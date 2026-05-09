@@ -193,6 +193,33 @@ theorem materialize_HeapValid_preserves
       exact materializeStep_iter_HeapValid_preserves T (n + 1 - T.levels.length) h_hv
 
 /-- After buildBindings foldl, every lookup in the resulting env points
+    to an idx ≥ a lower bound, provided the input env and heap also
+    satisfy the bound. Used to show fresh-level envs' bindings are in
+    the freshly-allocated range (≥ original heap length). -/
+private theorem buildBindings_foldl_env_lookups_geq
+    (pairs : List (String × Val)) (h : Heap) (env : Env) (lb : Nat)
+    (h_h : lb ≤ h.length)
+    (h_env : ∀ name i, env.lookup name = some i → lb ≤ i) :
+    ∀ name i, (pairs.foldl
+      (fun (acc : Heap × Env) (kv : String × Val) =>
+        (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
+      (h, env)).2.lookup name = some i → lb ≤ i := by
+  induction pairs generalizing h env with
+  | nil =>
+      simp only [List.foldl]; exact h_env
+  | cons p rest ih =>
+      simp only [List.foldl]
+      apply ih (h ++ [p.2]) (.cons p.1 h.length env)
+      · simp [List.length_append]; omega
+      · intro name i hl
+        simp only [Env.lookup] at hl
+        split at hl
+        · -- p.1 == name → i = h.length
+          simp at hl; rw [← hl]; exact h_h
+        · -- otherwise lookup in env
+          exact h_env name i hl
+
+/-- After buildBindings foldl, every lookup in the resulting env points
     to an idx within the resulting heap. -/
 private theorem buildBindings_foldl_env_lookups_in_range
     (pairs : List (String × Val)) (h : Heap) (env : Env)
@@ -220,6 +247,28 @@ private theorem buildBindings_foldl_env_lookups_in_range
       · -- p.1 ≠ name: hl is env.lookup name = some i
         have h_in_range := h_env_in_range name i hl
         omega
+
+/-- The env from `freshLevelEnv` has all bindings ≥ `h.length` (i.e.,
+    bindings point only into the freshly-allocated cells, never into
+    the original heap). -/
+private theorem freshLevelEnv_env_lookups_geq (h : Heap) :
+    ∀ name i, (freshLevelEnv h).2.lookup name = some i → h.length ≤ i := by
+  intro name i hl
+  unfold freshLevelEnv at hl
+  simp only [Heap.alloc] at hl
+  simp only [Env.lookup] at hl
+  split at hl
+  · -- "base-apply" matches: i = (buildBindings result heap).length
+    simp at hl
+    rw [← hl]
+    -- (foldl ... (h, .nil)).1 = h ++ primPairs.map (·.2), so length ≥ h.length.
+    have h_eq := buildBindings_foldl_appends_eq primPairs h .nil
+    rw [h_eq, List.length_append]
+    omega
+  · -- not "base-apply": lookup in envPrims = foldl result env
+    apply buildBindings_foldl_env_lookups_geq primPairs h .nil h.length (Nat.le_refl _)
+    · intro _ _ h_nil; simp [Env.lookup] at h_nil
+    · exact hl
 
 /-- The env from `freshLevelEnv` is valid in the resulting heap. -/
 private theorem freshLevelEnv_env_valid (h : Heap) :
