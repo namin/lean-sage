@@ -318,15 +318,65 @@ theorem materialize_level_envs_valid_preserves
       obtain rfl := h_mat.symm
       exact materializeStep_iter_level_envs_valid_preserves T (n + 1 - T.levels.length) h_hv h_levs
 
+/-- One materializeStep preserves "all policies satisfy P". -/
+private theorem materializeStep_policies_resp_preserves
+    (T : TowerState) (P : BlackPolicy → Prop)
+    (h_resp : ∀ m p, T.policyAt? m = some p → P p)
+    (h_acceptAll : P acceptAllPolicy) :
+    ∀ m p, (materializeStep T).policyAt? m = some p → P p := by
+  intro m p hp
+  unfold materializeStep at hp
+  unfold TowerState.policyAt? TowerState.levelAt? at hp
+  by_cases h_in : m < T.levels.length
+  · rw [List.getElem?_append_left h_in] at hp
+    have h_old : T.policyAt? m = some p := by
+      unfold TowerState.policyAt? TowerState.levelAt?; exact hp
+    exact h_resp m p h_old
+  · by_cases h_eq : m = T.levels.length
+    · subst h_eq
+      rw [List.getElem?_append_right (Nat.le_refl _)] at hp
+      simp at hp
+      rw [← hp]
+      exact h_acceptAll
+    · let new_ls : LevelState :=
+        { env := (freshLevelEnv T.heap).2, policy := acceptAllPolicy }
+      have h_oob : (T.levels ++ [new_ls]).length ≤ m := by
+        simp [List.length_append]; omega
+      rw [List.getElem?_eq_none h_oob] at hp
+      exact Option.noConfusion hp
+
+/-- Iterated materializeStep preserves "all policies satisfy P". -/
+private theorem materializeStep_iter_policies_resp_preserves
+    (T : TowerState) (k : Nat) (P : BlackPolicy → Prop)
+    (h_resp : ∀ m p, T.policyAt? m = some p → P p)
+    (h_acceptAll : P acceptAllPolicy) :
+    ∀ m p, (Nat.fold k (fun _ _ T' => materializeStep T') T).policyAt? m = some p → P p := by
+  induction k with
+  | zero => simp [Nat.fold]; exact h_resp
+  | succ k ih =>
+      simp only [Nat.fold]
+      exact materializeStep_policies_resp_preserves _ P ih h_acceptAll
+
 /-- Materialize preserves "all policies satisfy P" provided P holds for
     `acceptAllPolicy` (which materialize uses for new levels). -/
 theorem materialize_policies_resp_preserves
     (T T' : TowerState) (n : Nat) (P : BlackPolicy → Prop)
-    (_h_mat : T.materialize n = some T')
-    (_h_resp : ∀ m p, T.policyAt? m = some p → P p)
-    (_h_acceptAll : P acceptAllPolicy) :
-    ∀ m p, T'.policyAt? m = some p → P p :=
-  sorry
+    (h_mat : T.materialize n = some T')
+    (h_resp : ∀ m p, T.policyAt? m = some p → P p)
+    (h_acceptAll : P acceptAllPolicy) :
+    ∀ m p, T'.policyAt? m = some p → P p := by
+  unfold TowerState.materialize at h_mat
+  by_cases h1 : n ≥ Tower.maxDepth
+  · simp [h1] at h_mat
+  · simp [h1] at h_mat
+    by_cases h2 : T.levels.length > n
+    · simp [h2] at h_mat
+      obtain rfl := h_mat.symm
+      exact h_resp
+    · simp [h2] at h_mat
+      obtain rfl := h_mat.symm
+      exact materializeStep_iter_policies_resp_preserves T
+        (n + 1 - T.levels.length) P h_resp h_acceptAll
 
 /-- Tower well-formedness at a specific level. -/
 structure WFCtxT (env_a env_b : Env) (T_a T_b : TowerState) (level : Nat)
