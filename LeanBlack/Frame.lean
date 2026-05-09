@@ -2235,13 +2235,301 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                                 refine ⟨r_b, T_b', ?_, h_vv_r, h_he_outer, h_tc_outer,
                                         hv_ra, hv_rb⟩
                                 simp only [applyVia, hm_b, he_b, hba, hp_b, h_app_b]
-                            | num _ | bool _ | nilV | sym _ | cons _ _ | prim _ | closure _ _ _ =>
-                                -- TODO: dispatch through applyDirect on (baseApply, [op, listToVal args]).
-                                -- Each case needs to extract baseApply_b's structure from h_vv_base_1
-                                -- (atomic equality for atoms, closure_ValVis_imp_cenv_EnvVis for closure)
-                                -- then call ih_applyDirect with the new args list.
-                                -- ~150 LOC of explicit case work; deferred.
-                                sorry
+                            | num n =>
+                                -- baseApply_b must be .num n.
+                                have h_b_eq : baseApply_b = .num n := by
+                                  cases baseApply_b with
+                                  | num m => simp [ValVis_aux] at h_vv_base_1; rw [h_vv_base_1]
+                                  | bool _ | nilV | sym _ | cons _ _ | closure _ _ _
+                                  | prim _ | builtinBaseApply =>
+                                      simp [ValVis_aux] at h_vv_base_1
+                                subst h_b_eq
+                                -- Dispatch via applyDirect on (.num n, [op, listToVal args]).
+                                have h_lvv_disp : ListValVis [op_a, listToVal args_a]
+                                    [op_b, listToVal args_b] T_a_mat.heap T_b_mat.heap :=
+                                  ⟨h_vv_op_mat, ValVis_listToVal h_lvv_mat, trivial⟩
+                                have hv_disp_a : ListValValid [op_a, listToVal args_a]
+                                    T_a_mat.heap :=
+                                  ⟨hv_opa_mat, ValValid_listToVal hv_argsa_mat, trivial⟩
+                                have hv_disp_b : ListValValid [op_b, listToVal args_b]
+                                    T_b_mat.heap :=
+                                  ⟨hv_opb_mat, ValValid_listToVal hv_argsb_mat, trivial⟩
+                                have hv_base_a : ValValid (.num n) T_a_mat.heap :=
+                                  h_hv_a_mat idx (.num n) hp_a
+                                have hv_base_b : ValValid (.num n) T_b_mat.heap :=
+                                  h_hv_b_mat idx (.num n) hp_b
+                                obtain ⟨r_b, T_b', h_app_b, h_vv_r, h_he', h_tc',
+                                        hv_ra, hv_rb⟩ :=
+                                  ih_applyDirect ptable level (.num n) (.num n)
+                                    [op_a, listToVal args_a] [op_b, listToVal args_b]
+                                    T_a_mat T_b_mat r_a T_a'
+                                    hresp_pt
+                                    (fun p hp => h_resp_all_mat level p hp)
+                                    (h_pols_eq_mat level)
+                                    h_hv_a_mat h_hv_b_mat h_heap_eq_mat
+                                    h_levs_valid_a_mat h_levs_valid_b_mat
+                                    h_envs_eq_mat h_pols_eq_mat h_resp_all_mat
+                                    h_bisim_mat
+                                    h_vv_base h_lvv_disp
+                                    hv_base_a hv_base_b hv_disp_a hv_disp_b
+                                    h_eval
+                                obtain ⟨h_he_outer, h_tc_outer⟩ :=
+                                  lift_outputs T_b' h_he' h_tc'
+                                refine ⟨r_b, T_b', ?_, h_vv_r, h_he_outer, h_tc_outer,
+                                        hv_ra, hv_rb⟩
+                                simp only [applyVia, hm_b, he_b, hba, hp_b, h_app_b]
+                            | bool b =>
+                                have h_b_eq : baseApply_b = .bool b := by
+                                  cases baseApply_b with
+                                  | bool b' => simp [ValVis_aux] at h_vv_base_1; rw [h_vv_base_1]
+                                  | num _ | nilV | sym _ | cons _ _ | closure _ _ _
+                                  | prim _ | builtinBaseApply =>
+                                      simp [ValVis_aux] at h_vv_base_1
+                                subst h_b_eq
+                                have h_lvv_disp : ListValVis [op_a, listToVal args_a]
+                                    [op_b, listToVal args_b] T_a_mat.heap T_b_mat.heap :=
+                                  ⟨h_vv_op_mat, ValVis_listToVal h_lvv_mat, trivial⟩
+                                have hv_disp_a : ListValValid [op_a, listToVal args_a]
+                                    T_a_mat.heap :=
+                                  ⟨hv_opa_mat, ValValid_listToVal hv_argsa_mat, trivial⟩
+                                have hv_disp_b : ListValValid [op_b, listToVal args_b]
+                                    T_b_mat.heap :=
+                                  ⟨hv_opb_mat, ValValid_listToVal hv_argsb_mat, trivial⟩
+                                have hv_base_a : ValValid (.bool b) T_a_mat.heap :=
+                                  h_hv_a_mat idx (.bool b) hp_a
+                                have hv_base_b : ValValid (.bool b) T_b_mat.heap :=
+                                  h_hv_b_mat idx (.bool b) hp_b
+                                obtain ⟨r_b, T_b', h_app_b, h_vv_r, h_he', h_tc',
+                                        hv_ra, hv_rb⟩ :=
+                                  ih_applyDirect ptable level (.bool b) (.bool b)
+                                    [op_a, listToVal args_a] [op_b, listToVal args_b]
+                                    T_a_mat T_b_mat r_a T_a'
+                                    hresp_pt
+                                    (fun p hp => h_resp_all_mat level p hp)
+                                    (h_pols_eq_mat level)
+                                    h_hv_a_mat h_hv_b_mat h_heap_eq_mat
+                                    h_levs_valid_a_mat h_levs_valid_b_mat
+                                    h_envs_eq_mat h_pols_eq_mat h_resp_all_mat
+                                    h_bisim_mat
+                                    h_vv_base h_lvv_disp
+                                    hv_base_a hv_base_b hv_disp_a hv_disp_b
+                                    h_eval
+                                obtain ⟨h_he_outer, h_tc_outer⟩ :=
+                                  lift_outputs T_b' h_he' h_tc'
+                                refine ⟨r_b, T_b', ?_, h_vv_r, h_he_outer, h_tc_outer,
+                                        hv_ra, hv_rb⟩
+                                simp only [applyVia, hm_b, he_b, hba, hp_b, h_app_b]
+                            | nilV =>
+                                have h_b_eq : baseApply_b = .nilV := by
+                                  cases baseApply_b with
+                                  | nilV => rfl
+                                  | num _ | bool _ | sym _ | cons _ _ | closure _ _ _
+                                  | prim _ | builtinBaseApply =>
+                                      simp [ValVis_aux] at h_vv_base_1
+                                subst h_b_eq
+                                have h_lvv_disp : ListValVis [op_a, listToVal args_a]
+                                    [op_b, listToVal args_b] T_a_mat.heap T_b_mat.heap :=
+                                  ⟨h_vv_op_mat, ValVis_listToVal h_lvv_mat, trivial⟩
+                                have hv_disp_a : ListValValid [op_a, listToVal args_a]
+                                    T_a_mat.heap :=
+                                  ⟨hv_opa_mat, ValValid_listToVal hv_argsa_mat, trivial⟩
+                                have hv_disp_b : ListValValid [op_b, listToVal args_b]
+                                    T_b_mat.heap :=
+                                  ⟨hv_opb_mat, ValValid_listToVal hv_argsb_mat, trivial⟩
+                                have hv_base_a : ValValid .nilV T_a_mat.heap :=
+                                  h_hv_a_mat idx .nilV hp_a
+                                have hv_base_b : ValValid .nilV T_b_mat.heap :=
+                                  h_hv_b_mat idx .nilV hp_b
+                                obtain ⟨r_b, T_b', h_app_b, h_vv_r, h_he', h_tc',
+                                        hv_ra, hv_rb⟩ :=
+                                  ih_applyDirect ptable level .nilV .nilV
+                                    [op_a, listToVal args_a] [op_b, listToVal args_b]
+                                    T_a_mat T_b_mat r_a T_a'
+                                    hresp_pt
+                                    (fun p hp => h_resp_all_mat level p hp)
+                                    (h_pols_eq_mat level)
+                                    h_hv_a_mat h_hv_b_mat h_heap_eq_mat
+                                    h_levs_valid_a_mat h_levs_valid_b_mat
+                                    h_envs_eq_mat h_pols_eq_mat h_resp_all_mat
+                                    h_bisim_mat
+                                    h_vv_base h_lvv_disp
+                                    hv_base_a hv_base_b hv_disp_a hv_disp_b
+                                    h_eval
+                                obtain ⟨h_he_outer, h_tc_outer⟩ :=
+                                  lift_outputs T_b' h_he' h_tc'
+                                refine ⟨r_b, T_b', ?_, h_vv_r, h_he_outer, h_tc_outer,
+                                        hv_ra, hv_rb⟩
+                                simp only [applyVia, hm_b, he_b, hba, hp_b, h_app_b]
+                            | sym s =>
+                                have h_b_eq : baseApply_b = .sym s := by
+                                  cases baseApply_b with
+                                  | sym s' => simp [ValVis_aux] at h_vv_base_1; rw [h_vv_base_1]
+                                  | num _ | bool _ | nilV | cons _ _ | closure _ _ _
+                                  | prim _ | builtinBaseApply =>
+                                      simp [ValVis_aux] at h_vv_base_1
+                                subst h_b_eq
+                                have h_lvv_disp : ListValVis [op_a, listToVal args_a]
+                                    [op_b, listToVal args_b] T_a_mat.heap T_b_mat.heap :=
+                                  ⟨h_vv_op_mat, ValVis_listToVal h_lvv_mat, trivial⟩
+                                have hv_disp_a : ListValValid [op_a, listToVal args_a]
+                                    T_a_mat.heap :=
+                                  ⟨hv_opa_mat, ValValid_listToVal hv_argsa_mat, trivial⟩
+                                have hv_disp_b : ListValValid [op_b, listToVal args_b]
+                                    T_b_mat.heap :=
+                                  ⟨hv_opb_mat, ValValid_listToVal hv_argsb_mat, trivial⟩
+                                have hv_base_a : ValValid (.sym s) T_a_mat.heap :=
+                                  h_hv_a_mat idx (.sym s) hp_a
+                                have hv_base_b : ValValid (.sym s) T_b_mat.heap :=
+                                  h_hv_b_mat idx (.sym s) hp_b
+                                obtain ⟨r_b, T_b', h_app_b, h_vv_r, h_he', h_tc',
+                                        hv_ra, hv_rb⟩ :=
+                                  ih_applyDirect ptable level (.sym s) (.sym s)
+                                    [op_a, listToVal args_a] [op_b, listToVal args_b]
+                                    T_a_mat T_b_mat r_a T_a'
+                                    hresp_pt
+                                    (fun p hp => h_resp_all_mat level p hp)
+                                    (h_pols_eq_mat level)
+                                    h_hv_a_mat h_hv_b_mat h_heap_eq_mat
+                                    h_levs_valid_a_mat h_levs_valid_b_mat
+                                    h_envs_eq_mat h_pols_eq_mat h_resp_all_mat
+                                    h_bisim_mat
+                                    h_vv_base h_lvv_disp
+                                    hv_base_a hv_base_b hv_disp_a hv_disp_b
+                                    h_eval
+                                obtain ⟨h_he_outer, h_tc_outer⟩ :=
+                                  lift_outputs T_b' h_he' h_tc'
+                                refine ⟨r_b, T_b', ?_, h_vv_r, h_he_outer, h_tc_outer,
+                                        hv_ra, hv_rb⟩
+                                simp only [applyVia, hm_b, he_b, hba, hp_b, h_app_b]
+                            | prim s =>
+                                have h_b_eq : baseApply_b = .prim s := by
+                                  cases baseApply_b with
+                                  | prim s' => simp [ValVis_aux] at h_vv_base_1; rw [h_vv_base_1]
+                                  | num _ | bool _ | nilV | sym _ | cons _ _ | closure _ _ _
+                                  | builtinBaseApply =>
+                                      simp [ValVis_aux] at h_vv_base_1
+                                subst h_b_eq
+                                have h_lvv_disp : ListValVis [op_a, listToVal args_a]
+                                    [op_b, listToVal args_b] T_a_mat.heap T_b_mat.heap :=
+                                  ⟨h_vv_op_mat, ValVis_listToVal h_lvv_mat, trivial⟩
+                                have hv_disp_a : ListValValid [op_a, listToVal args_a]
+                                    T_a_mat.heap :=
+                                  ⟨hv_opa_mat, ValValid_listToVal hv_argsa_mat, trivial⟩
+                                have hv_disp_b : ListValValid [op_b, listToVal args_b]
+                                    T_b_mat.heap :=
+                                  ⟨hv_opb_mat, ValValid_listToVal hv_argsb_mat, trivial⟩
+                                have hv_base_a : ValValid (.prim s) T_a_mat.heap :=
+                                  h_hv_a_mat idx (.prim s) hp_a
+                                have hv_base_b : ValValid (.prim s) T_b_mat.heap :=
+                                  h_hv_b_mat idx (.prim s) hp_b
+                                obtain ⟨r_b, T_b', h_app_b, h_vv_r, h_he', h_tc',
+                                        hv_ra, hv_rb⟩ :=
+                                  ih_applyDirect ptable level (.prim s) (.prim s)
+                                    [op_a, listToVal args_a] [op_b, listToVal args_b]
+                                    T_a_mat T_b_mat r_a T_a'
+                                    hresp_pt
+                                    (fun p hp => h_resp_all_mat level p hp)
+                                    (h_pols_eq_mat level)
+                                    h_hv_a_mat h_hv_b_mat h_heap_eq_mat
+                                    h_levs_valid_a_mat h_levs_valid_b_mat
+                                    h_envs_eq_mat h_pols_eq_mat h_resp_all_mat
+                                    h_bisim_mat
+                                    h_vv_base h_lvv_disp
+                                    hv_base_a hv_base_b hv_disp_a hv_disp_b
+                                    h_eval
+                                obtain ⟨h_he_outer, h_tc_outer⟩ :=
+                                  lift_outputs T_b' h_he' h_tc'
+                                refine ⟨r_b, T_b', ?_, h_vv_r, h_he_outer, h_tc_outer,
+                                        hv_ra, hv_rb⟩
+                                simp only [applyVia, hm_b, he_b, hba, hp_b, h_app_b]
+                            | cons xa ya =>
+                                have h_b_form : ∃ xb yb, baseApply_b = .cons xb yb := by
+                                  cases baseApply_b with
+                                  | cons xb yb => exact ⟨xb, yb, rfl⟩
+                                  | num _ | bool _ | nilV | sym _ | closure _ _ _
+                                  | prim _ | builtinBaseApply =>
+                                      simp [ValVis_aux] at h_vv_base_1
+                                obtain ⟨xb, yb, h_b_eq⟩ := h_b_form
+                                subst h_b_eq
+                                have h_lvv_disp : ListValVis [op_a, listToVal args_a]
+                                    [op_b, listToVal args_b] T_a_mat.heap T_b_mat.heap :=
+                                  ⟨h_vv_op_mat, ValVis_listToVal h_lvv_mat, trivial⟩
+                                have hv_disp_a : ListValValid [op_a, listToVal args_a]
+                                    T_a_mat.heap :=
+                                  ⟨hv_opa_mat, ValValid_listToVal hv_argsa_mat, trivial⟩
+                                have hv_disp_b : ListValValid [op_b, listToVal args_b]
+                                    T_b_mat.heap :=
+                                  ⟨hv_opb_mat, ValValid_listToVal hv_argsb_mat, trivial⟩
+                                have hv_base_a : ValValid (.cons xa ya) T_a_mat.heap :=
+                                  h_hv_a_mat idx (.cons xa ya) hp_a
+                                have hv_base_b : ValValid (.cons xb yb) T_b_mat.heap :=
+                                  h_hv_b_mat idx (.cons xb yb) hp_b
+                                obtain ⟨r_b, T_b', h_app_b, h_vv_r, h_he', h_tc',
+                                        hv_ra, hv_rb⟩ :=
+                                  ih_applyDirect ptable level (.cons xa ya) (.cons xb yb)
+                                    [op_a, listToVal args_a] [op_b, listToVal args_b]
+                                    T_a_mat T_b_mat r_a T_a'
+                                    hresp_pt
+                                    (fun p hp => h_resp_all_mat level p hp)
+                                    (h_pols_eq_mat level)
+                                    h_hv_a_mat h_hv_b_mat h_heap_eq_mat
+                                    h_levs_valid_a_mat h_levs_valid_b_mat
+                                    h_envs_eq_mat h_pols_eq_mat h_resp_all_mat
+                                    h_bisim_mat
+                                    h_vv_base h_lvv_disp
+                                    hv_base_a hv_base_b hv_disp_a hv_disp_b
+                                    h_eval
+                                obtain ⟨h_he_outer, h_tc_outer⟩ :=
+                                  lift_outputs T_b' h_he' h_tc'
+                                refine ⟨r_b, T_b', ?_, h_vv_r, h_he_outer, h_tc_outer,
+                                        hv_ra, hv_rb⟩
+                                simp only [applyVia, hm_b, he_b, hba, hp_b, h_app_b]
+                            | closure ps body cenv =>
+                                have h_b_eq : baseApply_b = .closure ps body cenv := by
+                                  cases baseApply_b with
+                                  | closure ps_b body_b cenv_b =>
+                                      have h := h_vv_base_1
+                                      simp only [ValVis_aux] at h
+                                      obtain ⟨h_ps, h_body, h_cenv, _⟩ := h
+                                      rw [h_ps, h_body, h_cenv]
+                                  | num _ | bool _ | nilV | sym _ | cons _ _
+                                  | prim _ | builtinBaseApply =>
+                                      simp [ValVis_aux] at h_vv_base_1
+                                subst h_b_eq
+                                have h_lvv_disp : ListValVis [op_a, listToVal args_a]
+                                    [op_b, listToVal args_b] T_a_mat.heap T_b_mat.heap :=
+                                  ⟨h_vv_op_mat, ValVis_listToVal h_lvv_mat, trivial⟩
+                                have hv_disp_a : ListValValid [op_a, listToVal args_a]
+                                    T_a_mat.heap :=
+                                  ⟨hv_opa_mat, ValValid_listToVal hv_argsa_mat, trivial⟩
+                                have hv_disp_b : ListValValid [op_b, listToVal args_b]
+                                    T_b_mat.heap :=
+                                  ⟨hv_opb_mat, ValValid_listToVal hv_argsb_mat, trivial⟩
+                                have hv_base_a : ValValid (.closure ps body cenv) T_a_mat.heap :=
+                                  h_hv_a_mat idx (.closure ps body cenv) hp_a
+                                have hv_base_b : ValValid (.closure ps body cenv) T_b_mat.heap :=
+                                  h_hv_b_mat idx (.closure ps body cenv) hp_b
+                                obtain ⟨r_b, T_b', h_app_b, h_vv_r, h_he', h_tc',
+                                        hv_ra, hv_rb⟩ :=
+                                  ih_applyDirect ptable level (.closure ps body cenv)
+                                    (.closure ps body cenv)
+                                    [op_a, listToVal args_a] [op_b, listToVal args_b]
+                                    T_a_mat T_b_mat r_a T_a'
+                                    hresp_pt
+                                    (fun p hp => h_resp_all_mat level p hp)
+                                    (h_pols_eq_mat level)
+                                    h_hv_a_mat h_hv_b_mat h_heap_eq_mat
+                                    h_levs_valid_a_mat h_levs_valid_b_mat
+                                    h_envs_eq_mat h_pols_eq_mat h_resp_all_mat
+                                    h_bisim_mat
+                                    h_vv_base h_lvv_disp
+                                    hv_base_a hv_base_b hv_disp_a hv_disp_b
+                                    h_eval
+                                obtain ⟨h_he_outer, h_tc_outer⟩ :=
+                                  lift_outputs T_b' h_he' h_tc'
+                                refine ⟨r_b, T_b', ?_, h_vv_r, h_he_outer, h_tc_outer,
+                                        hv_ra, hv_rb⟩
+                                simp only [applyVia, hm_b, he_b, hba, hp_b, h_app_b]
       · -- applyDirect (k+1) — non-applicable / builtin / prim / closure proved.
         intro ptable level op_a op_b args_a args_b T_a T_b r_a T_a'
               hresp_pt h_resp_at h_pol_eq h_hv_a h_hv_b h_hl_eq
