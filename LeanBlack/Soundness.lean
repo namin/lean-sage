@@ -196,6 +196,42 @@ private theorem TowerCE_of_heap_eq (T T' : TowerState)
   have h_new_T : T.heap[idx]? = some newApply := h_heap_eq ▸ h_new
   exact h_self n idx oldApply newApply h_lookup h_old h_new_T
 
+/-- More general than `TowerCE_of_heap_eq`: if `T'.heap` extends `T.heap`
+    by appending cells (no mutation), then `TowerCE T T'` reduces to
+    `TowerCE T T`. The base-apply lookup gives `idx < T.heap.length` (via
+    `T.heap[idx]? = some old`), and on that range the prefix equality
+    forces `newApply = oldApply`. Useful for non-mutating compound
+    expressions (those whose only heap effect is allocation). -/
+private theorem TowerCE_of_heap_extends (T T' : TowerState)
+    (h_ext : ∃ extras, T'.heap = T.heap ++ extras)
+    (h_self : TowerCE T T) :
+    TowerCE T T' := by
+  intro n idx oldApply newApply h_lookup h_old h_new
+  obtain ⟨extras, h_eq⟩ := h_ext
+  have h_lt : idx < T.heap.length :=
+    (List.getElem?_eq_some_iff.mp h_old).1
+  have h_t' : T'.heap[idx]? = T.heap[idx]? := by
+    rw [h_eq]; exact List.getElem?_append_left h_lt
+  rw [h_t', h_old] at h_new
+  have h_eq_app : oldApply = newApply := Option.some.inj h_new
+  subst h_eq_app
+  exact h_self n idx oldApply oldApply h_lookup h_old h_old
+
+/-- If `T_mid` shares its heap and per-level envs with `T`, then
+    `TowerCE T_mid T''` lifts to `TowerCE T T''`. Useful when a
+    sub-eval doesn't change the tower (e.g., the condition of an
+    `.ifte` is an atomic expression). -/
+private theorem TowerCE_lift_source (T T_mid T'' : TowerState)
+    (h_heap_eq : T_mid.heap = T.heap)
+    (h_env_eq : ∀ n, T_mid.envAt? n = T.envAt? n)
+    (h23 : TowerCE T_mid T'') :
+    TowerCE T T'' := by
+  intro n idx oldApply newApply h_lookup h_old h_new
+  apply h23 n idx oldApply newApply
+  · rw [h_env_eq]; exact h_lookup
+  · rw [h_heap_eq]; exact h_old
+  · exact h_new
+
 /-! ## Safe evolution -/
 
 /-- Every materialized level's policy is universally sound (at its
@@ -398,8 +434,49 @@ theorem eval_tower_safe
                   -- the second CE invocation needs ValValid mid T₀.heap
                   -- where T₀ is the test state. Deferred.
                   sorry
+      | ifte c t e =>
+          -- For atomic conditions (.num/.bool/.lam/.quote/.var), eval c
+          -- doesn't change T, so the branch eval handles everything via
+          -- IH. For non-atomic c, composition is required (deferred).
+          cases c with
+          | num i =>
+              simp only [eval] at h_eval
+              -- h_eval reduces: eval k ... = some (v, T') for the t-branch.
+              -- eval k ptable level (.num i) env T = some (.num i, T) when k > 0.
+              cases k with
+              | zero => simp [eval] at h_eval
+              | succ j =>
+                  simp only [eval] at h_eval
+                  -- h_eval : eval (j+1) ... t env T = some (v, T') (true branch)
+                  apply ih <;> assumption
+          | bool b =>
+              simp only [eval] at h_eval
+              cases k with
+              | zero => simp [eval] at h_eval
+              | succ j =>
+                  cases b with
+                  | true =>
+                      simp only [eval] at h_eval
+                      apply ih <;> assumption
+                  | false =>
+                      simp only [eval] at h_eval
+                      apply ih <;> assumption
+          | lam ps body =>
+              simp only [eval] at h_eval
+              cases k with
+              | zero => simp [eval] at h_eval
+              | succ j =>
+                  simp only [eval] at h_eval
+                  -- closure is not .bool false, so falls to t-branch.
+                  apply ih <;> assumption
+          | _ =>
+              -- Other conditions (.var/.quote/+ all the recursive ones):
+              -- composition required (deferred — see DUMP.md
+              -- "Architectural blocker"). Subset of cases handled above
+              -- to validate the IH-based approach for atomic c.
+              sorry
       | _ =>
-          -- Remaining cases: ifte/app/primApp/letE (heap extended
+          -- Remaining cases: app/primApp/letE (heap extended
           -- but base-apply cells unchanged → TowerCE preserved via
           -- length_mono), em (heap extended via materialize), set
           -- (heap mutated via gated update; SoundForCE → CE preserved).
