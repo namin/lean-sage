@@ -447,19 +447,7 @@ theorem freshLevelEnv_heap_length (h : Heap) :
     These lemmas express that `materialize` is "deterministic up to
     bisimulation": if two tower states have equal heap-length and
     equal envAt? at all indices, then materialize behaves the same
-    cross-side. The proof structure is:
-
-    1. `materialize` only fails at `n ≥ maxDepth` (independent of T).
-    2. The "no extension" case (`T.levels.length > n`): result is T
-       unchanged on both sides.
-    3. The "extension" case: each fold step appends a level whose env
-       depends only on `T.heap.length` (via `freshLevelEnv`), and a
-       heap suffix of 14 deterministic cells. Cross-side these match.
-
-    Both lemmas needed by `frame_tower`'s `.em` and `applyVia` cases
-    to construct the inductive step at level+1. Proofs sketched but
-    sorry'd — the bookkeeping involves Lean's `Option`/`List.getElem?`
-    interaction which is fiddly. -/
+    cross-side. -/
 
 /-- Cross-side: `materialize` succeeds on both or fails on both. -/
 theorem TowerState.materialize_cross_side_some_iff
@@ -471,17 +459,120 @@ theorem TowerState.materialize_cross_side_some_iff
   · simp [h1]
     constructor <;> (intro h; split at h <;> simp at h)
 
+/-- `envAt? n` is `some` exactly when `n` is in bounds. -/
+private theorem envAt?_isSome_iff (T : TowerState) (n : Nat) :
+    (T.envAt? n).isSome ↔ n < T.levels.length := by
+  unfold TowerState.envAt? TowerState.levelAt?
+  constructor
+  · intro h
+    rw [Option.isSome_iff_exists] at h
+    obtain ⟨_, h_eq⟩ := h
+    rw [Option.map_eq_some] at h_eq
+    obtain ⟨_, h_some, _⟩ := h_eq
+    exact (List.getElem?_eq_some_iff.mp h_some).1
+  · intro h_lt
+    rw [Option.isSome_iff_exists]
+    refine ⟨T.levels[n]'h_lt |>.env, ?_⟩
+    have h_some : T.levels[n]? = some (T.levels[n]'h_lt) := List.getElem?_eq_getElem h_lt
+    rw [h_some]; rfl
+
+/-- Cross-side: equal envAt? at all indices implies equal levels.length. -/
+private theorem levels_length_eq_of_envs_eq
+    (T_a T_b : TowerState)
+    (h_envs : ∀ m, T_a.envAt? m = T_b.envAt? m) :
+    T_a.levels.length = T_b.levels.length := by
+  have key : ∀ m, m < T_a.levels.length ↔ m < T_b.levels.length := by
+    intro m
+    rw [← envAt?_isSome_iff T_a m, ← envAt?_isSome_iff T_b m, h_envs m]
+  have h1 : ¬ T_a.levels.length < T_b.levels.length := by
+    rw [← key T_a.levels.length]; exact Nat.lt_irrefl _
+  have h2 : ¬ T_b.levels.length < T_a.levels.length := by
+    rw [key T_b.levels.length]; exact Nat.lt_irrefl _
+  omega
+
+/-- One materialize step preserves cross-side parallelism. -/
+private theorem materializeStep_cross_side
+    (T_a T_b : TowerState)
+    (h_heap_len : T_a.heap.length = T_b.heap.length)
+    (h_envs : ∀ m, T_a.envAt? m = T_b.envAt? m) :
+    (materializeStep T_a).heap.length = (materializeStep T_b).heap.length ∧
+    ∀ m, (materializeStep T_a).envAt? m = (materializeStep T_b).envAt? m := by
+  have h_lvl_len : T_a.levels.length = T_b.levels.length :=
+    levels_length_eq_of_envs_eq T_a T_b h_envs
+  have h_env_eq : (freshLevelEnv T_a.heap).2 = (freshLevelEnv T_b.heap).2 :=
+    freshLevelEnv_env_eq T_a.heap T_b.heap h_heap_len
+  refine ⟨?_, ?_⟩
+  · unfold materializeStep
+    show (freshLevelEnv T_a.heap).1.length = (freshLevelEnv T_b.heap).1.length
+    rw [freshLevelEnv_heap_length, freshLevelEnv_heap_length, h_heap_len]
+  · intro m
+    unfold materializeStep TowerState.envAt? TowerState.levelAt?
+    by_cases h_in : m < T_a.levels.length
+    · rw [List.getElem?_append_left h_in,
+          List.getElem?_append_left (h_lvl_len ▸ h_in)]
+      exact h_envs m
+    · by_cases h_eq : m = T_a.levels.length
+      · subst h_eq
+        rw [List.getElem?_append_right (Nat.le_refl _),
+            List.getElem?_append_right (h_lvl_len ▸ Nat.le_refl _)]
+        simp [h_lvl_len, h_env_eq]
+      · -- m > T_a.levels.length; both out of bounds
+        have h_a_oob : (T_a.levels ++
+            [({env := (freshLevelEnv T_a.heap).2, policy := acceptAllPolicy}
+              : LevelState)]).length ≤ m := by
+          simp [List.length_append]; omega
+        have h_b_oob : (T_b.levels ++
+            [({env := (freshLevelEnv T_b.heap).2, policy := acceptAllPolicy}
+              : LevelState)]).length ≤ m := by
+          simp [List.length_append]; omega
+        rw [List.getElem?_eq_none h_a_oob, List.getElem?_eq_none h_b_oob]
+
+/-- Iterating `materializeStep` k times preserves cross-side parallelism. -/
+private theorem materializeStep_iter_cross_side
+    (T_a T_b : TowerState) (k : Nat)
+    (h_heap_len : T_a.heap.length = T_b.heap.length)
+    (h_envs : ∀ m, T_a.envAt? m = T_b.envAt? m) :
+    (Nat.fold k (fun _ _ T' => materializeStep T') T_a).heap.length =
+      (Nat.fold k (fun _ _ T' => materializeStep T') T_b).heap.length ∧
+    ∀ m, (Nat.fold k (fun _ _ T' => materializeStep T') T_a).envAt? m =
+         (Nat.fold k (fun _ _ T' => materializeStep T') T_b).envAt? m := by
+  induction k with
+  | zero => simp [Nat.fold]; exact ⟨h_heap_len, h_envs⟩
+  | succ k ih =>
+      simp only [Nat.fold]
+      obtain ⟨ih_heap, ih_envs⟩ := ih
+      exact materializeStep_cross_side _ _ ih_heap ih_envs
+
 /-- Cross-side: parallel materialize results have equal heap.length
     and equal envAt? at all indices. -/
 theorem TowerState.materialize_cross_side_envs_eq
     (T_a T_b T_a' T_b' : TowerState) (n : Nat)
-    (_h_heap_len : T_a.heap.length = T_b.heap.length)
-    (_h_envs : ∀ m, T_a.envAt? m = T_b.envAt? m)
-    (_h_mat_a : T_a.materialize n = some T_a')
-    (_h_mat_b : T_b.materialize n = some T_b') :
+    (h_heap_len : T_a.heap.length = T_b.heap.length)
+    (h_envs : ∀ m, T_a.envAt? m = T_b.envAt? m)
+    (h_mat_a : T_a.materialize n = some T_a')
+    (h_mat_b : T_b.materialize n = some T_b') :
     T_a'.heap.length = T_b'.heap.length ∧
-    ∀ m, T_a'.envAt? m = T_b'.envAt? m :=
-  sorry
+    ∀ m, T_a'.envAt? m = T_b'.envAt? m := by
+  have h_lvl_len : T_a.levels.length = T_b.levels.length :=
+    levels_length_eq_of_envs_eq T_a T_b h_envs
+  unfold materialize at h_mat_a h_mat_b
+  by_cases h1 : n ≥ Tower.maxDepth
+  · simp [h1] at h_mat_a
+  · simp [h1] at h_mat_a h_mat_b
+    by_cases h2 : T_a.levels.length > n
+    · have h2_b : T_b.levels.length > n := h_lvl_len ▸ h2
+      simp [h2] at h_mat_a; simp [h2_b] at h_mat_b
+      obtain rfl := h_mat_a.symm
+      obtain rfl := h_mat_b.symm
+      exact ⟨h_heap_len, h_envs⟩
+    · have h2_b : ¬ T_b.levels.length > n := h_lvl_len ▸ h2
+      simp [h2] at h_mat_a; simp [h2_b] at h_mat_b
+      obtain rfl := h_mat_a.symm
+      obtain rfl := h_mat_b.symm
+      have h_eq_k : n + 1 - T_a.levels.length = n + 1 - T_b.levels.length := by
+        rw [h_lvl_len]
+      rw [h_eq_k]
+      exact materializeStep_iter_cross_side T_a T_b _ h_heap_len h_envs
 
 /-! ## RunState compatibility shim
 
