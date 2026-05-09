@@ -498,6 +498,1268 @@ private theorem eval_preserves_self_invariants
          h_ctx_out.policies_resp_all, h_ctx_out.heap_content_bisim_at_levels,
          h_ctx_out.ev_a, hv_va, h_he.len_a⟩
 
+/-- Self-bisim of a `ListValValid` list with itself. -/
+private theorem ListValVis_self_of_valid (xs : List Val) (h : Heap)
+    (hh : HeapValid h) (hv : ListValValid xs h) :
+    ListValVis xs xs h h := by
+  induction xs with
+  | nil => trivial
+  | cons head tail ih =>
+      refine ⟨?_, ih hv.2⟩
+      intro d
+      have := ValVis_aux_self_extend d head h [] hh hv.1
+      simpa using this
+
+/-- `evalList` preserves the self-WFCtxT invariants. Mirrors
+    `eval_preserves_self_invariants` via `frame_tower`'s evalList clause. -/
+private theorem evalList_preserves_self_invariants
+    (fuel : Nat) (ptable : PolicyTable) (level : Nat) (exps : List Expr)
+    (env : Env) (T : TowerState) (vs : List Val) (T' : TowerState)
+    (hh : HeapValid T.heap)
+    (hev : EnvValid env T.heap)
+    (h_levs : ∀ n e, T.envAt? n = some e → EnvValid e T.heap)
+    (h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+    (h_pt : PolicyTableRespectsBisimT ptable)
+    (h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
+    (h_env_self : EnvVis env env T.heap T.heap)
+    (h_eval : evalList fuel ptable level exps env T = some (vs, T')) :
+    HeapValid T'.heap ∧
+    (∀ n e, T'.envAt? n = some e → EnvValid e T'.heap) ∧
+    (∀ n p, T'.policyAt? n = some p → PolicyRespectsBisimT p) ∧
+    (∀ n e, T'.envAt? n = some e → EnvVis e e T'.heap T'.heap) ∧
+    EnvValid env T'.heap ∧
+    ListValValid vs T'.heap ∧
+    T.heap.length ≤ T'.heap.length := by
+  obtain ⟨_, ih_evalList, _, _⟩ := frame_tower fuel
+  have h_ctx : WFCtxT env env T T level :=
+    WFCtxT.refl env T level hh hev h_pol_resp_at h_levs h_resp_all
+  obtain ⟨vs_b, T_b', h_eval_b, _, h_ctx_out, h_he, _, hv_va, _⟩ :=
+    ih_evalList ptable level exps env env T T vs T'
+      h_pt h_ctx h_env_self h_eval
+  have h_eq : (vs, T') = (vs_b, T_b') := by
+    have : some (vs, T') = some (vs_b, T_b') := h_eval.symm.trans h_eval_b
+    exact Option.some.inj this
+  obtain ⟨h_vs_eq, h_T_eq⟩ : vs = vs_b ∧ T' = T_b' := Prod.mk.inj h_eq
+  subst h_vs_eq; subst h_T_eq
+  exact ⟨h_ctx_out.hv_a, h_ctx_out.level_envs_valid_a,
+         h_ctx_out.policies_resp_all, h_ctx_out.heap_content_bisim_at_levels,
+         h_ctx_out.ev_a, hv_va, h_he.len_a⟩
+
+/-- `applyVia` preserves the self-invariants. Mirrors
+    `eval_preserves_self_invariants` via `frame_tower`'s applyVia clause. -/
+private theorem applyVia_preserves_self_invariants
+    (fuel : Nat) (ptable : PolicyTable) (level : Nat) (op : Val)
+    (args : List Val) (T : TowerState) (r : Val) (T' : TowerState)
+    (hh : HeapValid T.heap)
+    (h_levs : ∀ n e, T.envAt? n = some e → EnvValid e T.heap)
+    (h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+    (h_bisim : ∀ n e, T.envAt? n = some e → EnvVis e e T.heap T.heap)
+    (h_pt : PolicyTableRespectsBisimT ptable)
+    (h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
+    (hv_op : ValValid op T.heap)
+    (hv_args : ListValValid args T.heap)
+    (h_eval : applyVia fuel ptable level op args T = some (r, T')) :
+    HeapValid T'.heap ∧
+    (∀ n e, T'.envAt? n = some e → EnvValid e T'.heap) ∧
+    (∀ n p, T'.policyAt? n = some p → PolicyRespectsBisimT p) ∧
+    (∀ n e, T'.envAt? n = some e → EnvVis e e T'.heap T'.heap) ∧
+    ValValid r T'.heap ∧
+    T.heap.length ≤ T'.heap.length := by
+  obtain ⟨_, _, ih_applyVia, _⟩ := frame_tower fuel
+  -- Self-pair: T_a = T_b = T, op_a = op_b = op, args_a = args_b = args.
+  have h_vv_op : ValVis op op T.heap T.heap := by
+    intro d
+    have := ValVis_aux_self_extend d op T.heap [] hh hv_op
+    simpa using this
+  have h_lvv_args : ListValVis args args T.heap T.heap :=
+    ListValVis_self_of_valid args T.heap hh hv_args
+  obtain ⟨r_b, T_b', h_eval_b, _, h_he, h_tc, hv_r_a, _⟩ :=
+    ih_applyVia ptable level op op args args T T r T'
+      h_pt h_pol_resp_at rfl hh hh rfl h_levs h_levs (fun _ => rfl) (fun _ => rfl)
+      h_resp_all h_bisim h_vv_op h_lvv_args hv_op hv_op hv_args hv_args h_eval
+  have h_eq : (r, T') = (r_b, T_b') := by
+    have : some (r, T') = some (r_b, T_b') := h_eval.symm.trans h_eval_b
+    exact Option.some.inj this
+  obtain ⟨h_r_eq, h_T_eq⟩ : r = r_b ∧ T' = T_b' := Prod.mk.inj h_eq
+  subst h_r_eq; subst h_T_eq
+  exact ⟨h_tc.hv_a_out, h_tc.level_envs_valid_a_out,
+         h_tc.policies_resp_all_out, h_tc.heap_content_bisim_at_levels_out,
+         hv_r_a, h_he.len_a⟩
+
+/-- `applyDirect` preserves the self-invariants. Mirrors
+    `eval_preserves_self_invariants` via `frame_tower`'s applyDirect clause. -/
+private theorem applyDirect_preserves_self_invariants
+    (fuel : Nat) (ptable : PolicyTable) (level : Nat) (op : Val)
+    (args : List Val) (T : TowerState) (r : Val) (T' : TowerState)
+    (hh : HeapValid T.heap)
+    (h_levs : ∀ n e, T.envAt? n = some e → EnvValid e T.heap)
+    (h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+    (h_bisim : ∀ n e, T.envAt? n = some e → EnvVis e e T.heap T.heap)
+    (h_pt : PolicyTableRespectsBisimT ptable)
+    (h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
+    (hv_op : ValValid op T.heap)
+    (hv_args : ListValValid args T.heap)
+    (h_eval : applyDirect fuel ptable level op args T = some (r, T')) :
+    HeapValid T'.heap ∧
+    (∀ n e, T'.envAt? n = some e → EnvValid e T'.heap) ∧
+    (∀ n p, T'.policyAt? n = some p → PolicyRespectsBisimT p) ∧
+    (∀ n e, T'.envAt? n = some e → EnvVis e e T'.heap T'.heap) ∧
+    ValValid r T'.heap ∧
+    T.heap.length ≤ T'.heap.length := by
+  obtain ⟨_, _, _, ih_applyDirect⟩ := frame_tower fuel
+  have h_vv_op : ValVis op op T.heap T.heap := by
+    intro d
+    have := ValVis_aux_self_extend d op T.heap [] hh hv_op
+    simpa using this
+  have h_lvv_args : ListValVis args args T.heap T.heap :=
+    ListValVis_self_of_valid args T.heap hh hv_args
+  obtain ⟨r_b, T_b', h_eval_b, _, h_he, h_tc, hv_r_a, _⟩ :=
+    ih_applyDirect ptable level op op args args T T r T'
+      h_pt h_pol_resp_at rfl hh hh rfl h_levs h_levs (fun _ => rfl) (fun _ => rfl)
+      h_resp_all h_bisim h_vv_op h_lvv_args hv_op hv_op hv_args hv_args h_eval
+  have h_eq : (r, T') = (r_b, T_b') := by
+    have : some (r, T') = some (r_b, T_b') := h_eval.symm.trans h_eval_b
+    exact Option.some.inj this
+  obtain ⟨h_r_eq, h_T_eq⟩ : r = r_b ∧ T' = T_b' := Prod.mk.inj h_eq
+  subst h_r_eq; subst h_T_eq
+  exact ⟨h_tc.hv_a_out, h_tc.level_envs_valid_a_out,
+         h_tc.policies_resp_all_out, h_tc.heap_content_bisim_at_levels_out,
+         hv_r_a, h_he.len_a⟩
+
+/-- `valToList` preserves `ValValid` to `ListValValid`. -/
+private theorem ValValid_valToList :
+    ∀ {v : Val} {h : Heap} {ws : List Val},
+      ValValid v h → valToList v = some ws → ListValValid ws h
+  | .nilV, _, _, _, h_vt => by
+      simp [valToList] at h_vt; subst h_vt; trivial
+  | .cons x xs, h, ws, hv, h_vt => by
+      simp [valToList] at h_vt
+      cases h_xs : valToList xs with
+      | none => rw [h_xs] at h_vt; simp at h_vt
+      | some l =>
+          rw [h_xs] at h_vt
+          simp at h_vt
+          subst h_vt
+          exact ⟨hv.1, ValValid_valToList hv.2 h_xs⟩
+  | .num _, _, _, _, h_vt => by simp [valToList] at h_vt
+  | .bool _, _, _, _, h_vt => by simp [valToList] at h_vt
+  | .sym _, _, _, _, h_vt => by simp [valToList] at h_vt
+  | .closure _ _ _, _, _, _, h_vt => by simp [valToList] at h_vt
+  | .prim _, _, _, _, h_vt => by simp [valToList] at h_vt
+  | .builtinBaseApply, _, _, _, h_vt => by simp [valToList] at h_vt
+
+/-- **4-way mutual tower-safety conjunction.** Joint preservation of
+    `TowerCE` and `SafeEvolution` for `eval`, `evalList`, `applyVia`,
+    `applyDirect` — proved by single induction on `fuel`.
+
+    The eval clause delegates to `evalList` (for `.app`/`.primApp`
+    arg lists) and `applyVia`/`applyDirect`. Without this 4-way
+    bundle, each compound expression case in the eval clause hits a
+    "no IH for evalList/applyVia/applyDirect" wall. Mirrors
+    `Frame.all_preserves_envAt`'s shape. -/
+private theorem all_tower_safe (fuel : Nat) :
+    -- eval clause
+    (∀ (ptable : PolicyTable) (h_pt : PolicyTableRespectsBisimT ptable)
+       (level : Nat) (exp : Expr) (env : Env) (T : TowerState)
+       (hh : HeapValid T.heap)
+       (hev : EnvValid env T.heap)
+       (h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
+       (h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+       (h_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap)
+       (h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
+       (h_env_self : EnvVis env env T.heap T.heap)
+       (h_safe : SafeEvolution ptable T)
+       (v : Val) (T' : TowerState),
+      eval fuel ptable level exp env T = some (v, T') →
+      TowerCE T T' ∧ SafeEvolution ptable T') ∧
+    -- evalList clause
+    (∀ (ptable : PolicyTable) (h_pt : PolicyTableRespectsBisimT ptable)
+       (level : Nat) (exps : List Expr) (env : Env) (T : TowerState)
+       (hh : HeapValid T.heap)
+       (hev : EnvValid env T.heap)
+       (h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
+       (h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+       (h_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap)
+       (h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
+       (h_env_self : EnvVis env env T.heap T.heap)
+       (h_safe : SafeEvolution ptable T)
+       (vs : List Val) (T' : TowerState),
+      evalList fuel ptable level exps env T = some (vs, T') →
+      TowerCE T T' ∧ SafeEvolution ptable T' ∧ ListValValid vs T'.heap) ∧
+    -- applyVia clause
+    (∀ (ptable : PolicyTable) (h_pt : PolicyTableRespectsBisimT ptable)
+       (level : Nat) (op : Val) (args : List Val) (T : TowerState)
+       (hh : HeapValid T.heap)
+       (hv_op : ValValid op T.heap)
+       (hv_args : ListValValid args T.heap)
+       (h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
+       (h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+       (h_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap)
+       (h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
+       (h_safe : SafeEvolution ptable T)
+       (r : Val) (T' : TowerState),
+      applyVia fuel ptable level op args T = some (r, T') →
+      TowerCE T T' ∧ SafeEvolution ptable T' ∧ ValValid r T'.heap) ∧
+    -- applyDirect clause
+    (∀ (ptable : PolicyTable) (h_pt : PolicyTableRespectsBisimT ptable)
+       (level : Nat) (op : Val) (args : List Val) (T : TowerState)
+       (hh : HeapValid T.heap)
+       (hv_op : ValValid op T.heap)
+       (hv_args : ListValValid args T.heap)
+       (h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
+       (h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+       (h_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap)
+       (h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
+       (h_safe : SafeEvolution ptable T)
+       (r : Val) (T' : TowerState),
+      applyDirect fuel ptable level op args T = some (r, T') →
+      TowerCE T T' ∧ SafeEvolution ptable T' ∧ ValValid r T'.heap) := by
+  induction fuel with
+  | zero =>
+      refine ⟨?_, ?_, ?_, ?_⟩
+      · intros; rename_i h_eval; simp [eval] at h_eval
+      · intros; rename_i h_eval; simp [evalList] at h_eval
+      · intros; rename_i h_eval; simp [applyVia] at h_eval
+      · intros; rename_i h_eval; simp [applyDirect] at h_eval
+  | succ k ih =>
+      obtain ⟨ih_eval, ih_evalList, ih_applyVia, ih_applyDirect⟩ := ih
+      refine ⟨?_, ?_, ?_, ?_⟩
+      · -- eval (k+1) clause
+        intro ptable h_pt level exp env T hh hev h_levs h_resp_all
+              h_bisim h_pol_resp_at h_env_self h_safe v T' h_eval
+        cases exp with
+        | num i =>
+            simp [eval] at h_eval
+            obtain ⟨_, h_T⟩ := h_eval
+            subst h_T
+            exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
+        | bool b =>
+            simp [eval] at h_eval
+            obtain ⟨_, h_T⟩ := h_eval
+            subst h_T
+            exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
+        | lam ps body =>
+            simp [eval] at h_eval
+            obtain ⟨_, h_T⟩ := h_eval
+            subst h_T
+            exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
+        | quote w =>
+            simp only [eval] at h_eval
+            split at h_eval
+            · simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+              obtain ⟨_, h_T⟩ := h_eval
+              subst h_T
+              exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
+            · simp at h_eval
+        | var x =>
+            simp only [eval] at h_eval
+            cases hx : env.lookup x with
+            | none => rw [hx] at h_eval; simp at h_eval
+            | some idx =>
+                rw [hx] at h_eval
+                simp only at h_eval
+                cases hp : T.heap[idx]? with
+                | none => rw [hp] at h_eval; simp at h_eval
+                | some w =>
+                    rw [hp] at h_eval
+                    simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                    obtain ⟨_, h_T⟩ := h_eval
+                    subst h_T
+                    exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
+        | installPolicy idx =>
+            simp only [eval] at h_eval
+            cases h_pt_idx : ptable[idx]? with
+            | none =>
+                rw [h_pt_idx] at h_eval
+                simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                obtain ⟨_, h_T⟩ := h_eval
+                subst h_T
+                exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
+            | some newPolicy =>
+                rw [h_pt_idx] at h_eval
+                simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                obtain ⟨_, h_T⟩ := h_eval
+                subst h_T
+                have h_heap_eq : (T.setPolicyAt level newPolicy).heap = T.heap :=
+                  TowerState.setPolicyAt_heap T level newPolicy
+                refine ⟨?_, ?_, h_safe.2⟩
+                · exact TowerCE_of_heap_eq T (T.setPolicyAt level newPolicy)
+                    h_heap_eq (TowerCE.refl T hh h_levs h_resp_all h_bisim)
+                · intro n p hp
+                  by_cases hnl : level = n
+                  · subst hnl
+                    rw [TowerState.setPolicyAt_policyAt?_self] at hp
+                    cases h_orig : T.policyAt? level with
+                    | none => rw [h_orig] at hp; simp at hp
+                    | some p_orig =>
+                        rw [h_orig] at hp
+                        simp only [Option.map_some, Option.some.injEq] at hp
+                        have h_in : newPolicy ∈ ptable :=
+                          List.mem_of_getElem? h_pt_idx
+                        rw [← hp]
+                        intro m
+                        exact h_safe.2 newPolicy h_in m
+                  · rw [TowerState.setPolicyAt_policyAt?_other T level n newPolicy hnl]
+                      at hp
+                    exact h_safe.1 n p hp
+        | app exps =>
+            cases exps with
+            | nil => simp [eval] at h_eval
+            | cons f rargs =>
+                simp only [eval] at h_eval
+                cases h_f : eval k ptable level f env T with
+                | none => rw [h_f] at h_eval; simp at h_eval
+                | some pr =>
+                    obtain ⟨fv, T_f⟩ := pr
+                    rw [h_f] at h_eval; simp only at h_eval
+                    obtain ⟨h_tce_f, h_safe_f⟩ :=
+                      ih_eval ptable h_pt level f env T hh hev h_levs h_resp_all
+                        h_bisim h_pol_resp_at h_env_self h_safe fv T_f h_f
+                    obtain ⟨hh_f, h_levs_f, h_resp_all_f, h_bisim_f,
+                            hev_f, hv_fv, h_heap_mono_T_Tf⟩ :=
+                      eval_preserves_self_invariants k ptable level f env T fv
+                        T_f hh hev h_levs h_resp_all h_pt h_pol_resp_at
+                        h_env_self h_f
+                    have h_pol_resp_at_f :
+                        ∀ p, T_f.policyAt? level = some p → PolicyRespectsBisimT p :=
+                      fun p hp => h_resp_all_f level p hp
+                    have h_env_self_f : EnvVis env env T_f.heap T_f.heap :=
+                      EnvVis_self_of_valid env T_f.heap hev_f hh_f
+                    have h_levs_mono_T_Tf :
+                        ∀ n e, T.envAt? n = some e → T_f.envAt? n = some e :=
+                      fun n e h_env =>
+                        eval_preserves_envAt k ptable level f env T fv
+                          T_f n e h_f h_env
+                    cases h_args : evalList k ptable level rargs env T_f with
+                    | none => rw [h_args] at h_eval; simp at h_eval
+                    | some pr2 =>
+                        obtain ⟨avs, T_a⟩ := pr2
+                        rw [h_args] at h_eval; simp only at h_eval
+                        obtain ⟨h_tce_args, h_safe_a, hv_avs⟩ :=
+                          ih_evalList ptable h_pt level rargs env T_f hh_f hev_f
+                            h_levs_f h_resp_all_f h_bisim_f h_pol_resp_at_f
+                            h_env_self_f h_safe_f avs T_a h_args
+                        obtain ⟨hh_a, h_levs_a, h_resp_all_a, h_bisim_a,
+                                _, _, h_heap_mono_Tf_Ta⟩ :=
+                          evalList_preserves_self_invariants k ptable level
+                            rargs env T_f avs T_a hh_f hev_f h_levs_f
+                            h_resp_all_f h_pt h_pol_resp_at_f h_env_self_f h_args
+                        have h_pol_resp_at_a :
+                            ∀ p, T_a.policyAt? level = some p → PolicyRespectsBisimT p :=
+                          fun p hp => h_resp_all_a level p hp
+                        have h_levs_mono_Tf_Ta :
+                            ∀ n e, T_f.envAt? n = some e → T_a.envAt? n = some e := by
+                          obtain ⟨_, ih_evalList_envAt, _, _⟩ := all_preserves_envAt k
+                          exact fun n e h_env =>
+                            ih_evalList_envAt ptable level rargs env T_f avs T_a
+                              n e h_args h_env
+                        have hv_fv_Ta : ValValid fv T_a.heap :=
+                          ValValid.length_mono fv hv_fv h_heap_mono_Tf_Ta
+                        obtain ⟨h_tce_app, h_safe_T', _⟩ :=
+                          ih_applyVia ptable h_pt level fv avs T_a hh_a hv_fv_Ta
+                            hv_avs h_levs_a h_resp_all_a h_bisim_a h_pol_resp_at_a
+                            h_safe_a v T' h_eval
+                        obtain ⟨hh_T', _, _, _, _, h_heap_mono_Ta_T'⟩ :=
+                          applyVia_preserves_self_invariants k ptable level fv avs
+                            T_a v T' hh_a h_levs_a h_resp_all_a h_bisim_a h_pt
+                            h_pol_resp_at_a hv_fv_Ta hv_avs h_eval
+                        have h_levs_mono_Ta_T' :
+                            ∀ n e, T_a.envAt? n = some e → T'.envAt? n = some e := by
+                          obtain ⟨_, _, ih_applyVia_envAt, _⟩ := all_preserves_envAt k
+                          exact fun n e h_env =>
+                            ih_applyVia_envAt ptable level fv avs T_a v T'
+                              n e h_eval h_env
+                        -- Compose three TowerCE chains.
+                        have h_tce_T_Ta : TowerCE T T_a :=
+                          TowerCE_trans T T_f T_a h_heap_mono_T_Tf
+                            h_heap_mono_Tf_Ta h_levs_mono_T_Tf hh_f hh_a
+                            h_tce_f h_tce_args
+                        have h_heap_mono_T_Ta : T.heap.length ≤ T_a.heap.length :=
+                          Nat.le_trans h_heap_mono_T_Tf h_heap_mono_Tf_Ta
+                        have h_levs_mono_T_Ta :
+                            ∀ n e, T.envAt? n = some e → T_a.envAt? n = some e :=
+                          fun n e h_env =>
+                            h_levs_mono_Tf_Ta n e (h_levs_mono_T_Tf n e h_env)
+                        refine ⟨?_, h_safe_T'⟩
+                        exact TowerCE_trans T T_a T'
+                          h_heap_mono_T_Ta h_heap_mono_Ta_T'
+                          h_levs_mono_T_Ta hh_a hh_T' h_tce_T_Ta h_tce_app
+        | seq exps =>
+            cases exps with
+            | nil =>
+                simp [eval] at h_eval
+                obtain ⟨_, h_T⟩ := h_eval
+                subst h_T
+                exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
+            | cons e rest =>
+                cases rest with
+                | nil =>
+                    simp only [eval] at h_eval
+                    apply ih_eval ptable h_pt <;> assumption
+                | cons e' rest' =>
+                    cases e with
+                    | num _ | bool _ | lam _ _ | var _ | quote _ =>
+                        simp only [eval] at h_eval
+                        cases h_e : eval k ptable level _ env T with
+                        | none => rw [h_e] at h_eval; simp at h_eval
+                        | some pr =>
+                            rw [h_e] at h_eval
+                            cases pr with
+                            | mk _ T_mid =>
+                                simp only at h_eval
+                                have h_T_eq : T_mid = T :=
+                                  eval_atomic_T_unchanged k ptable level _ env T _
+                                    T_mid (by simp [Expr.IsAtomic]) h_e
+                                subst h_T_eq
+                                apply ih_eval ptable h_pt <;> assumption
+                    | _ =>
+                        simp only [eval] at h_eval
+                        cases h_e : eval k ptable level _ env T with
+                        | none => rw [h_e] at h_eval; simp at h_eval
+                        | some pr =>
+                            rw [h_e] at h_eval
+                            cases pr with
+                            | mk cv T_mid =>
+                                simp only at h_eval
+                                obtain ⟨h_tce_e, h_safe_mid⟩ :=
+                                  ih_eval ptable h_pt level _ env T hh hev h_levs
+                                    h_resp_all h_bisim h_pol_resp_at h_env_self
+                                    h_safe cv T_mid h_e
+                                obtain ⟨hh_mid, h_levs_mid, h_resp_all_mid,
+                                        h_bisim_mid, hev_mid, _, h_heap_mono_12⟩ :=
+                                  eval_preserves_self_invariants k ptable level _
+                                    env T cv T_mid hh hev h_levs h_resp_all h_pt
+                                    h_pol_resp_at h_env_self h_e
+                                have h_pol_resp_at_mid :
+                                    ∀ p, T_mid.policyAt? level = some p →
+                                         PolicyRespectsBisimT p :=
+                                  fun p hp => h_resp_all_mid level p hp
+                                have h_env_self_mid :
+                                    EnvVis env env T_mid.heap T_mid.heap :=
+                                  EnvVis_self_of_valid env T_mid.heap hev_mid hh_mid
+                                obtain ⟨h_tce_rest, h_safe_T'⟩ :=
+                                  ih_eval ptable h_pt level (.seq (e' :: rest'))
+                                    env T_mid hh_mid hev_mid h_levs_mid
+                                    h_resp_all_mid h_bisim_mid h_pol_resp_at_mid
+                                    h_env_self_mid h_safe_mid v T' h_eval
+                                obtain ⟨hh_T', _, _, _, _, _, h_heap_mono_23⟩ :=
+                                  eval_preserves_self_invariants k ptable level
+                                    (.seq (e' :: rest')) env T_mid v T'
+                                    hh_mid hev_mid h_levs_mid h_resp_all_mid h_pt
+                                    h_pol_resp_at_mid h_env_self_mid h_eval
+                                have h_levs_mono_12 :
+                                    ∀ n env_n, T.envAt? n = some env_n →
+                                               T_mid.envAt? n = some env_n :=
+                                  fun n env_n h_env =>
+                                    eval_preserves_envAt k ptable level _ env T cv
+                                      T_mid n env_n h_e h_env
+                                refine ⟨?_, h_safe_T'⟩
+                                exact TowerCE_trans T T_mid T' h_heap_mono_12
+                                  h_heap_mono_23 h_levs_mono_12 hh_mid hh_T'
+                                  h_tce_e h_tce_rest
+        | ifte c t e =>
+            cases k with
+            | zero => simp [eval] at h_eval
+            | succ j =>
+                simp only [eval] at h_eval
+                cases h_c : eval (j+1) ptable level c env T with
+                | none => rw [h_c] at h_eval; simp at h_eval
+                | some pr =>
+                    rw [h_c] at h_eval
+                    cases pr with
+                    | mk cv T_mid =>
+                        obtain ⟨h_tce_c, h_safe_mid⟩ :=
+                          ih_eval ptable h_pt level c env T hh hev h_levs
+                            h_resp_all h_bisim h_pol_resp_at h_env_self h_safe
+                            cv T_mid h_c
+                        obtain ⟨hh_mid, h_levs_mid, h_resp_all_mid,
+                                h_bisim_mid, hev_mid, _, h_heap_mono_12⟩ :=
+                          eval_preserves_self_invariants (j+1) ptable level c
+                            env T cv T_mid hh hev h_levs h_resp_all h_pt
+                            h_pol_resp_at h_env_self h_c
+                        have h_pol_resp_at_mid :
+                            ∀ p, T_mid.policyAt? level = some p →
+                                 PolicyRespectsBisimT p :=
+                          fun p hp => h_resp_all_mid level p hp
+                        have h_env_self_mid :
+                            EnvVis env env T_mid.heap T_mid.heap :=
+                          EnvVis_self_of_valid env T_mid.heap hev_mid hh_mid
+                        have h_levs_mono_12 :
+                            ∀ n env_n, T.envAt? n = some env_n →
+                                       T_mid.envAt? n = some env_n :=
+                          fun n env_n h_env =>
+                            eval_preserves_envAt (j+1) ptable level c env T cv
+                              T_mid n env_n h_c h_env
+                        have run_branch :
+                            ∀ (branch_exp : Expr),
+                              eval (j+1) ptable level branch_exp env T_mid
+                                  = some (v, T') →
+                              TowerCE T T' ∧ SafeEvolution ptable T' := by
+                          intro branch_exp h_eval_branch
+                          obtain ⟨h_tce_branch, h_safe_T'⟩ :=
+                            ih_eval ptable h_pt level branch_exp env T_mid
+                              hh_mid hev_mid h_levs_mid h_resp_all_mid
+                              h_bisim_mid h_pol_resp_at_mid h_env_self_mid
+                              h_safe_mid v T' h_eval_branch
+                          obtain ⟨hh_T', _, _, _, _, _, h_heap_mono_23⟩ :=
+                            eval_preserves_self_invariants (j+1) ptable level
+                              branch_exp env T_mid v T' hh_mid hev_mid
+                              h_levs_mid h_resp_all_mid h_pt
+                              h_pol_resp_at_mid h_env_self_mid h_eval_branch
+                          refine ⟨?_, h_safe_T'⟩
+                          exact TowerCE_trans T T_mid T' h_heap_mono_12
+                            h_heap_mono_23 h_levs_mono_12 hh_mid hh_T'
+                            h_tce_c h_tce_branch
+                        cases cv with
+                        | bool b =>
+                            cases b with
+                            | true => exact run_branch t h_eval
+                            | false => exact run_branch e h_eval
+                        | num _ | nilV | sym _ | cons _ _ | closure _ _ _
+                        | prim _ | builtinBaseApply =>
+                            exact run_branch t h_eval
+        | letE x e body =>
+            cases k with
+            | zero => simp [eval] at h_eval
+            | succ j =>
+                simp only [eval] at h_eval
+                cases h_e : eval (j+1) ptable level e env T with
+                | none => rw [h_e] at h_eval; simp at h_eval
+                | some pr =>
+                    rw [h_e] at h_eval
+                    cases pr with
+                    | mk v_e T_e =>
+                        obtain ⟨h_tce_e, h_safe_e⟩ :=
+                          ih_eval ptable h_pt level e env T hh hev h_levs
+                            h_resp_all h_bisim h_pol_resp_at h_env_self h_safe
+                            v_e T_e h_e
+                        obtain ⟨hh_e, h_levs_e, h_resp_all_e, h_bisim_e,
+                                hev_e, hv_v_e, h_heap_mono_T_Te⟩ :=
+                          eval_preserves_self_invariants (j+1) ptable level e
+                            env T v_e T_e hh hev h_levs h_resp_all h_pt
+                            h_pol_resp_at h_env_self h_e
+                        have h_alloc_heap :
+                            (T_e.alloc v_e).1.heap = T_e.heap ++ [v_e] := rfl
+                        have h_alloc_idx :
+                            (T_e.alloc v_e).2 = T_e.heap.length := rfl
+                        have h_alloc_envAt :
+                            ∀ n, (T_e.alloc v_e).1.envAt? n = T_e.envAt? n :=
+                          fun _ => rfl
+                        have h_alloc_policyAt :
+                            ∀ n, (T_e.alloc v_e).1.policyAt? n = T_e.policyAt? n :=
+                          fun _ => rfl
+                        have hh_alloc : HeapValid (T_e.alloc v_e).1.heap := by
+                          rw [h_alloc_heap]
+                          exact HeapValid_alloc_one T_e.heap v_e hh_e hv_v_e
+                        have hev_alloc :
+                            EnvValid (.cons x (T_e.alloc v_e).2 env)
+                              (T_e.alloc v_e).1.heap := by
+                          rw [h_alloc_heap, h_alloc_idx]
+                          exact EnvValid_cons_alloc x v_e hev_e
+                        have h_levs_alloc :
+                            ∀ n env_n, (T_e.alloc v_e).1.envAt? n = some env_n →
+                                       EnvValid env_n (T_e.alloc v_e).1.heap := by
+                          intro n env_n h_env
+                          rw [h_alloc_envAt] at h_env
+                          rw [h_alloc_heap]
+                          exact EnvValid.length_mono (h_levs_e n env_n h_env)
+                            (by simp [List.length_append])
+                        have h_resp_all_alloc :
+                            ∀ n p, (T_e.alloc v_e).1.policyAt? n = some p →
+                                   PolicyRespectsBisimT p :=
+                          fun n p h_p => h_resp_all_e n p (h_alloc_policyAt n ▸ h_p)
+                        have h_pol_resp_at_alloc :
+                            ∀ p, (T_e.alloc v_e).1.policyAt? level = some p →
+                                 PolicyRespectsBisimT p :=
+                          fun p hp => h_resp_all_alloc level p hp
+                        have h_bisim_alloc :
+                            ∀ n env_n, (T_e.alloc v_e).1.envAt? n = some env_n →
+                                       EnvVis env_n env_n (T_e.alloc v_e).1.heap
+                                         (T_e.alloc v_e).1.heap :=
+                          fun n env_n h_env =>
+                            EnvVis_self_of_valid env_n (T_e.alloc v_e).1.heap
+                              (h_levs_alloc n env_n h_env) hh_alloc
+                        have h_env_self_alloc :
+                            EnvVis (.cons x (T_e.alloc v_e).2 env)
+                              (.cons x (T_e.alloc v_e).2 env)
+                              (T_e.alloc v_e).1.heap (T_e.alloc v_e).1.heap :=
+                          EnvVis_self_of_valid _ _ hev_alloc hh_alloc
+                        have h_safe_alloc :
+                            SafeEvolution ptable (T_e.alloc v_e).1 := by
+                          refine ⟨?_, h_safe_e.2⟩
+                          intro n p h_p
+                          rw [h_alloc_policyAt] at h_p
+                          exact h_safe_e.1 n p h_p
+                        obtain ⟨h_tce_body, h_safe_T'⟩ :=
+                          ih_eval ptable h_pt level body
+                            (.cons x (T_e.alloc v_e).2 env)
+                            (T_e.alloc v_e).1 hh_alloc hev_alloc h_levs_alloc
+                            h_resp_all_alloc h_bisim_alloc h_pol_resp_at_alloc
+                            h_env_self_alloc h_safe_alloc v T' h_eval
+                        obtain ⟨hh_T', _, _, _, _, _, h_heap_mono_alloc_T'⟩ :=
+                          eval_preserves_self_invariants (j+1) ptable level body
+                            (.cons x (T_e.alloc v_e).2 env) (T_e.alloc v_e).1 v T'
+                            hh_alloc hev_alloc h_levs_alloc h_resp_all_alloc h_pt
+                            h_pol_resp_at_alloc h_env_self_alloc h_eval
+                        have h_heap_mono_Te_alloc :
+                            T_e.heap.length ≤ (T_e.alloc v_e).1.heap.length := by
+                          rw [h_alloc_heap]; simp [List.length_append]
+                        have h_heap_mono_T_alloc :
+                            T.heap.length ≤ (T_e.alloc v_e).1.heap.length :=
+                          Nat.le_trans h_heap_mono_T_Te h_heap_mono_Te_alloc
+                        have h_levs_mono_T_Te :
+                            ∀ n env_n, T.envAt? n = some env_n →
+                                       T_e.envAt? n = some env_n :=
+                          fun n env_n h_env =>
+                            eval_preserves_envAt (j+1) ptable level e env T v_e
+                              T_e n env_n h_e h_env
+                        have h_levs_mono_T_alloc :
+                            ∀ n env_n, T.envAt? n = some env_n →
+                                       (T_e.alloc v_e).1.envAt? n = some env_n :=
+                          fun n env_n h_env =>
+                            (h_alloc_envAt n).symm ▸
+                              h_levs_mono_T_Te n env_n h_env
+                        have h_tce_e_alloc : TowerCE T_e (T_e.alloc v_e).1 :=
+                          TowerCE_of_heap_extends T_e (T_e.alloc v_e).1
+                            ⟨[v_e], h_alloc_heap⟩
+                            (TowerCE.refl T_e hh_e h_levs_e h_resp_all_e h_bisim_e)
+                        have h_tce_T_alloc : TowerCE T (T_e.alloc v_e).1 :=
+                          TowerCE_trans T T_e (T_e.alloc v_e).1
+                            h_heap_mono_T_Te h_heap_mono_Te_alloc h_levs_mono_T_Te
+                            hh_e hh_alloc h_tce_e h_tce_e_alloc
+                        refine ⟨?_, h_safe_T'⟩
+                        exact TowerCE_trans T (T_e.alloc v_e).1 T'
+                          h_heap_mono_T_alloc h_heap_mono_alloc_T'
+                          h_levs_mono_T_alloc hh_alloc hh_T'
+                          h_tce_T_alloc h_tce_body
+        | primApp f args =>
+            cases k with
+            | zero => simp [eval] at h_eval
+            | succ j =>
+                simp only [eval] at h_eval
+                cases h_f : eval (j+1) ptable level f env T with
+                | none => rw [h_f] at h_eval; simp at h_eval
+                | some pr =>
+                    obtain ⟨fv, T_f⟩ := pr
+                    rw [h_f] at h_eval; simp only at h_eval
+                    obtain ⟨h_tce_f, h_safe_f⟩ :=
+                      ih_eval ptable h_pt level f env T hh hev h_levs h_resp_all
+                        h_bisim h_pol_resp_at h_env_self h_safe fv T_f h_f
+                    obtain ⟨hh_f, h_levs_f, h_resp_all_f, h_bisim_f,
+                            hev_f, hv_fv, h_heap_mono_T_Tf⟩ :=
+                      eval_preserves_self_invariants (j+1) ptable level f env T fv
+                        T_f hh hev h_levs h_resp_all h_pt h_pol_resp_at
+                        h_env_self h_f
+                    have h_pol_resp_at_f :
+                        ∀ p, T_f.policyAt? level = some p → PolicyRespectsBisimT p :=
+                      fun p hp => h_resp_all_f level p hp
+                    have h_env_self_f : EnvVis env env T_f.heap T_f.heap :=
+                      EnvVis_self_of_valid env T_f.heap hev_f hh_f
+                    have h_levs_mono_T_Tf :
+                        ∀ n e, T.envAt? n = some e → T_f.envAt? n = some e :=
+                      fun n e h_env =>
+                        eval_preserves_envAt (j+1) ptable level f env T fv
+                          T_f n e h_f h_env
+                    cases h_args : evalList (j+1) ptable level args env T_f with
+                    | none => rw [h_args] at h_eval; simp at h_eval
+                    | some pr2 =>
+                        obtain ⟨avs, T_a⟩ := pr2
+                        rw [h_args] at h_eval; simp only at h_eval
+                        obtain ⟨h_tce_args, h_safe_a, hv_avs⟩ :=
+                          ih_evalList ptable h_pt level args env T_f hh_f hev_f
+                            h_levs_f h_resp_all_f h_bisim_f h_pol_resp_at_f
+                            h_env_self_f h_safe_f avs T_a h_args
+                        obtain ⟨hh_a, h_levs_a, h_resp_all_a, h_bisim_a,
+                                _, _, h_heap_mono_Tf_Ta⟩ :=
+                          evalList_preserves_self_invariants (j+1) ptable level
+                            args env T_f avs T_a hh_f hev_f h_levs_f
+                            h_resp_all_f h_pt h_pol_resp_at_f h_env_self_f h_args
+                        have h_pol_resp_at_a :
+                            ∀ p, T_a.policyAt? level = some p → PolicyRespectsBisimT p :=
+                          fun p hp => h_resp_all_a level p hp
+                        have h_levs_mono_Tf_Ta :
+                            ∀ n e, T_f.envAt? n = some e → T_a.envAt? n = some e := by
+                          obtain ⟨_, ih_evalList_envAt, _, _⟩ := all_preserves_envAt (j+1)
+                          exact fun n e h_env =>
+                            ih_evalList_envAt ptable level args env T_f avs T_a
+                              n e h_args h_env
+                        have hv_fv_Ta : ValValid fv T_a.heap :=
+                          ValValid.length_mono fv hv_fv h_heap_mono_Tf_Ta
+                        obtain ⟨h_tce_app, h_safe_T', _⟩ :=
+                          ih_applyDirect ptable h_pt level fv avs T_a hh_a
+                            hv_fv_Ta hv_avs h_levs_a h_resp_all_a h_bisim_a
+                            h_pol_resp_at_a h_safe_a v T' h_eval
+                        obtain ⟨hh_T', _, _, _, _, h_heap_mono_Ta_T'⟩ :=
+                          applyDirect_preserves_self_invariants (j+1) ptable level fv avs
+                            T_a v T' hh_a h_levs_a h_resp_all_a h_bisim_a h_pt
+                            h_pol_resp_at_a hv_fv_Ta hv_avs h_eval
+                        have h_levs_mono_Ta_T' :
+                            ∀ n e, T_a.envAt? n = some e → T'.envAt? n = some e := by
+                          obtain ⟨_, _, _, ih_applyDirect_envAt⟩ := all_preserves_envAt (j+1)
+                          exact fun n e h_env =>
+                            ih_applyDirect_envAt ptable level fv avs T_a v T'
+                              n e h_eval h_env
+                        have h_tce_T_Ta : TowerCE T T_a :=
+                          TowerCE_trans T T_f T_a h_heap_mono_T_Tf
+                            h_heap_mono_Tf_Ta h_levs_mono_T_Tf hh_f hh_a
+                            h_tce_f h_tce_args
+                        have h_heap_mono_T_Ta : T.heap.length ≤ T_a.heap.length :=
+                          Nat.le_trans h_heap_mono_T_Tf h_heap_mono_Tf_Ta
+                        have h_levs_mono_T_Ta :
+                            ∀ n e, T.envAt? n = some e → T_a.envAt? n = some e :=
+                          fun n e h_env =>
+                            h_levs_mono_Tf_Ta n e (h_levs_mono_T_Tf n e h_env)
+                        refine ⟨?_, h_safe_T'⟩
+                        exact TowerCE_trans T T_a T'
+                          h_heap_mono_T_Ta h_heap_mono_Ta_T'
+                          h_levs_mono_T_Ta hh_a hh_T' h_tce_T_Ta h_tce_app
+        | em body =>
+            cases k with
+            | zero =>
+                simp only [eval] at h_eval
+                cases h_mat : T.materialize (level + 1) with
+                | none => rw [h_mat] at h_eval; simp at h_eval
+                | some T_mat =>
+                    rw [h_mat] at h_eval
+                    simp only at h_eval
+                    cases h_env_mat : T_mat.envAt? (level + 1) with
+                    | none => rw [h_env_mat] at h_eval; simp at h_eval
+                    | some upEnv =>
+                        rw [h_env_mat] at h_eval
+                        simp [eval] at h_eval
+            | succ j =>
+                simp only [eval] at h_eval
+                cases h_mat : T.materialize (level + 1) with
+                | none => rw [h_mat] at h_eval; simp at h_eval
+                | some T_mat =>
+                    rw [h_mat] at h_eval
+                    simp only at h_eval
+                    cases h_env_mat : T_mat.envAt? (level + 1) with
+                    | none => rw [h_env_mat] at h_eval; simp at h_eval
+                    | some upEnv =>
+                        rw [h_env_mat] at h_eval
+                        simp only at h_eval
+                        have hh_mat : HeapValid T_mat.heap :=
+                          materialize_HeapValid_preserves T T_mat (level + 1) h_mat hh
+                        have h_levs_mat :
+                            ∀ m env_m, T_mat.envAt? m = some env_m →
+                                       EnvValid env_m T_mat.heap :=
+                          materialize_level_envs_valid_preserves T T_mat (level + 1)
+                            h_mat hh h_levs
+                        have h_resp_all_mat :
+                            ∀ m p, T_mat.policyAt? m = some p →
+                                   PolicyRespectsBisimT p :=
+                          materialize_policies_resp_preserves T T_mat (level + 1)
+                            PolicyRespectsBisimT h_mat h_resp_all
+                            rejectAllPolicy_respects_bisimT
+                        have h_bisim_mat :
+                            ∀ m env_m, T_mat.envAt? m = some env_m →
+                                       EnvVis env_m env_m T_mat.heap T_mat.heap :=
+                          fun m env_m hen =>
+                            EnvVis_self_of_valid env_m T_mat.heap
+                              (h_levs_mat m env_m hen) hh_mat
+                        have h_pol_resp_at_mat :
+                            ∀ p, T_mat.policyAt? (level + 1) = some p →
+                                 PolicyRespectsBisimT p :=
+                          fun p h => h_resp_all_mat (level + 1) p h
+                        have hev_upEnv : EnvValid upEnv T_mat.heap :=
+                          h_levs_mat (level + 1) upEnv h_env_mat
+                        have h_env_self_mat : EnvVis upEnv upEnv T_mat.heap T_mat.heap :=
+                          h_bisim_mat (level + 1) upEnv h_env_mat
+                        have h_safe_mat : SafeEvolution ptable T_mat := by
+                          refine ⟨?_, h_safe.2⟩
+                          apply materialize_policies_resp_preserves T T_mat (level + 1)
+                            (fun p => ∀ m, p.UnivSoundAt m) h_mat h_safe.1
+                          intro m
+                          unfold BlackPolicy.UnivSoundAt
+                          exact rejectAllPolicy_soundForCE m
+                        obtain ⟨h_tce_body, h_safe_T'⟩ :=
+                          ih_eval ptable h_pt (level + 1) body upEnv T_mat hh_mat
+                            hev_upEnv h_levs_mat h_resp_all_mat h_bisim_mat
+                            h_pol_resp_at_mat h_env_self_mat h_safe_mat v T' h_eval
+                        obtain ⟨extras, h_heap_eq⟩ :=
+                          T.materialize_heap_extends T_mat (level + 1) h_mat
+                        have h_tce_T_mat : TowerCE T T_mat :=
+                          TowerCE_of_heap_extends T T_mat ⟨extras, h_heap_eq⟩
+                            (TowerCE.refl T hh h_levs h_resp_all h_bisim)
+                        have h_heap_mono_T_Tmat :
+                            T.heap.length ≤ T_mat.heap.length := by
+                          rw [h_heap_eq]; simp [List.length_append]
+                        have h_levs_mono_T_Tmat :
+                            ∀ n env_n, T.envAt? n = some env_n →
+                                       T_mat.envAt? n = some env_n :=
+                          fun n env_n h_env =>
+                            T.materialize_envAt?_preserves T_mat (level + 1) n env_n
+                              h_mat h_env
+                        obtain ⟨hh_T', _, _, _, _, _, h_heap_mono_Tmat_T'⟩ :=
+                          eval_preserves_self_invariants (j+1) ptable (level + 1) body
+                            upEnv T_mat v T' hh_mat hev_upEnv h_levs_mat
+                            h_resp_all_mat h_pt h_pol_resp_at_mat h_env_self_mat
+                            h_eval
+                        refine ⟨?_, h_safe_T'⟩
+                        exact TowerCE_trans T T_mat T' h_heap_mono_T_Tmat
+                          h_heap_mono_Tmat_T' h_levs_mono_T_Tmat hh_mat hh_T'
+                          h_tce_T_mat h_tce_body
+        | set x e =>
+            cases k with
+            | zero => simp [eval] at h_eval
+            | succ j =>
+                simp only [eval] at h_eval
+                cases h_e : eval (j+1) ptable level e env T with
+                | none => rw [h_e] at h_eval; simp at h_eval
+                | some pr =>
+                    rw [h_e] at h_eval
+                    cases pr with
+                    | mk v_e T_mid =>
+                        simp only at h_eval
+                        obtain ⟨h_tce_e, h_safe_mid⟩ :=
+                          ih_eval ptable h_pt level e env T hh hev h_levs
+                            h_resp_all h_bisim h_pol_resp_at h_env_self h_safe
+                            v_e T_mid h_e
+                        obtain ⟨hh_mid, h_levs_mid, h_resp_all_mid,
+                                h_bisim_mid, hev_mid, hv_v_e, h_heap_mono_12⟩ :=
+                          eval_preserves_self_invariants (j+1) ptable level e
+                            env T v_e T_mid hh hev h_levs h_resp_all h_pt
+                            h_pol_resp_at h_env_self h_e
+                        have h_levs_mono_12 :
+                            ∀ n env_n, T.envAt? n = some env_n →
+                                       T_mid.envAt? n = some env_n :=
+                          fun n env_n h_env =>
+                            eval_preserves_envAt (j+1) ptable level e env T v_e
+                              T_mid n env_n h_e h_env
+                        cases h_lk : env.lookup x with
+                        | none => rw [h_lk] at h_eval; simp at h_eval
+                        | some idx =>
+                            rw [h_lk] at h_eval
+                            simp only at h_eval
+                            by_cases h_meta : isMetaMutation x env T_mid level = true
+                            · simp only [h_meta, if_true] at h_eval
+                              cases h_old : T_mid.heap[idx]? with
+                              | none => rw [h_old] at h_eval; simp at h_eval
+                              | some oldVal =>
+                                  rw [h_old] at h_eval
+                                  cases h_gate? : T.policyAt? level with
+                                  | none => rw [h_gate?] at h_eval; simp at h_eval
+                                  | some gate =>
+                                      rw [h_gate?] at h_eval
+                                      simp only at h_eval
+                                      by_cases h_gate :
+                                          gate
+                                            { target := x, heap := T_mid.heap, env := env,
+                                              metaEnv := (T_mid.envAt? level).getD .nil,
+                                              index := idx, level := level }
+                                            oldVal v_e = true
+                                      · rw [h_gate] at h_eval
+                                        simp only [↓reduceIte, Option.some.injEq,
+                                                    Prod.mk.injEq] at h_eval
+                                        obtain ⟨_, h_T_eq⟩ := h_eval
+                                        subst h_T_eq
+                                        have h_gate_univ : ∀ m, gate.UnivSoundAt m :=
+                                          h_safe.1 level gate h_gate?
+                                        have h_ce_oldVal_v :
+                                            ∀ n, CE n T_mid.heap oldVal v_e := fun n =>
+                                          h_gate_univ n
+                                            { target := x, heap := T_mid.heap, env := env,
+                                              metaEnv := (T_mid.envAt? level).getD .nil,
+                                              index := idx, level := level }
+                                            oldVal v_e h_gate
+                                        have h_idx_lt :
+                                            idx < T_mid.heap.length :=
+                                          (List.getElem?_eq_some_iff.mp h_old).1
+                                        have h_update_len :
+                                            (T_mid.updateHeap idx v_e).heap.length =
+                                              T_mid.heap.length :=
+                                          Heap.update_length T_mid.heap idx v_e
+                                        have h_len_le :
+                                            T_mid.heap.length
+                                              ≤ (T_mid.updateHeap idx v_e).heap.length :=
+                                          Nat.le_of_eq h_update_len.symm
+                                        have hh_upd :
+                                            HeapValid (T_mid.updateHeap idx v_e).heap := by
+                                          intro i v_i hp
+                                          by_cases h_ie : i = idx
+                                          · rw [h_ie] at hp
+                                            have h_at : (T_mid.updateHeap idx v_e).heap[idx]?
+                                                = some v_e :=
+                                              Heap.update_get_eq T_mid.heap idx v_e h_idx_lt
+                                            rw [h_at] at hp
+                                            have h_v_eq : v_e = v_i :=
+                                              Option.some.inj hp
+                                            rw [← h_v_eq]
+                                            exact ValValid.length_mono v_e hv_v_e h_len_le
+                                          · have h_get :=
+                                              Heap.update_get_neq T_mid.heap idx v_e i h_ie
+                                            rw [show (T_mid.updateHeap idx v_e).heap[i]?
+                                                = T_mid.heap[i]? from h_get] at hp
+                                            exact ValValid.length_mono v_i
+                                              (hh_mid i v_i hp) h_len_le
+                                        have h_tce_mid_upd :
+                                            TowerCE T_mid (T_mid.updateHeap idx v_e) := by
+                                          intro n idx_ba oldApply newApply
+                                            h_lookup h_old_T_mid h_new_T_upd
+                                          by_cases h_eq_idx : idx_ba = idx
+                                          · subst h_eq_idx
+                                            have h_old_eq : oldApply = oldVal := by
+                                              rw [h_old] at h_old_T_mid
+                                              exact (Option.some.inj h_old_T_mid).symm
+                                            have h_new_eq : newApply = v_e := by
+                                              have h_get :=
+                                                Heap.update_get_eq T_mid.heap idx_ba v_e h_idx_lt
+                                              rw [show
+                                                (T_mid.updateHeap idx_ba v_e).heap[idx_ba]?
+                                                  = some v_e from h_get] at h_new_T_upd
+                                              exact (Option.some.inj h_new_T_upd).symm
+                                            subst h_old_eq; subst h_new_eq
+                                            apply CE_weaken_h_ref n T_mid.heap _
+                                              (Nat.le_of_eq h_update_len.symm)
+                                            exact h_ce_oldVal_v n
+                                          · have h_unchanged :
+                                                (T_mid.updateHeap idx v_e).heap[idx_ba]?
+                                                  = T_mid.heap[idx_ba]? :=
+                                              Heap.update_get_neq T_mid.heap idx v_e idx_ba
+                                                h_eq_idx
+                                            rw [h_unchanged] at h_new_T_upd
+                                            rw [h_old_T_mid] at h_new_T_upd
+                                            have h_eq_app : oldApply = newApply :=
+                                              Option.some.inj h_new_T_upd
+                                            subst h_eq_app
+                                            have h_self :=
+                                              TowerCE.refl T_mid hh_mid h_levs_mid
+                                                h_resp_all_mid h_bisim_mid
+                                            apply CE_weaken_h_ref n T_mid.heap _
+                                              (Nat.le_of_eq h_update_len.symm)
+                                            exact h_self n idx_ba oldApply oldApply
+                                              h_lookup h_old_T_mid h_old_T_mid
+                                        have h_tce_T_upd :
+                                            TowerCE T (T_mid.updateHeap idx v_e) := by
+                                          apply TowerCE_trans T T_mid
+                                            (T_mid.updateHeap idx v_e)
+                                            h_heap_mono_12
+                                            (Nat.le_of_eq h_update_len.symm)
+                                            h_levs_mono_12 hh_mid hh_upd
+                                            h_tce_e h_tce_mid_upd
+                                        have h_safe_upd :
+                                            SafeEvolution ptable
+                                              (T_mid.updateHeap idx v_e) := by
+                                          refine ⟨?_, h_safe_mid.2⟩
+                                          intro n p hp
+                                          rw [TowerState.updateHeap_policyAt?] at hp
+                                          exact h_safe_mid.1 n p hp
+                                        exact ⟨h_tce_T_upd, h_safe_upd⟩
+                                      · have h_gate_false :
+                                            (gate
+                                                { target := x, heap := T_mid.heap, env := env,
+                                                  metaEnv := (T_mid.envAt? level).getD .nil,
+                                                  index := idx, level := level }
+                                                oldVal v_e) = false := by
+                                          cases h : gate _ oldVal v_e with
+                                          | true => exact absurd h h_gate
+                                          | false => rfl
+                                        rw [h_gate_false] at h_eval
+                                        simp only [Bool.false_eq_true, ↓reduceIte,
+                                                    Option.some.injEq,
+                                                    Prod.mk.injEq] at h_eval
+                                        obtain ⟨_, h_T_eq⟩ := h_eval
+                                        subst h_T_eq
+                                        exact ⟨h_tce_e, h_safe_mid⟩
+                            · have h_meta_false : isMetaMutation x env T_mid level = false := by
+                                cases h : isMetaMutation x env T_mid level with
+                                | true => exact absurd h h_meta
+                                | false => rfl
+                              rw [h_meta_false] at h_eval
+                              simp at h_eval
+      · -- evalList (k+1) clause
+        intro ptable h_pt level exps env T hh hev h_levs h_resp_all
+              h_bisim h_pol_resp_at h_env_self h_safe vs T' h_eval
+        cases exps with
+        | nil =>
+            simp only [evalList, Option.some.injEq, Prod.mk.injEq] at h_eval
+            obtain ⟨h_vs, h_T⟩ := h_eval
+            subst h_T; subst h_vs
+            exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe, trivial⟩
+        | cons e rest =>
+            simp only [evalList] at h_eval
+            cases h_e : eval k ptable level e env T with
+            | none => rw [h_e] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨v_e, T_e⟩ := pr
+                rw [h_e] at h_eval; simp only at h_eval
+                obtain ⟨h_tce_e, h_safe_e⟩ :=
+                  ih_eval ptable h_pt level e env T hh hev h_levs h_resp_all
+                    h_bisim h_pol_resp_at h_env_self h_safe v_e T_e h_e
+                obtain ⟨hh_e, h_levs_e, h_resp_all_e, h_bisim_e, hev_e,
+                        hv_v_e, h_heap_mono_T_Te⟩ :=
+                  eval_preserves_self_invariants k ptable level e env T v_e
+                    T_e hh hev h_levs h_resp_all h_pt h_pol_resp_at
+                    h_env_self h_e
+                have h_pol_resp_at_e :
+                    ∀ p, T_e.policyAt? level = some p → PolicyRespectsBisimT p :=
+                  fun p hp => h_resp_all_e level p hp
+                have h_env_self_e : EnvVis env env T_e.heap T_e.heap :=
+                  EnvVis_self_of_valid env T_e.heap hev_e hh_e
+                have h_levs_mono_T_Te :
+                    ∀ n env_n, T.envAt? n = some env_n →
+                               T_e.envAt? n = some env_n :=
+                  fun n env_n h_env =>
+                    eval_preserves_envAt k ptable level e env T v_e
+                      T_e n env_n h_e h_env
+                cases h_rest : evalList k ptable level rest env T_e with
+                | none => rw [h_rest] at h_eval; simp at h_eval
+                | some pr2 =>
+                    obtain ⟨vs_rest, T_r⟩ := pr2
+                    rw [h_rest] at h_eval
+                    simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                    obtain ⟨h_vs, h_T_eq⟩ := h_eval
+                    subst h_T_eq; subst h_vs
+                    obtain ⟨h_tce_rest, h_safe_r, h_lvv_rest⟩ :=
+                      ih_evalList ptable h_pt level rest env T_e hh_e hev_e
+                        h_levs_e h_resp_all_e h_bisim_e h_pol_resp_at_e
+                        h_env_self_e h_safe_e vs_rest T_r h_rest
+                    obtain ⟨hh_T_r, _, _, _, _, _, h_heap_mono_Te_Tr⟩ :=
+                      evalList_preserves_self_invariants k ptable level rest
+                        env T_e vs_rest T_r hh_e hev_e h_levs_e h_resp_all_e
+                        h_pt h_pol_resp_at_e h_env_self_e h_rest
+                    have h_levs_mono_Te_Tr :
+                        ∀ n env_n, T_e.envAt? n = some env_n →
+                                   T_r.envAt? n = some env_n := by
+                      obtain ⟨_, ih_evalList_envAt, _, _⟩ := all_preserves_envAt k
+                      exact fun n env_n h_env =>
+                        ih_evalList_envAt ptable level rest env T_e vs_rest T_r
+                          n env_n h_rest h_env
+                    have h_tce : TowerCE T T_r :=
+                      TowerCE_trans T T_e T_r h_heap_mono_T_Te h_heap_mono_Te_Tr
+                        h_levs_mono_T_Te hh_e hh_T_r h_tce_e h_tce_rest
+                    have hv_v_e_Tr : ValValid v_e T_r.heap :=
+                      ValValid.length_mono v_e hv_v_e h_heap_mono_Te_Tr
+                    exact ⟨h_tce, h_safe_r, hv_v_e_Tr, h_lvv_rest⟩
+      · -- applyVia (k+1) clause
+        intro ptable h_pt level op args T hh hv_op hv_args h_levs h_resp_all
+              h_bisim h_pol_resp_at h_safe r T' h_eval
+        simp only [applyVia] at h_eval
+        cases h_mat : T.materialize (level + 1) with
+        | none => rw [h_mat] at h_eval; simp at h_eval
+        | some T_mat =>
+            rw [h_mat] at h_eval
+            simp only at h_eval
+            -- Materialize-side invariants for T_mat.
+            have hh_mat : HeapValid T_mat.heap :=
+              materialize_HeapValid_preserves T T_mat (level + 1) h_mat hh
+            have h_levs_mat :
+                ∀ n e, T_mat.envAt? n = some e → EnvValid e T_mat.heap :=
+              materialize_level_envs_valid_preserves T T_mat (level + 1)
+                h_mat hh h_levs
+            have h_resp_all_mat :
+                ∀ n p, T_mat.policyAt? n = some p → PolicyRespectsBisimT p :=
+              materialize_policies_resp_preserves T T_mat (level + 1)
+                PolicyRespectsBisimT h_mat h_resp_all
+                rejectAllPolicy_respects_bisimT
+            have h_bisim_mat :
+                ∀ n e, T_mat.envAt? n = some e → EnvVis e e T_mat.heap T_mat.heap :=
+              fun n e h_env =>
+                EnvVis_self_of_valid e T_mat.heap (h_levs_mat n e h_env) hh_mat
+            have h_pol_resp_at_mat :
+                ∀ p, T_mat.policyAt? level = some p → PolicyRespectsBisimT p :=
+              fun p hp => h_resp_all_mat level p hp
+            obtain ⟨ext, h_heap_eq⟩ :=
+              T.materialize_heap_extends T_mat (level + 1) h_mat
+            have h_heap_mono_T_Tmat : T.heap.length ≤ T_mat.heap.length := by
+              rw [h_heap_eq]; simp [List.length_append]
+            have h_levs_mono_T_Tmat :
+                ∀ n e, T.envAt? n = some e → T_mat.envAt? n = some e :=
+              fun n e h_env =>
+                T.materialize_envAt?_preserves T_mat (level + 1) n e h_mat h_env
+            have h_safe_mat : SafeEvolution ptable T_mat := by
+              refine ⟨?_, h_safe.2⟩
+              apply materialize_policies_resp_preserves T T_mat (level + 1)
+                (fun p => ∀ m, p.UnivSoundAt m) h_mat h_safe.1
+              intro m
+              unfold BlackPolicy.UnivSoundAt
+              exact rejectAllPolicy_soundForCE m
+            have hv_op_mat : ValValid op T_mat.heap :=
+              ValValid.length_mono op hv_op h_heap_mono_T_Tmat
+            have hv_args_mat : ListValValid args T_mat.heap :=
+              ListValValid.length_mono hv_args h_heap_mono_T_Tmat
+            have h_tce_T_Tmat : TowerCE T T_mat :=
+              TowerCE_of_heap_extends T T_mat ⟨ext, h_heap_eq⟩
+                (TowerCE.refl T hh h_levs h_resp_all h_bisim)
+            -- Helper: dispatch to applyDirect at the materialized state.
+            -- Each branch ends here.
+            have run_direct :
+                ∀ (op' : Val) (args' : List Val),
+                  ValValid op' T_mat.heap → ListValValid args' T_mat.heap →
+                  applyDirect k ptable level op' args' T_mat = some (r, T') →
+                  TowerCE T T' ∧ SafeEvolution ptable T' ∧ ValValid r T'.heap := by
+              intro op' args' hv_op' hv_args' h_eval'
+              obtain ⟨h_tce_d, h_safe_T', hv_r⟩ :=
+                ih_applyDirect ptable h_pt level op' args' T_mat hh_mat
+                  hv_op' hv_args' h_levs_mat h_resp_all_mat h_bisim_mat
+                  h_pol_resp_at_mat h_safe_mat r T' h_eval'
+              obtain ⟨hh_T', _, _, _, _, h_heap_mono_Tmat_T'⟩ :=
+                applyDirect_preserves_self_invariants k ptable level op' args'
+                  T_mat r T' hh_mat h_levs_mat h_resp_all_mat h_bisim_mat
+                  h_pt h_pol_resp_at_mat hv_op' hv_args' h_eval'
+              have h_levs_mono_Tmat_T' :
+                  ∀ n e, T_mat.envAt? n = some e → T'.envAt? n = some e := by
+                obtain ⟨_, _, _, ih_applyDirect_envAt⟩ := all_preserves_envAt k
+                exact fun n e h_env =>
+                  ih_applyDirect_envAt ptable level op' args' T_mat r T'
+                    n e h_eval' h_env
+              refine ⟨?_, h_safe_T', hv_r⟩
+              have h_levs_mono_T_T' :
+                  ∀ n e, T.envAt? n = some e → T_mat.envAt? n = some e :=
+                h_levs_mono_T_Tmat
+              exact TowerCE_trans T T_mat T'
+                h_heap_mono_T_Tmat h_heap_mono_Tmat_T' h_levs_mono_T_T'
+                hh_mat hh_T' h_tce_T_Tmat h_tce_d
+            cases h_env_mat : T_mat.envAt? (level + 1) with
+            | none =>
+                rw [h_env_mat] at h_eval; simp only at h_eval
+                exact run_direct op args hv_op_mat hv_args_mat h_eval
+            | some upEnv =>
+                rw [h_env_mat] at h_eval; simp only at h_eval
+                cases h_lookup : upEnv.lookup "base-apply" with
+                | none =>
+                    rw [h_lookup] at h_eval; simp only at h_eval
+                    exact run_direct op args hv_op_mat hv_args_mat h_eval
+                | some idx =>
+                    rw [h_lookup] at h_eval; simp only at h_eval
+                    cases h_cell : T_mat.heap[idx]? with
+                    | none => rw [h_cell] at h_eval; simp at h_eval
+                    | some baseApply =>
+                        rw [h_cell] at h_eval
+                        cases baseApply with
+                        | builtinBaseApply =>
+                            exact run_direct op args hv_op_mat hv_args_mat h_eval
+                        | num _ | bool _ | nilV | sym _ | cons _ _
+                        | closure _ _ _ | prim _ =>
+                            -- Dispatch to applyDirect with new op = baseApply, new args = [op, listToVal args].
+                            -- ValValid baseApply T_mat.heap from hh_mat at idx.
+                            -- ValValid (listToVal args) T_mat.heap from hv_args_mat.
+                            have hv_baseApply : ValValid _ T_mat.heap :=
+                              hh_mat idx _ h_cell
+                            have hv_disp_args :
+                                ListValValid [op, listToVal args] T_mat.heap :=
+                              ⟨hv_op_mat, ValValid_listToVal hv_args_mat, trivial⟩
+                            exact run_direct _ [op, listToVal args]
+                              hv_baseApply hv_disp_args h_eval
+      · -- applyDirect (k+1) clause
+        intro ptable h_pt level op args T hh hv_op hv_args h_levs h_resp_all
+              h_bisim h_pol_resp_at h_safe r T' h_eval
+        -- ValValid r T'.heap comes from frame_tower's applyDirect clause via the helper.
+        obtain ⟨_, _, _, _, hv_r, _⟩ :=
+          applyDirect_preserves_self_invariants (k+1) ptable level op args T r T'
+            hh h_levs h_resp_all h_bisim h_pt h_pol_resp_at hv_op hv_args h_eval
+        suffices h : TowerCE T T' ∧ SafeEvolution ptable T' from ⟨h.1, h.2, hv_r⟩
+        cases op with
+        | num _ | bool _ | nilV | sym _ | cons _ _ => simp [applyDirect] at h_eval
+        | closure ps body cenv =>
+            simp only [applyDirect] at h_eval
+            by_cases hlen : ps.length = args.length
+            · have hne : (ps.length != args.length) = false := by simp [hlen]
+              rw [hne] at h_eval
+              simp only [Bool.false_eq_true, ↓reduceIte] at h_eval
+              -- alloc step.
+              have hev_cenv : EnvValid cenv T.heap := hv_op
+              have h_envvis_cenv : EnvVis cenv cenv T.heap T.heap :=
+                EnvVis_self_of_valid cenv T.heap hev_cenv hh
+              have h_lvv_args : ListValVis args args T.heap T.heap :=
+                ListValVis_self_of_valid args T.heap hh hv_args
+              have h_args_len : args.length = ps.length := hlen.symm
+              obtain ⟨hh_alloc, _, hev_alloc, _, _, ⟨ext, hex⟩, _⟩ :=
+                alloc_chain_bisim args args ps cenv cenv T.heap T.heap
+                  h_args_len h_args_len h_lvv_args hv_args hv_args
+                  hh hh hev_cenv hev_cenv h_envvis_cenv
+              let T_alloc : TowerState :=
+                { T with heap := (args.zip ps |>.foldl allocStep (T.heap, cenv)).1 }
+              have h_T_alloc_envAt : ∀ n, T_alloc.envAt? n = T.envAt? n := fun _ => rfl
+              have h_T_alloc_policyAt : ∀ n, T_alloc.policyAt? n = T.policyAt? n := fun _ => rfl
+              have h_heap_eq : T_alloc.heap = T.heap ++ ext := hex
+              have hh_alloc' : HeapValid T_alloc.heap := hh_alloc
+              have hev_alloc' :
+                  EnvValid (args.zip ps |>.foldl allocStep (T.heap, cenv)).2 T_alloc.heap :=
+                hev_alloc
+              have h_heap_mono_T_Talloc : T.heap.length ≤ T_alloc.heap.length := by
+                rw [h_heap_eq]; simp [List.length_append]
+              have h_levs_alloc :
+                  ∀ n e, T_alloc.envAt? n = some e → EnvValid e T_alloc.heap := by
+                intro n e h_env
+                rw [h_T_alloc_envAt] at h_env
+                exact EnvValid.length_mono (h_levs n e h_env) h_heap_mono_T_Talloc
+              have h_resp_all_alloc :
+                  ∀ n p, T_alloc.policyAt? n = some p → PolicyRespectsBisimT p := by
+                intro n p h_p; rw [h_T_alloc_policyAt] at h_p
+                exact h_resp_all n p h_p
+              have h_pol_resp_at_alloc :
+                  ∀ p, T_alloc.policyAt? level = some p → PolicyRespectsBisimT p :=
+                fun p hp => h_resp_all_alloc level p hp
+              have h_bisim_alloc :
+                  ∀ n e, T_alloc.envAt? n = some e → EnvVis e e T_alloc.heap T_alloc.heap :=
+                fun n e h_env =>
+                  EnvVis_self_of_valid e T_alloc.heap (h_levs_alloc n e h_env) hh_alloc'
+              have h_env_self_alloc :
+                  EnvVis (args.zip ps |>.foldl allocStep (T.heap, cenv)).2
+                    (args.zip ps |>.foldl allocStep (T.heap, cenv)).2
+                    T_alloc.heap T_alloc.heap :=
+                EnvVis_self_of_valid _ T_alloc.heap hev_alloc' hh_alloc'
+              have h_safe_alloc : SafeEvolution ptable T_alloc := by
+                refine ⟨?_, h_safe.2⟩
+                intro n p h_p
+                rw [h_T_alloc_policyAt] at h_p
+                exact h_safe.1 n p h_p
+              obtain ⟨h_tce_body, h_safe_T'⟩ :=
+                ih_eval ptable h_pt level body
+                  (args.zip ps |>.foldl allocStep (T.heap, cenv)).2
+                  T_alloc hh_alloc' hev_alloc' h_levs_alloc h_resp_all_alloc
+                  h_bisim_alloc h_pol_resp_at_alloc h_env_self_alloc h_safe_alloc
+                  r T' h_eval
+              have h_tce_T_alloc : TowerCE T T_alloc :=
+                TowerCE_of_heap_extends T T_alloc ⟨ext, h_heap_eq⟩
+                  (TowerCE.refl T hh h_levs h_resp_all h_bisim)
+              obtain ⟨hh_T', _, _, _, _, _, h_heap_mono_alloc_T'⟩ :=
+                eval_preserves_self_invariants k ptable level body
+                  (args.zip ps |>.foldl allocStep (T.heap, cenv)).2
+                  T_alloc r T' hh_alloc' hev_alloc' h_levs_alloc
+                  h_resp_all_alloc h_pt h_pol_resp_at_alloc h_env_self_alloc h_eval
+              have h_levs_mono_T_Talloc :
+                  ∀ n e, T.envAt? n = some e → T_alloc.envAt? n = some e := by
+                intro n e h_env; rw [h_T_alloc_envAt]; exact h_env
+              refine ⟨?_, h_safe_T'⟩
+              exact TowerCE_trans T T_alloc T'
+                h_heap_mono_T_Talloc h_heap_mono_alloc_T' h_levs_mono_T_Talloc
+                hh_alloc' hh_T' h_tce_T_alloc h_tce_body
+            · have hne : (ps.length != args.length) = true := by simp [hlen]
+              rw [hne] at h_eval
+              simp at h_eval
+        | prim name =>
+            simp only [applyDirect] at h_eval
+            cases hp : applyPrim name args with
+            | none => rw [hp] at h_eval; simp at h_eval
+            | some w =>
+                rw [hp] at h_eval
+                simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                obtain ⟨_, h_T⟩ := h_eval
+                subst h_T
+                exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
+        | builtinBaseApply =>
+            match args, h_eval with
+            | [], h => simp [applyDirect] at h
+            | [_], h => simp [applyDirect] at h
+            | _ :: _ :: _ :: _, h => simp [applyDirect] at h
+            | [actualOp, operandsList], h =>
+                simp only [applyDirect] at h
+                cases hl : valToList operandsList with
+                | none => rw [hl] at h; simp at h
+                | some operands =>
+                    rw [hl] at h
+                    have hv_actualOp : ValValid actualOp T.heap := hv_args.1
+                    have hv_operands : ListValValid operands T.heap :=
+                      ValValid_valToList hv_args.2.1 hl
+                    obtain ⟨h_tce, h_safe_T', _⟩ :=
+                      ih_applyDirect ptable h_pt level actualOp operands T hh
+                        hv_actualOp hv_operands h_levs h_resp_all h_bisim
+                        h_pol_resp_at h_safe r T' h
+                    exact ⟨h_tce, h_safe_T'⟩
+
 /-- **Tower safety**. Under `SafeEvolution`, evaluating any program
     — with `(em ...)`, `(set! base-apply ...)`, `(installPolicy n)`
     at any depth — preserves cross-level conservative extension
@@ -510,11 +1772,7 @@ private theorem eval_preserves_self_invariants
     - lean-green's `multnExact_soundForCE_first_install` (the
       *substance*: real heap, real `set!`, CakeML-style bisim).
 
-    **Body deferred.** Discharging requires the full frame
-    theorem (Frame.lean: 6 sorries) and the single-install
-    soundness theorem (Policies.lean: 1 sorry). Once those are
-    complete, the cross-level induction here is mechanical
-    (mirrors lean-grey's proof structure). -/
+    Wrapper around `all_tower_safe`'s eval clause. -/
 theorem eval_tower_safe
     (ptable : PolicyTable) (fuel : Nat) (level : Nat)
     (exp : Expr) (env : Env) (T : TowerState)
@@ -529,672 +1787,9 @@ theorem eval_tower_safe
     (h_safe : SafeEvolution ptable T)
     (v : Val) (T' : TowerState)
     (h_eval : eval fuel ptable level exp env T = some (v, T')) :
-    TowerCE T T' ∧ SafeEvolution ptable T' := by
-  -- Easy cases: where T' = T, both conjuncts follow trivially.
-  -- Recursive cases (.seq/.ifte/.app/.primApp/.letE/.em): use the IH on
-  -- fuel k via `induction fuel generalizing ...`. Note `level` is also
-  -- generalized because `.em` changes it.
-  -- Hard cases (.set, .em-with-fresh-policies, multi-step composition):
-  -- require cross-level architecture arguments — see DUMP.md.
-  induction fuel generalizing exp env T v T' level with
-  | zero => simp [eval] at h_eval
-  | succ k ih =>
-      cases exp with
-      | num i =>
-          simp [eval] at h_eval
-          obtain ⟨_, h_T⟩ := h_eval
-          subst h_T
-          exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
-      | bool b =>
-          simp [eval] at h_eval
-          obtain ⟨_, h_T⟩ := h_eval
-          subst h_T
-          exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
-      | lam ps body =>
-          simp [eval] at h_eval
-          obtain ⟨_, h_T⟩ := h_eval
-          subst h_T
-          exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
-      | quote w =>
-          simp only [eval] at h_eval
-          split at h_eval
-          · simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
-            obtain ⟨_, h_T⟩ := h_eval
-            subst h_T
-            exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
-          · simp at h_eval
-      | var x =>
-          simp only [eval] at h_eval
-          cases hx : env.lookup x with
-          | none => rw [hx] at h_eval; simp at h_eval
-          | some idx =>
-              rw [hx] at h_eval
-              simp only at h_eval
-              cases hp : T.heap[idx]? with
-              | none => rw [hp] at h_eval; simp at h_eval
-              | some w =>
-                  rw [hp] at h_eval
-                  simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
-                  obtain ⟨_, h_T⟩ := h_eval
-                  subst h_T
-                  exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
-      | installPolicy idx =>
-          -- T' is either T (when ptable[idx]? = none) or
-          -- T.setPolicyAt level newPolicy (heap unchanged).
-          -- TowerCE: heap unchanged ⇒ reduces to self-CE via TowerCE.refl.
-          -- SafeEvolution: the new policy comes from ptable, which by
-          -- h_safe.2 is UnivSoundAt at every level (including `level`).
-          simp only [eval] at h_eval
-          cases h_pt_idx : ptable[idx]? with
-          | none =>
-              rw [h_pt_idx] at h_eval
-              simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
-              obtain ⟨_, h_T⟩ := h_eval
-              subst h_T
-              exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
-          | some newPolicy =>
-              rw [h_pt_idx] at h_eval
-              simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
-              obtain ⟨_, h_T⟩ := h_eval
-              subst h_T
-              have h_heap_eq : (T.setPolicyAt level newPolicy).heap = T.heap :=
-                TowerState.setPolicyAt_heap T level newPolicy
-              refine ⟨?_, ?_, h_safe.2⟩
-              · exact TowerCE_of_heap_eq T (T.setPolicyAt level newPolicy)
-                  h_heap_eq (TowerCE.refl T hh h_levs h_resp_all h_bisim)
-              · -- ∀ n p, (T.setPolicyAt level newPolicy).policyAt? n
-                --       = some p → p.UnivSoundAt n
-                intro n p hp
-                by_cases hnl : level = n
-                · subst hnl
-                  rw [TowerState.setPolicyAt_policyAt?_self] at hp
-                  cases h_orig : T.policyAt? level with
-                  | none => rw [h_orig] at hp; simp at hp
-                  | some p_orig =>
-                      rw [h_orig] at hp
-                      simp only [Option.map_some, Option.some.injEq] at hp
-                      have h_in : newPolicy ∈ ptable :=
-                        List.mem_of_getElem? h_pt_idx
-                      rw [← hp]
-                      -- Strengthened SafeEvolution: universal soundness needed.
-                      intro m
-                      exact h_safe.2 newPolicy h_in m
-                · rw [TowerState.setPolicyAt_policyAt?_other T level n newPolicy hnl]
-                    at hp
-                  exact h_safe.1 n p hp
-      | app exps =>
-          -- Empty `.app` returns `none` (contradiction); non-empty
-          -- requires multi-step CE composition (architectural — DUMP).
-          cases exps with
-          | nil => simp [eval] at h_eval
-          | cons _ _ =>
-              -- Composition case — sorry.
-              sorry
-      | seq exps =>
-          -- Three sub-cases: empty seq (T' = T trivially), singleton
-          -- seq (delegates to inner eval — pure IH application), and
-          -- multi-element seq (compositional — requires CE-chaining).
-          cases exps with
-          | nil =>
-              simp [eval] at h_eval
-              obtain ⟨_, h_T⟩ := h_eval
-              subst h_T
-              exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
-          | cons e rest =>
-              cases rest with
-              | nil =>
-                  -- exps = [e] — eval at fuel k delegates to inner.
-                  simp only [eval] at h_eval
-                  -- h_eval : eval k ptable level e env T = some (v, T')
-                  apply ih <;> assumption
-              | cons e' rest' =>
-                  -- exps = e :: e' :: rest'.
-                  -- Sub-case: e is atomic ⇒ eval e doesn't mutate (T_mid = T),
-                  -- so we can apply IH to (.seq (e' :: rest')) at T directly.
-                  -- For non-atomic e, composition required (deferred).
-                  cases e with
-                  | num _ | bool _ | lam _ _ | var _ | quote _ =>
-                      simp only [eval] at h_eval
-                      -- h_eval has structure: match (eval k ... e env T) with ...
-                      cases h_e : eval k ptable level _ env T with
-                      | none => rw [h_e] at h_eval; simp at h_eval
-                      | some pr =>
-                          rw [h_e] at h_eval
-                          cases pr with
-                          | mk _ T_mid =>
-                              simp only at h_eval
-                              have h_T_eq : T_mid = T :=
-                                eval_atomic_T_unchanged k ptable level _ env T _
-                                  T_mid (by simp [Expr.IsAtomic]) h_e
-                              subst h_T_eq
-                              apply ih <;> assumption
-                  | _ =>
-                      -- Non-atomic e: use TowerCE_trans to compose.
-                      simp only [eval] at h_eval
-                      cases h_e : eval k ptable level _ env T with
-                      | none => rw [h_e] at h_eval; simp at h_eval
-                      | some pr =>
-                          rw [h_e] at h_eval
-                          cases pr with
-                          | mk cv T_mid =>
-                              simp only at h_eval
-                              -- IH on first sub-eval e at T → (cv, T_mid).
-                              -- Note: h_pt is captured from outer context (not generalized),
-                              -- so it's not in IH's parameter list.
-                              obtain ⟨h_tce_e, h_safe_mid⟩ :=
-                                ih level _ env T hh hev h_levs h_resp_all
-                                  h_bisim h_pol_resp_at h_env_self h_safe
-                                  cv T_mid h_e
-                              -- Get T_mid invariants (heap mono, etc.).
-                              obtain ⟨hh_mid, h_levs_mid, h_resp_all_mid,
-                                      h_bisim_mid, hev_mid, _, h_heap_mono_12⟩ :=
-                                eval_preserves_self_invariants k ptable level _
-                                  env T cv T_mid hh hev h_levs h_resp_all h_pt
-                                  h_pol_resp_at h_env_self h_e
-                              have h_pol_resp_at_mid :
-                                  ∀ p, T_mid.policyAt? level = some p →
-                                       PolicyRespectsBisimT p :=
-                                fun p hp => h_resp_all_mid level p hp
-                              have h_env_self_mid :
-                                  EnvVis env env T_mid.heap T_mid.heap :=
-                                EnvVis_self_of_valid env T_mid.heap hev_mid hh_mid
-                              -- IH on .seq rest at T_mid → (v, T').
-                              obtain ⟨h_tce_rest, h_safe_T'⟩ :=
-                                ih level (.seq (e' :: rest')) env T_mid
-                                  hh_mid hev_mid h_levs_mid h_resp_all_mid
-                                  h_bisim_mid h_pol_resp_at_mid
-                                  h_env_self_mid h_safe_mid v T' h_eval
-                              -- Heap mono and HeapValid for second eval.
-                              obtain ⟨hh_T', _, _, _, _, _, h_heap_mono_23⟩ :=
-                                eval_preserves_self_invariants k ptable level
-                                  (.seq (e' :: rest')) env T_mid v T'
-                                  hh_mid hev_mid h_levs_mid h_resp_all_mid h_pt
-                                  h_pol_resp_at_mid h_env_self_mid h_eval
-                              -- levels_mono via eval_preserves_envAt.
-                              have h_levs_mono_12 :
-                                  ∀ n env_n, T.envAt? n = some env_n →
-                                             T_mid.envAt? n = some env_n :=
-                                fun n env_n h_env =>
-                                  eval_preserves_envAt k ptable level _ env T cv
-                                    T_mid n env_n h_e h_env
-                              -- Compose via TowerCE_trans.
-                              refine ⟨?_, h_safe_T'⟩
-                              exact TowerCE_trans T T_mid T' h_heap_mono_12
-                                h_heap_mono_23 h_levs_mono_12 hh_mid hh_T'
-                                h_tce_e h_tce_rest
-      | ifte c t e =>
-          -- Use TowerCE_trans uniformly. The structure:
-          -- eval c → (cv, T_mid). IH gives TowerCE T T_mid + SafeEvolution T_mid.
-          -- Cases on cv to dispatch to t or e branch. IH on branch.
-          -- Compose via TowerCE_trans.
-          cases k with
-          | zero => simp [eval] at h_eval
-          | succ j =>
-              simp only [eval] at h_eval
-              cases h_c : eval (j+1) ptable level c env T with
-              | none => rw [h_c] at h_eval; simp at h_eval
-              | some pr =>
-                  rw [h_c] at h_eval
-                  cases pr with
-                  | mk cv T_mid =>
-                      obtain ⟨h_tce_c, h_safe_mid⟩ :=
-                        ih level c env T hh hev h_levs h_resp_all h_bisim
-                          h_pol_resp_at h_env_self h_safe cv T_mid h_c
-                      obtain ⟨hh_mid, h_levs_mid, h_resp_all_mid,
-                              h_bisim_mid, hev_mid, _, h_heap_mono_12⟩ :=
-                        eval_preserves_self_invariants (j+1) ptable level c
-                          env T cv T_mid hh hev h_levs h_resp_all h_pt
-                          h_pol_resp_at h_env_self h_c
-                      have h_pol_resp_at_mid :
-                          ∀ p, T_mid.policyAt? level = some p →
-                               PolicyRespectsBisimT p :=
-                        fun p hp => h_resp_all_mid level p hp
-                      have h_env_self_mid :
-                          EnvVis env env T_mid.heap T_mid.heap :=
-                        EnvVis_self_of_valid env T_mid.heap hev_mid hh_mid
-                      have h_levs_mono_12 :
-                          ∀ n env_n, T.envAt? n = some env_n →
-                                     T_mid.envAt? n = some env_n :=
-                        fun n env_n h_env =>
-                          eval_preserves_envAt (j+1) ptable level c env T cv
-                            T_mid n env_n h_c h_env
-                      have run_branch :
-                          ∀ (branch_exp : Expr),
-                            eval (j+1) ptable level branch_exp env T_mid
-                                = some (v, T') →
-                            TowerCE T T' ∧ SafeEvolution ptable T' := by
-                        intro branch_exp h_eval_branch
-                        obtain ⟨h_tce_branch, h_safe_T'⟩ :=
-                          ih level branch_exp env T_mid hh_mid hev_mid
-                            h_levs_mid h_resp_all_mid h_bisim_mid
-                            h_pol_resp_at_mid h_env_self_mid h_safe_mid
-                            v T' h_eval_branch
-                        obtain ⟨hh_T', _, _, _, _, _, h_heap_mono_23⟩ :=
-                          eval_preserves_self_invariants (j+1) ptable level
-                            branch_exp env T_mid v T' hh_mid hev_mid
-                            h_levs_mid h_resp_all_mid h_pt
-                            h_pol_resp_at_mid h_env_self_mid h_eval_branch
-                        refine ⟨?_, h_safe_T'⟩
-                        exact TowerCE_trans T T_mid T' h_heap_mono_12
-                          h_heap_mono_23 h_levs_mono_12 hh_mid hh_T'
-                          h_tce_c h_tce_branch
-                      cases cv with
-                      | bool b =>
-                          cases b with
-                          | true => exact run_branch t h_eval
-                          | false => exact run_branch e h_eval
-                      | num _ | nilV | sym _ | cons _ _ | closure _ _ _
-                      | prim _ | builtinBaseApply =>
-                          exact run_branch t h_eval
-      | letE x e body =>
-          -- Compose: T → T_e (eval e) → T_alloc (alloc v_e) → T' (eval body).
-          -- Apply IH on e, derive T_alloc invariants, IH on body, compose.
-          cases k with
-          | zero => simp [eval] at h_eval
-          | succ j =>
-              simp only [eval] at h_eval
-              cases h_e : eval (j+1) ptable level e env T with
-              | none => rw [h_e] at h_eval; simp at h_eval
-              | some pr =>
-                  rw [h_e] at h_eval
-                  cases pr with
-                  | mk v_e T_e =>
-                      obtain ⟨h_tce_e, h_safe_e⟩ :=
-                        ih level e env T hh hev h_levs h_resp_all h_bisim
-                          h_pol_resp_at h_env_self h_safe v_e T_e h_e
-                      obtain ⟨hh_e, h_levs_e, h_resp_all_e, h_bisim_e,
-                              hev_e, hv_v_e, h_heap_mono_T_Te⟩ :=
-                        eval_preserves_self_invariants (j+1) ptable level e
-                          env T v_e T_e hh hev h_levs h_resp_all h_pt
-                          h_pol_resp_at h_env_self h_e
-                      have h_alloc_heap :
-                          (T_e.alloc v_e).1.heap = T_e.heap ++ [v_e] := rfl
-                      have h_alloc_idx :
-                          (T_e.alloc v_e).2 = T_e.heap.length := rfl
-                      have h_alloc_levels :
-                          (T_e.alloc v_e).1.levels = T_e.levels := rfl
-                      have h_alloc_envAt :
-                          ∀ n, (T_e.alloc v_e).1.envAt? n = T_e.envAt? n :=
-                        fun _ => rfl
-                      have h_alloc_policyAt :
-                          ∀ n, (T_e.alloc v_e).1.policyAt? n = T_e.policyAt? n :=
-                        fun _ => rfl
-                      have hh_alloc : HeapValid (T_e.alloc v_e).1.heap := by
-                        rw [h_alloc_heap]
-                        exact HeapValid_alloc_one T_e.heap v_e hh_e hv_v_e
-                      have hev_alloc :
-                          EnvValid (.cons x (T_e.alloc v_e).2 env)
-                            (T_e.alloc v_e).1.heap := by
-                        rw [h_alloc_heap, h_alloc_idx]
-                        exact EnvValid_cons_alloc x v_e hev_e
-                      have h_levs_alloc :
-                          ∀ n env_n, (T_e.alloc v_e).1.envAt? n = some env_n →
-                                     EnvValid env_n (T_e.alloc v_e).1.heap := by
-                        intro n env_n h_env
-                        rw [h_alloc_envAt] at h_env
-                        rw [h_alloc_heap]
-                        exact EnvValid.length_mono (h_levs_e n env_n h_env)
-                          (by simp [List.length_append])
-                      have h_resp_all_alloc :
-                          ∀ n p, (T_e.alloc v_e).1.policyAt? n = some p →
-                                 PolicyRespectsBisimT p :=
-                        fun n p h_p => h_resp_all_e n p (h_alloc_policyAt n ▸ h_p)
-                      have h_pol_resp_at_alloc :
-                          ∀ p, (T_e.alloc v_e).1.policyAt? level = some p →
-                               PolicyRespectsBisimT p :=
-                        fun p hp => h_resp_all_alloc level p hp
-                      have h_bisim_alloc :
-                          ∀ n env_n, (T_e.alloc v_e).1.envAt? n = some env_n →
-                                     EnvVis env_n env_n (T_e.alloc v_e).1.heap
-                                       (T_e.alloc v_e).1.heap :=
-                        fun n env_n h_env =>
-                          EnvVis_self_of_valid env_n (T_e.alloc v_e).1.heap
-                            (h_levs_alloc n env_n h_env) hh_alloc
-                      have h_env_self_alloc :
-                          EnvVis (.cons x (T_e.alloc v_e).2 env)
-                            (.cons x (T_e.alloc v_e).2 env)
-                            (T_e.alloc v_e).1.heap (T_e.alloc v_e).1.heap :=
-                        EnvVis_self_of_valid _ _ hev_alloc hh_alloc
-                      have h_safe_alloc :
-                          SafeEvolution ptable (T_e.alloc v_e).1 := by
-                        refine ⟨?_, h_safe_e.2⟩
-                        intro n p h_p
-                        rw [h_alloc_policyAt] at h_p
-                        exact h_safe_e.1 n p h_p
-                      obtain ⟨h_tce_body, h_safe_T'⟩ :=
-                        ih level body (.cons x (T_e.alloc v_e).2 env)
-                          (T_e.alloc v_e).1 hh_alloc hev_alloc h_levs_alloc
-                          h_resp_all_alloc h_bisim_alloc h_pol_resp_at_alloc
-                          h_env_self_alloc h_safe_alloc v T' h_eval
-                      obtain ⟨hh_T', _, _, _, _, _, h_heap_mono_alloc_T'⟩ :=
-                        eval_preserves_self_invariants (j+1) ptable level body
-                          (.cons x (T_e.alloc v_e).2 env) (T_e.alloc v_e).1 v T'
-                          hh_alloc hev_alloc h_levs_alloc h_resp_all_alloc h_pt
-                          h_pol_resp_at_alloc h_env_self_alloc h_eval
-                      -- Heap mono chain.
-                      have h_heap_mono_Te_alloc :
-                          T_e.heap.length ≤ (T_e.alloc v_e).1.heap.length := by
-                        rw [h_alloc_heap]; simp [List.length_append]
-                      have h_heap_mono_T_alloc :
-                          T.heap.length ≤ (T_e.alloc v_e).1.heap.length :=
-                        Nat.le_trans h_heap_mono_T_Te h_heap_mono_Te_alloc
-                      -- levels_mono chain.
-                      have h_levs_mono_T_Te :
-                          ∀ n env_n, T.envAt? n = some env_n →
-                                     T_e.envAt? n = some env_n :=
-                        fun n env_n h_env =>
-                          eval_preserves_envAt (j+1) ptable level e env T v_e
-                            T_e n env_n h_e h_env
-                      have h_levs_mono_T_alloc :
-                          ∀ n env_n, T.envAt? n = some env_n →
-                                     (T_e.alloc v_e).1.envAt? n = some env_n :=
-                        fun n env_n h_env =>
-                          (h_alloc_envAt n).symm ▸
-                            h_levs_mono_T_Te n env_n h_env
-                      -- TowerCE T_e (T_e.alloc v_e).1 (heap-prefix extension).
-                      have h_tce_e_alloc : TowerCE T_e (T_e.alloc v_e).1 :=
-                        TowerCE_of_heap_extends T_e (T_e.alloc v_e).1
-                          ⟨[v_e], h_alloc_heap⟩
-                          (TowerCE.refl T_e hh_e h_levs_e h_resp_all_e h_bisim_e)
-                      -- Compose T → T_e → T_alloc.
-                      have h_tce_T_alloc : TowerCE T (T_e.alloc v_e).1 :=
-                        TowerCE_trans T T_e (T_e.alloc v_e).1
-                          h_heap_mono_T_Te h_heap_mono_Te_alloc h_levs_mono_T_Te
-                          hh_e hh_alloc h_tce_e h_tce_e_alloc
-                      -- Compose T → T_alloc → T'.
-                      refine ⟨?_, h_safe_T'⟩
-                      exact TowerCE_trans T (T_e.alloc v_e).1 T'
-                        h_heap_mono_T_alloc h_heap_mono_alloc_T'
-                        h_levs_mono_T_alloc hh_alloc hh_T'
-                        h_tce_T_alloc h_tce_body
-      | primApp f args =>
-          -- Multi-step: eval f, evalList args, applyDirect. Needs
-          -- evalList/applyDirect preservation theorems (extension to
-          -- 4-way mutual induction). See DUMP0 Session C.
-          sorry
-      | em body =>
-          -- After `materializeStep`'s default was changed to
-          -- `rejectAllPolicy` (UnivSoundAt by vacuity),
-          -- SafeEvolution.1 is preserved across `.em`. The proof:
-          -- (1) materialize gives heap-prefix-extension, so TowerCE T T_mat
-          --     reduces to TowerCE T T (via `TowerCE_of_heap_extends`);
-          -- (2) IH on body at level+1 in T_mat → TowerCE T_mat T' and
-          --     SafeEvolution ptable T';
-          -- (3) compose via `TowerCE_trans`.
-          cases k with
-          | zero =>
-              simp only [eval] at h_eval
-              cases h_mat : T.materialize (level + 1) with
-              | none => rw [h_mat] at h_eval; simp at h_eval
-              | some T_mat =>
-                  rw [h_mat] at h_eval
-                  simp only at h_eval
-                  cases h_env_mat : T_mat.envAt? (level + 1) with
-                  | none => rw [h_env_mat] at h_eval; simp at h_eval
-                  | some upEnv =>
-                      rw [h_env_mat] at h_eval
-                      simp [eval] at h_eval
-          | succ j =>
-              simp only [eval] at h_eval
-              cases h_mat : T.materialize (level + 1) with
-              | none => rw [h_mat] at h_eval; simp at h_eval
-              | some T_mat =>
-                  rw [h_mat] at h_eval
-                  simp only at h_eval
-                  cases h_env_mat : T_mat.envAt? (level + 1) with
-                  | none => rw [h_env_mat] at h_eval; simp at h_eval
-                  | some upEnv =>
-                      rw [h_env_mat] at h_eval
-                      simp only at h_eval
-                      -- Single-side preservation facts.
-                      have hh_mat : HeapValid T_mat.heap :=
-                        materialize_HeapValid_preserves T T_mat (level + 1) h_mat hh
-                      have h_levs_mat :
-                          ∀ m env_m, T_mat.envAt? m = some env_m →
-                                     EnvValid env_m T_mat.heap :=
-                        materialize_level_envs_valid_preserves T T_mat (level + 1)
-                          h_mat hh h_levs
-                      have h_resp_all_mat :
-                          ∀ m p, T_mat.policyAt? m = some p →
-                                 PolicyRespectsBisimT p :=
-                        materialize_policies_resp_preserves T T_mat (level + 1)
-                          PolicyRespectsBisimT h_mat h_resp_all
-                          rejectAllPolicy_respects_bisimT
-                      have h_bisim_mat :
-                          ∀ m env_m, T_mat.envAt? m = some env_m →
-                                     EnvVis env_m env_m T_mat.heap T_mat.heap :=
-                        fun m env_m hen =>
-                          EnvVis_self_of_valid env_m T_mat.heap
-                            (h_levs_mat m env_m hen) hh_mat
-                      have h_pol_resp_at_mat :
-                          ∀ p, T_mat.policyAt? (level + 1) = some p →
-                               PolicyRespectsBisimT p :=
-                        fun p h => h_resp_all_mat (level + 1) p h
-                      have hev_upEnv : EnvValid upEnv T_mat.heap :=
-                        h_levs_mat (level + 1) upEnv h_env_mat
-                      have h_env_self_mat : EnvVis upEnv upEnv T_mat.heap T_mat.heap :=
-                        h_bisim_mat (level + 1) upEnv h_env_mat
-                      -- SafeEvolution preservation: pre-existing levels carry
-                      -- over via h_safe.1; new levels get rejectAllPolicy which
-                      -- is UnivSoundAt by vacuity (admits nothing).
-                      have h_safe_mat : SafeEvolution ptable T_mat := by
-                        refine ⟨?_, h_safe.2⟩
-                        apply materialize_policies_resp_preserves T T_mat (level + 1)
-                          (fun p => ∀ m, p.UnivSoundAt m) h_mat h_safe.1
-                        intro m
-                        unfold BlackPolicy.UnivSoundAt
-                        exact rejectAllPolicy_soundForCE m
-                      -- IH on body at level+1.
-                      obtain ⟨h_tce_body, h_safe_T'⟩ :=
-                        ih (level + 1) body upEnv T_mat hh_mat hev_upEnv
-                          h_levs_mat h_resp_all_mat h_bisim_mat
-                          h_pol_resp_at_mat h_env_self_mat h_safe_mat v T' h_eval
-                      -- T_mat.heap = T.heap ++ extras (heap-prefix-extension).
-                      obtain ⟨extras, h_heap_eq⟩ :=
-                        T.materialize_heap_extends T_mat (level + 1) h_mat
-                      -- TowerCE T T_mat via TowerCE_of_heap_extends.
-                      have h_tce_T_mat : TowerCE T T_mat :=
-                        TowerCE_of_heap_extends T T_mat ⟨extras, h_heap_eq⟩
-                          (TowerCE.refl T hh h_levs h_resp_all h_bisim)
-                      -- Heap mono.
-                      have h_heap_mono_T_Tmat :
-                          T.heap.length ≤ T_mat.heap.length := by
-                        rw [h_heap_eq]; simp [List.length_append]
-                      -- T_mat preserves T's envs at pre-existing levels.
-                      have h_levs_mono_T_Tmat :
-                          ∀ n env_n, T.envAt? n = some env_n →
-                                     T_mat.envAt? n = some env_n :=
-                        fun n env_n h_env =>
-                          T.materialize_envAt?_preserves T_mat (level + 1) n env_n
-                            h_mat h_env
-                      -- HeapValid + heap_mono for T'.
-                      obtain ⟨hh_T', _, _, _, _, _, h_heap_mono_Tmat_T'⟩ :=
-                        eval_preserves_self_invariants (j+1) ptable (level + 1) body
-                          upEnv T_mat v T' hh_mat hev_upEnv h_levs_mat
-                          h_resp_all_mat h_pt h_pol_resp_at_mat h_env_self_mat
-                          h_eval
-                      -- Compose T → T_mat → T'.
-                      refine ⟨?_, h_safe_T'⟩
-                      exact TowerCE_trans T T_mat T' h_heap_mono_T_Tmat
-                        h_heap_mono_Tmat_T' h_levs_mono_T_Tmat hh_mat hh_T'
-                        h_tce_T_mat h_tce_body
-      | set x e =>
-          -- Gated mutation. Strengthened `SafeEvolution.1` (universal
-          -- soundness) makes the meta-mutation case tractable: the
-          -- gate at level L admits a base-apply-cell mutation, and
-          -- by `SoundForCE n` (any n) we get the per-level CE chain.
-          -- Non-meta mutation requires a "no env-aliasing-with-base-
-          -- apply" runtime invariant — left as inline sorry.
-          cases k with
-          | zero => simp [eval] at h_eval
-          | succ j =>
-              simp only [eval] at h_eval
-              cases h_e : eval (j+1) ptable level e env T with
-              | none => rw [h_e] at h_eval; simp at h_eval
-              | some pr =>
-                  rw [h_e] at h_eval
-                  cases pr with
-                  | mk v_e T_mid =>
-                      simp only at h_eval
-                      obtain ⟨h_tce_e, h_safe_mid⟩ :=
-                        ih level e env T hh hev h_levs h_resp_all h_bisim
-                          h_pol_resp_at h_env_self h_safe v_e T_mid h_e
-                      obtain ⟨hh_mid, h_levs_mid, h_resp_all_mid,
-                              h_bisim_mid, hev_mid, hv_v_e, h_heap_mono_12⟩ :=
-                        eval_preserves_self_invariants (j+1) ptable level e
-                          env T v_e T_mid hh hev h_levs h_resp_all h_pt
-                          h_pol_resp_at h_env_self h_e
-                      have h_levs_mono_12 :
-                          ∀ n env_n, T.envAt? n = some env_n →
-                                     T_mid.envAt? n = some env_n :=
-                        fun n env_n h_env =>
-                          eval_preserves_envAt (j+1) ptable level e env T v_e
-                            T_mid n env_n h_e h_env
-                      cases h_lk : env.lookup x with
-                      | none => rw [h_lk] at h_eval; simp at h_eval
-                      | some idx =>
-                          rw [h_lk] at h_eval
-                          simp only at h_eval
-                          by_cases h_meta : isMetaMutation x env T_mid level = true
-                          · simp only [h_meta, if_true] at h_eval
-                            cases h_old : T_mid.heap[idx]? with
-                            | none => rw [h_old] at h_eval; simp at h_eval
-                            | some oldVal =>
-                                rw [h_old] at h_eval
-                                cases h_gate? : T.policyAt? level with
-                                | none => rw [h_gate?] at h_eval; simp at h_eval
-                                | some gate =>
-                                    rw [h_gate?] at h_eval
-                                    simp only at h_eval
-                                    by_cases h_gate :
-                                        gate
-                                          { target := x, heap := T_mid.heap, env := env,
-                                            metaEnv := (T_mid.envAt? level).getD .nil,
-                                            index := idx, level := level }
-                                          oldVal v_e = true
-                                    · -- Sub-case 4: gate accepts.
-                                      rw [h_gate] at h_eval
-                                      simp only [↓reduceIte, Option.some.injEq,
-                                                  Prod.mk.injEq] at h_eval
-                                      obtain ⟨_, h_T_eq⟩ := h_eval
-                                      subst h_T_eq
-                                      have h_gate_univ : ∀ m, gate.UnivSoundAt m :=
-                                        h_safe.1 level gate h_gate?
-                                      have h_ce_oldVal_v :
-                                          ∀ n, CE n T_mid.heap oldVal v_e := fun n =>
-                                        h_gate_univ n
-                                          { target := x, heap := T_mid.heap, env := env,
-                                            metaEnv := (T_mid.envAt? level).getD .nil,
-                                            index := idx, level := level }
-                                          oldVal v_e h_gate
-                                      have h_idx_lt :
-                                          idx < T_mid.heap.length :=
-                                        (List.getElem?_eq_some_iff.mp h_old).1
-                                      have h_update_len :
-                                          (T_mid.updateHeap idx v_e).heap.length =
-                                            T_mid.heap.length :=
-                                        Heap.update_length T_mid.heap idx v_e
-                                      have h_len_le :
-                                          T_mid.heap.length
-                                            ≤ (T_mid.updateHeap idx v_e).heap.length :=
-                                        Nat.le_of_eq h_update_len.symm
-                                      have hh_upd :
-                                          HeapValid (T_mid.updateHeap idx v_e).heap := by
-                                        intro i v_i hp
-                                        by_cases h_ie : i = idx
-                                        · rw [h_ie] at hp
-                                          have h_at : (T_mid.updateHeap idx v_e).heap[idx]?
-                                              = some v_e :=
-                                            Heap.update_get_eq T_mid.heap idx v_e h_idx_lt
-                                          rw [h_at] at hp
-                                          have h_v_eq : v_e = v_i :=
-                                            Option.some.inj hp
-                                          rw [← h_v_eq]
-                                          exact ValValid.length_mono v_e hv_v_e h_len_le
-                                        · have h_get :=
-                                            Heap.update_get_neq T_mid.heap idx v_e i h_ie
-                                          rw [show (T_mid.updateHeap idx v_e).heap[i]?
-                                              = T_mid.heap[i]? from h_get] at hp
-                                          exact ValValid.length_mono v_i
-                                            (hh_mid i v_i hp) h_len_le
-                                      have h_tce_mid_upd :
-                                          TowerCE T_mid (T_mid.updateHeap idx v_e) := by
-                                        intro n idx_ba oldApply newApply
-                                          h_lookup h_old_T_mid h_new_T_upd
-                                        by_cases h_eq_idx : idx_ba = idx
-                                        · subst h_eq_idx
-                                          have h_old_eq : oldApply = oldVal := by
-                                            rw [h_old] at h_old_T_mid
-                                            exact (Option.some.inj h_old_T_mid).symm
-                                          have h_new_eq : newApply = v_e := by
-                                            have h_get :=
-                                              Heap.update_get_eq T_mid.heap idx_ba v_e h_idx_lt
-                                            rw [show
-                                              (T_mid.updateHeap idx_ba v_e).heap[idx_ba]?
-                                                = some v_e from h_get] at h_new_T_upd
-                                            exact (Option.some.inj h_new_T_upd).symm
-                                          subst h_old_eq; subst h_new_eq
-                                          apply CE_weaken_h_ref n T_mid.heap _
-                                            (Nat.le_of_eq h_update_len.symm)
-                                          exact h_ce_oldVal_v n
-                                        · have h_unchanged :
-                                              (T_mid.updateHeap idx v_e).heap[idx_ba]?
-                                                = T_mid.heap[idx_ba]? :=
-                                            Heap.update_get_neq T_mid.heap idx v_e idx_ba
-                                              h_eq_idx
-                                          rw [h_unchanged] at h_new_T_upd
-                                          rw [h_old_T_mid] at h_new_T_upd
-                                          have h_eq_app : oldApply = newApply :=
-                                            Option.some.inj h_new_T_upd
-                                          subst h_eq_app
-                                          have h_self :=
-                                            TowerCE.refl T_mid hh_mid h_levs_mid
-                                              h_resp_all_mid h_bisim_mid
-                                          apply CE_weaken_h_ref n T_mid.heap _
-                                            (Nat.le_of_eq h_update_len.symm)
-                                          exact h_self n idx_ba oldApply oldApply
-                                            h_lookup h_old_T_mid h_old_T_mid
-                                      have h_tce_T_upd :
-                                          TowerCE T (T_mid.updateHeap idx v_e) := by
-                                        apply TowerCE_trans T T_mid
-                                          (T_mid.updateHeap idx v_e)
-                                          h_heap_mono_12
-                                          (Nat.le_of_eq h_update_len.symm)
-                                          h_levs_mono_12 hh_mid hh_upd
-                                          h_tce_e h_tce_mid_upd
-                                      have h_safe_upd :
-                                          SafeEvolution ptable
-                                            (T_mid.updateHeap idx v_e) := by
-                                        refine ⟨?_, h_safe_mid.2⟩
-                                        intro n p hp
-                                        rw [TowerState.updateHeap_policyAt?] at hp
-                                        exact h_safe_mid.1 n p hp
-                                      exact ⟨h_tce_T_upd, h_safe_upd⟩
-                                    · -- Sub-case 5: gate rejects.
-                                      have h_gate_false :
-                                          (gate
-                                              { target := x, heap := T_mid.heap, env := env,
-                                                metaEnv := (T_mid.envAt? level).getD .nil,
-                                                index := idx, level := level }
-                                              oldVal v_e) = false := by
-                                        cases h : gate _ oldVal v_e with
-                                        | true => exact absurd h h_gate
-                                        | false => rfl
-                                      rw [h_gate_false] at h_eval
-                                      simp only [Bool.false_eq_true, ↓reduceIte,
-                                                  Option.some.injEq,
-                                                  Prod.mk.injEq] at h_eval
-                                      obtain ⟨_, h_T_eq⟩ := h_eval
-                                      subst h_T_eq
-                                      exact ⟨h_tce_e, h_safe_mid⟩
-                          · -- Non-meta `.set` is now rejected by eval
-                            -- (returns `none`), so this branch is vacuous.
-                            have h_meta_false : isMetaMutation x env T_mid level = false := by
-                              cases h : isMetaMutation x env T_mid level with
-                              | true => exact absurd h h_meta
-                              | false => rfl
-                            rw [h_meta_false] at h_eval
-                            simp at h_eval
+    TowerCE T T' ∧ SafeEvolution ptable T' :=
+  (all_tower_safe fuel).1 ptable h_pt level exp env T hh hev h_levs h_resp_all
+    h_bisim h_pol_resp_at h_env_self h_safe v T' h_eval
 
 /-! ## Necessity
 
