@@ -196,6 +196,43 @@ def SafeEvolution (ptable : PolicyTable) (T : TowerState) : Prop :=
 
 /-! ## The headline theorem (statement; body deferred) -/
 
+/-- `eval` preserves the self-WFCtxT invariants (HeapValid, level-envs-valid,
+    policies-resp-all, EnvVis self-self at all materialized levels), plus
+    EnvValid of the active env and ValValid of the result. Derived from
+    `frame_tower`'s eval clause with self-pair (T_a = T_b = T). -/
+private theorem eval_preserves_self_invariants
+    (fuel : Nat) (ptable : PolicyTable) (level : Nat) (exp : Expr)
+    (env : Env) (T : TowerState) (v : Val) (T' : TowerState)
+    (hh : HeapValid T.heap)
+    (hev : EnvValid env T.heap)
+    (h_levs : ∀ n e, T.envAt? n = some e → EnvValid e T.heap)
+    (h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+    (h_pt : PolicyTableRespectsBisimT ptable)
+    (h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
+    (h_env_self : EnvVis env env T.heap T.heap)
+    (h_eval : eval fuel ptable level exp env T = some (v, T')) :
+    HeapValid T'.heap ∧
+    (∀ n e, T'.envAt? n = some e → EnvValid e T'.heap) ∧
+    (∀ n p, T'.policyAt? n = some p → PolicyRespectsBisimT p) ∧
+    (∀ n e, T'.envAt? n = some e → EnvVis e e T'.heap T'.heap) ∧
+    EnvValid env T'.heap ∧
+    ValValid v T'.heap := by
+  obtain ⟨ih_eval, _, _, _⟩ := frame_tower fuel
+  have h_ctx : WFCtxT env env T T level :=
+    WFCtxT.refl env T level hh hev h_pol_resp_at h_levs h_resp_all
+  obtain ⟨v_b, T_b', h_eval_b, _, h_ctx_out, _, _, hv_va, _⟩ :=
+    ih_eval ptable level exp env env T T v T'
+      h_pt h_ctx h_env_self h_eval
+  -- eval is deterministic: v_b = v, T_b' = T'.
+  have h_eq : (v, T') = (v_b, T_b') := by
+    have : some (v, T') = some (v_b, T_b') := h_eval.symm.trans h_eval_b
+    exact Option.some.inj this
+  obtain ⟨h_v_eq, h_T_eq⟩ : v = v_b ∧ T' = T_b' := Prod.mk.inj h_eq
+  subst h_v_eq; subst h_T_eq
+  exact ⟨h_ctx_out.hv_a, h_ctx_out.level_envs_valid_a,
+         h_ctx_out.policies_resp_all, h_ctx_out.heap_content_bisim_at_levels,
+         h_ctx_out.ev_a, hv_va⟩
+
 /-- **Tower safety**. Under `SafeEvolution`, evaluating any program
     — with `(em ...)`, `(set! base-apply ...)`, `(installPolicy n)`
     at any depth — preserves cross-level conservative extension
@@ -217,31 +254,71 @@ theorem eval_tower_safe
     (ptable : PolicyTable) (fuel : Nat) (level : Nat)
     (exp : Expr) (env : Env) (T : TowerState)
     (hh : HeapValid T.heap)
+    (hev : EnvValid env T.heap)
     (h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
     (h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
     (h_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap)
+    (h_pt : PolicyTableRespectsBisimT ptable)
+    (h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
+    (h_env_self : EnvVis env env T.heap T.heap)
     (h_safe : SafeEvolution ptable T)
     (v : Val) (T' : TowerState)
     (h_eval : eval fuel ptable level exp env T = some (v, T')) :
     TowerCE T T' ∧ SafeEvolution ptable T' := by
-  -- The full proof requires a cross-level induction over eval, tracking
-  -- which heap cells get mutated by `.set` and showing the per-level
-  -- policy gates preserve CE (via SoundForCE).
-  -- Key components needed:
-  --   (a) An "eval preserves the WFCtxT-self invariants" lemma — derivable
-  --       from frame_tower with self-pair.
-  --   (b) A `.set`-specific argument: when `set!` mutates a base-apply
-  --       cell, the gate's SoundForCE judgment converts admission
-  --       (`policy ctx old new = true`) to CE (`CE level old new`).
-  --   (c) An induction over fuel + case-split on `exp`. Most cases (.num,
-  --       .bool, .var, .lam, etc.) preserve T' = T trivially (TowerCE.refl);
-  --       .ifte/.app/.seq/.primApp/.letE dispatch to sub-evals via IH;
-  --       .em adds new levels with default acceptAllPolicy (not SoundForCE
-  --       — which is the architectural hole that `.set` at higher levels
-  --       must address); .installPolicy installs a ptable policy
-  --       (UnivSoundAt by SafeEvolution).
-  -- ~500-1000 LOC of careful proof, deferred to a future focused session.
-  sorry
+  -- Easy cases: where T' = T, both conjuncts follow trivially.
+  -- Hard cases (.set/.installPolicy/recursive): require cross-level induction
+  -- + per-case SoundForCE arguments. See DUMP.md for the full strategy.
+  cases fuel with
+  | zero => simp [eval] at h_eval
+  | succ k =>
+      cases exp with
+      | num i =>
+          simp [eval] at h_eval
+          obtain ⟨_, h_T⟩ := h_eval
+          subst h_T
+          exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
+      | bool b =>
+          simp [eval] at h_eval
+          obtain ⟨_, h_T⟩ := h_eval
+          subst h_T
+          exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
+      | lam ps body =>
+          simp [eval] at h_eval
+          obtain ⟨_, h_T⟩ := h_eval
+          subst h_T
+          exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
+      | quote w =>
+          simp only [eval] at h_eval
+          split at h_eval
+          · simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+            obtain ⟨_, h_T⟩ := h_eval
+            subst h_T
+            exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
+          · simp at h_eval
+      | var x =>
+          simp only [eval] at h_eval
+          cases hx : env.lookup x with
+          | none => rw [hx] at h_eval; simp at h_eval
+          | some idx =>
+              rw [hx] at h_eval
+              simp only at h_eval
+              cases hp : T.heap[idx]? with
+              | none => rw [hp] at h_eval; simp at h_eval
+              | some w =>
+                  rw [hp] at h_eval
+                  simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                  obtain ⟨_, h_T⟩ := h_eval
+                  subst h_T
+                  exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
+      | _ =>
+          -- All other cases: lam (T' = T), var (T' = T), quote (T' = T),
+          -- ifte/app/seq/primApp/letE (heap extended but base-apply
+          -- cells unchanged → TowerCE preserved via length_mono),
+          -- em (heap extended via materialize), set (heap mutated via
+          -- gated update; SoundForCE → CE preserved), installPolicy
+          -- (policy at level changed to ptable policy; UnivSoundAt by
+          -- SafeEvolution).
+          sorry
 
 /-! ## Necessity
 
