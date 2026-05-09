@@ -971,6 +971,125 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                         hv_ra, hv_rb⟩
                 simp only [applyDirect, hp_b]
         | closure _ _ _ =>
-            -- Needs alloc_chain_bisim + allocStep_chain_aligned + EnvVis_extends
-            -- adapted to TowerState. ~200 LOC port; deferred.
+            -- Structural proof transcribed from lean-green; blocked on a
+            -- *representational* mismatch: my `eval`'s closure-arm uses a
+            -- `(TowerState, Env)` foldl, while `alloc_chain_bisim` is
+            -- stated over `(Heap, Env)` foldl with `allocStep`. The two
+            -- are behaviorally equivalent (both append cells and extend
+            -- env), but bridging requires a lemma:
+            --   foldl_my_step (T, cenv) = ({T with heap := h'}, env')
+            --   where (h', env') = foldl allocStep (T.heap, cenv).
+            -- Tractable but not done. Sorry'd; the structural proof is
+            -- preserved in git history below this comment for the next
+            -- session to revive.
             sorry
+        /- Structural proof (deferred, blocked on heap/tower foldl bridge):
+            have h_opb : ∃ cenv_b, op_b = .closure ps body cenv_b ∧
+                cenv = cenv_b ∧
+                EnvVis cenv cenv_b T_a.heap T_b.heap := by
+              cases op_b with
+              | closure ps_b body_b cenv_b =>
+                  obtain ⟨hps, hbody, hcenv, henv⟩ :=
+                    closure_ValVis_imp_cenv_EnvVis h_vv_op
+                  subst hps; subst hbody
+                  exact ⟨cenv_b, rfl, hcenv, henv⟩
+              | num _ => simp [ValVis_aux] at h_vv1
+              | bool _ => simp [ValVis_aux] at h_vv1
+              | nilV => simp [ValVis_aux] at h_vv1
+              | sym _ => simp [ValVis_aux] at h_vv1
+              | cons _ _ => simp [ValVis_aux] at h_vv1
+              | prim _ => simp [ValVis_aux] at h_vv1
+              | builtinBaseApply => simp [ValVis_aux] at h_vv1
+            obtain ⟨cenv_b, h_eq, h_cenv_eq, h_env_cenv⟩ := h_opb
+            subst h_eq
+            have hev_cenv_a : EnvValid cenv T_a.heap := hv_opa
+            have hev_cenv_b : EnvValid cenv_b T_b.heap := hv_opb
+            simp only [applyDirect] at h_eval
+            by_cases hlen : ps.length = args_a.length
+            · -- Length matches on a-side. ListValVis transfers to b-side.
+              have hlen_b : ps.length = args_b.length := by
+                rw [hlen]; exact ListValVis.length_eq h_lvv
+              have hne_a : (ps.length != args_a.length) = false := by
+                simp [hlen]
+              rw [hne_a] at h_eval
+              simp only [Bool.false_eq_true, ↓reduceIte] at h_eval
+              have hlen_a' : args_a.length = ps.length := hlen.symm
+              have hlen_b' : args_b.length = ps.length := hlen_b.symm
+              -- alloc_chain_bisim gives post-alloc invariants.
+              obtain ⟨hh_a', hh_b', hev_a', hev_b', h_env_alloc, ⟨ext_a, hex_a⟩, ⟨ext_b, hex_b⟩⟩ :=
+                alloc_chain_bisim args_a args_b ps cenv cenv_b T_a.heap T_b.heap
+                  hlen_a' hlen_b' h_lvv hv_argsa hv_argsb
+                  h_hv_a h_hv_b hev_cenv_a hev_cenv_b h_env_cenv
+              -- allocStep_chain_aligned gives env-equal + heap-len-equal.
+              have h_args_len : args_a.length = args_b.length :=
+                ListValVis.length_eq h_lvv
+              obtain ⟨h_alloc_env_eq', h_alloc_len_eq'⟩ :=
+                allocStep_chain_aligned args_a args_b ps T_a.heap T_b.heap cenv_b
+                  h_hl_eq h_args_len
+              have h_alloc_env_eq :
+                  ((args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).2 : Env)
+                    = (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).2 := by
+                rw [h_cenv_eq]; exact h_alloc_env_eq'
+              have h_alloc_len_eq :
+                  (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).1.length =
+                    (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).1.length := by
+                rw [h_cenv_eq]; exact h_alloc_len_eq'
+              -- Lift level_envs_valid to alloc'd heaps.
+              have h_levs_a_alloc : ∀ n env, T_a.envAt? n = some env →
+                  EnvValid env (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).1 := by
+                intro n env hen
+                rw [hex_a]
+                exact EnvValid.heap_extends (h_levs_a n env hen) ⟨ext_a, rfl⟩
+              have h_levs_b_alloc : ∀ n env, T_b.envAt? n = some env →
+                  EnvValid env (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).1 := by
+                intro n env hen
+                rw [hex_b]
+                exact EnvValid.heap_extends (h_levs_b n env hen) ⟨ext_b, rfl⟩
+              -- Construct WFCtxT for the body call.
+              -- T_a after alloc: same levels (alloc only touches heap), new heap.
+              let T_a_alloc : TowerState :=
+                { T_a with heap := (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).1 }
+              let T_b_alloc : TowerState :=
+                { T_b with heap := (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).1 }
+              have h_ctx_alloc :
+                  WFCtxT
+                    (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).2
+                    (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).2
+                    T_a_alloc T_b_alloc level :=
+                ⟨h_pol_eq, hh_a', hh_b', hev_a', hev_b', h_resp_at,
+                 h_alloc_env_eq, h_alloc_len_eq,
+                 h_levs_a_alloc, h_levs_b_alloc⟩
+              -- Apply ih_eval on body.
+              obtain ⟨r_b, T_b', h_eval_b, h_vv_r, h_ctx_body, h_he_body,
+                      _h_env_body, hv_ra, hv_rb⟩ :=
+                ih_eval ptable level body
+                  (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).2
+                  (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).2
+                  T_a_alloc T_b_alloc r_a T_a'
+                  hresp_pt h_ctx_alloc h_env_alloc h_eval
+              -- HeapEvolution from the alloc step.
+              have h_he_alloc : HeapEvolution T_a T_b T_a_alloc T_b_alloc :=
+                HeapEvolution.from_heapExt h_hv_a h_hv_b ⟨ext_a, hex_a⟩ ⟨ext_b, hex_b⟩
+              have h_he_chain : HeapEvolution T_a T_b T_a' T_b' :=
+                HeapEvolution.trans h_he_alloc h_he_body
+              -- TowerCross output bundles WFCtxT-level facts at output.
+              have h_tc_out : TowerCross level T_a T_b T_a' T_b' :=
+                ⟨h_ctx_body.heap_len_eq, h_ctx_body.policy_eq_at,
+                 fun n env hen => h_ctx_body.level_envs_valid_a n env (by sorry),
+                 fun n env hen => h_ctx_body.level_envs_valid_b n env (by sorry),
+                 h_ctx_body.hv_a, h_ctx_body.hv_b,
+                 h_ctx_body.level_envs_valid_a, h_ctx_body.level_envs_valid_b,
+                 h_ctx_body.policy_resp⟩
+              refine ⟨r_b, T_b', ?_, h_vv_r, h_he_chain, h_tc_out, hv_ra, hv_rb⟩
+              -- Goal: applyDirect (k+1) ptable level (.closure ps body cenv_b) args_b T_b
+              --       = some (r_b, T_b')
+              simp only [applyDirect]
+              have hne_b : (ps.length != args_b.length) = false := by simp [hlen_b]
+              rw [hne_b]
+              simp only [Bool.false_eq_true, ↓reduceIte]
+              exact h_eval_b
+            · -- Length doesn't match on a-side. applyDirect returns none.
+              have hne : (ps.length != args_a.length) = true := by simp [hlen]
+              rw [hne] at h_eval
+              simp at h_eval
+        -/

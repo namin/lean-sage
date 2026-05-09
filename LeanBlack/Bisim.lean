@@ -2799,7 +2799,7 @@ theorem env_alloc_lookup_other {s_heap : Heap} {cenv : Env}
     resulting (extended-heap, cons-extended-env) pairs satisfy `WFCtx`-shape
     invariants and `EnvVis` on the extended envs. Used by `applyDirect`'s
     closure case in the framing theorem. -/
-private theorem alloc_chain_bisim
+theorem alloc_chain_bisim
     (xs_a : List Val) :
     ∀ (xs_b : List Val) (ps : List String) (cenv_a cenv_b : Env) (h_a h_b : Heap),
     xs_a.length = ps.length → xs_b.length = ps.length →
