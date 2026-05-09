@@ -92,13 +92,20 @@ structure WFCtxT (env_a env_b : Env) (T_a T_b : TowerState) (level : Nat)
   /-- All materialized levels' envs are valid in both heaps. -/
   level_envs_valid_a : ∀ n env, T_a.envAt? n = some env → EnvValid env T_a.heap
   level_envs_valid_b : ∀ n env, T_b.envAt? n = some env → EnvValid env T_b.heap
+  /-- Cross-side: at every level, the env (if materialized) is the same
+      on both sides. Holds for `initTower` (rfl); preserved by every eval
+      operation since none modifies existing-level envs (set!/letE/alloc
+      only touch heap; installPolicy modifies policy not env; em
+      materializes new levels deterministically from heap.length, equal
+      cross-side via `heap_len_eq`). -/
+  level_envs_eq : ∀ n, T_a.envAt? n = T_b.envAt? n
 
 theorem WFCtxT.refl (env : Env) (T : TowerState) (level : Nat)
     (hh : HeapValid T.heap) (hev : EnvValid env T.heap)
     (hresp : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
     (h_levels : ∀ n env, T.envAt? n = some env → EnvValid env T.heap) :
     WFCtxT env env T T level :=
-  ⟨rfl, hh, hh, hev, hev, hresp, rfl, rfl, h_levels, h_levels⟩
+  ⟨rfl, hh, hh, hev, hev, hresp, rfl, rfl, h_levels, h_levels, fun _ => rfl⟩
 
 /-! ## Single-side level-envs preservation
 
@@ -157,6 +164,9 @@ structure TowerCross (level : Nat) (T_a T_b T_a' T_b' : TowerState) : Prop where
   level_envs_valid_a_out : ∀ n env, T_a'.envAt? n = some env → EnvValid env T_a'.heap
   level_envs_valid_b_out : ∀ n env, T_b'.envAt? n = some env → EnvValid env T_b'.heap
   policy_resp_out       : ∀ p, T_a'.policyAt? level = some p → PolicyRespectsBisimT p
+  /-- Cross-side: every materialized level's env is the same on both
+      sides at the output state. Mirrors `WFCtxT.level_envs_eq`. -/
+  level_envs_eq_out     : ∀ n, T_a'.envAt? n = T_b'.envAt? n
 
 theorem TowerCross.refl (level : Nat) (T_a T_b : TowerState)
     (h_len : T_a.heap.length = T_b.heap.length)
@@ -164,10 +174,11 @@ theorem TowerCross.refl (level : Nat) (T_a T_b : TowerState)
     (h_hv_a : HeapValid T_a.heap) (h_hv_b : HeapValid T_b.heap)
     (h_levs_a : ∀ n env, T_a.envAt? n = some env → EnvValid env T_a.heap)
     (h_levs_b : ∀ n env, T_b.envAt? n = some env → EnvValid env T_b.heap)
-    (h_resp_at : ∀ p, T_a.policyAt? level = some p → PolicyRespectsBisimT p) :
+    (h_resp_at : ∀ p, T_a.policyAt? level = some p → PolicyRespectsBisimT p)
+    (h_levs_eq : ∀ n, T_a.envAt? n = T_b.envAt? n) :
     TowerCross level T_a T_b T_a T_b :=
   ⟨h_len, h_pol, fun _ _ h => h, fun _ _ h => h,
-   h_hv_a, h_hv_b, h_levs_a, h_levs_b, h_resp_at⟩
+   h_hv_a, h_hv_b, h_levs_a, h_levs_b, h_resp_at, h_levs_eq⟩
 
 /-! ## The framing statement (joint, mutual) -/
 
@@ -206,15 +217,13 @@ private def FrameStmtT (n : Nat) : Prop :=
      (args_a args_b : List Val) (T_a T_b : TowerState)
      (r_a : Val) (T_a' : TowerState),
     PolicyTableRespectsBisimT ptable →
-    -- For applyVia we use a "self" WFCtx: env_a = env_b = some sentinel.
-    -- The actual env arguments to applyVia are op/args, not an env.
-    -- We carry T_a/T_b validity via h_T_wf.
     (∀ p, T_a.policyAt? level = some p → PolicyRespectsBisimT p) →
     T_a.policyAt? level = T_b.policyAt? level →
     HeapValid T_a.heap → HeapValid T_b.heap →
     T_a.heap.length = T_b.heap.length →
     (∀ n env, T_a.envAt? n = some env → EnvValid env T_a.heap) →
     (∀ n env, T_b.envAt? n = some env → EnvValid env T_b.heap) →
+    (∀ n, T_a.envAt? n = T_b.envAt? n) →
     ValVis op_a op_b T_a.heap T_b.heap →
     ListValVis args_a args_b T_a.heap T_b.heap →
     ValValid op_a T_a.heap → ValValid op_b T_b.heap →
@@ -237,6 +246,7 @@ private def FrameStmtT (n : Nat) : Prop :=
     T_a.heap.length = T_b.heap.length →
     (∀ n env, T_a.envAt? n = some env → EnvValid env T_a.heap) →
     (∀ n env, T_b.envAt? n = some env → EnvValid env T_b.heap) →
+    (∀ n, T_a.envAt? n = T_b.envAt? n) →
     ValVis op_a op_b T_a.heap T_b.heap →
     ListValVis args_a args_b T_a.heap T_b.heap →
     ValValid op_a T_a.heap → ValValid op_b T_b.heap →
@@ -259,8 +269,8 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
       refine ⟨?_, ?_, ?_, ?_⟩
       · intro _ _ _ _ _ _ _ _ _ _ _ _ h; simp [eval] at h
       · intro _ _ _ _ _ _ _ _ _ _ _ _ h; simp [evalList] at h
-      · intro _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ h; simp [applyVia] at h
-      · intro _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ h; simp [applyDirect] at h
+      · intro _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ h; simp [applyVia] at h
+      · intro _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ h; simp [applyDirect] at h
   | succ k ih =>
       obtain ⟨ih_eval, ih_evalList, ih_applyVia, ih_applyDirect⟩ := ih
       refine ⟨?_, ?_, ?_, ?_⟩
@@ -465,6 +475,7 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                             hresp_pt h_ctx2.policy_resp h_ctx2.policy_eq_at
                             h_ctx2.hv_a h_ctx2.hv_b h_ctx2.heap_len_eq
                             h_ctx2.level_envs_valid_a h_ctx2.level_envs_valid_b
+                            h_ctx2.level_envs_eq
                             h_vv_f' h_lvv hv_fva2 hv_fvb2 hv_avsa hv_avsb h_eval
                         have h_he_chain : HeapEvolution T_a T_b T_a' T_b' :=
                           HeapEvolution.trans h_he1 (HeapEvolution.trans h_he2 h_he3)
@@ -489,7 +500,8 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                            EnvValid.length_mono h_ctx.ev_b h_he_outer_b,
                            h_tc3.policy_resp_out,
                            h_ctx.env_eq, h_tc3.heap_len_eq,
-                           h_tc3.level_envs_valid_a_out, h_tc3.level_envs_valid_b_out⟩
+                           h_tc3.level_envs_valid_a_out, h_tc3.level_envs_valid_b_out,
+                           h_tc3.level_envs_eq_out⟩
                         have h_env_out : EnvVis env_a env_b T_a'.heap T_b'.heap :=
                           h_he_chain.envVis_preserve env_a env_b h_ctx.env_eq
                             h_ctx.ev_a h_ctx.ev_b h_env
@@ -534,6 +546,7 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                         hresp_pt h_ctx2.policy_resp h_ctx2.policy_eq_at
                         h_ctx2.hv_a h_ctx2.hv_b h_ctx2.heap_len_eq
                         h_ctx2.level_envs_valid_a h_ctx2.level_envs_valid_b
+                        h_ctx2.level_envs_eq
                         h_vv_f' h_lvv hv_fva2 hv_fvb2 hv_avsa hv_avsb h_eval
                     have h_he_chain : HeapEvolution T_a T_b T_a' T_b' :=
                       HeapEvolution.trans h_he1 (HeapEvolution.trans h_he2 h_he3)
@@ -554,7 +567,8 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                        EnvValid.length_mono h_ctx.ev_b h_he_outer_b,
                        h_tc3.policy_resp_out,
                        h_ctx.env_eq, h_tc3.heap_len_eq,
-                       h_tc3.level_envs_valid_a_out, h_tc3.level_envs_valid_b_out⟩
+                       h_tc3.level_envs_valid_a_out, h_tc3.level_envs_valid_b_out,
+                       h_tc3.level_envs_eq_out⟩
                     have h_env_out : EnvVis env_a env_b T_a'.heap T_b'.heap :=
                       h_he_chain.envVis_preserve env_a env_b h_ctx.env_eq
                         h_ctx.ev_a h_ctx.ev_b h_env
@@ -693,7 +707,7 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                       (.cons x T_b_inner.heap.length env_b) T_a_alloc T_b_alloc level :=
                   ⟨h_ctx_inner.policy_eq_at, hh_a_alloc, hh_b_alloc,
                    hev_a', hev_b', h_ctx_inner.policy_resp, h_cons_eq, h_alloc_len_eq,
-                   h_levs_a_alloc, h_levs_b_alloc⟩
+                   h_levs_a_alloc, h_levs_b_alloc, h_ctx_inner.level_envs_eq⟩
                 -- ValVis v_a v_b lifted to alloc heaps.
                 have h_vv_v_alloc :
                     ValVis v_a v_b (T_a_inner.heap ++ [v_a]) (T_b_inner.heap ++ [v_b]) :=
@@ -732,7 +746,8 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                    h_ctx.ev_a.length_mono h_he_chain.len_a,
                    h_ctx.ev_b.length_mono h_he_chain.len_b,
                    h_ctx_body.policy_resp, h_ctx.env_eq, h_ctx_body.heap_len_eq,
-                   h_ctx_body.level_envs_valid_a, h_ctx_body.level_envs_valid_b⟩
+                   h_ctx_body.level_envs_valid_a, h_ctx_body.level_envs_valid_b,
+                   h_ctx_body.level_envs_eq⟩
                 have h_env_out : EnvVis env_a env_b T_a'.heap T_b'.heap :=
                   h_he_chain.envVis_preserve env_a env_b h_ctx.env_eq
                     h_ctx.ev_a h_ctx.ev_b h_env
@@ -833,7 +848,7 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                 · intro depth
                   cases depth with | zero => trivial | succ _ => rfl
                 · -- WFCtxT for output state
-                  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, h_ctx.env_eq, ?_, ?_, ?_⟩
+                  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, h_ctx.env_eq, ?_, ?_, ?_, ?_⟩
                   · -- policy_eq_at: rewrite with the .map fact, both sides
                     rw [h_pol_a, h_pol_b, h_ctx.policy_eq_at]
                   · rw [h_heap_a]; exact h_ctx.hv_a
@@ -857,6 +872,9 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                     rw [h_envs_b m] at h_env_eq
                     rw [h_heap_b]
                     exact h_ctx.level_envs_valid_b m env h_env_eq
+                  · -- level_envs_eq: setPolicyAt preserves envAt? on both sides
+                    intro m
+                    rw [h_envs_a m, h_envs_b m]; exact h_ctx.level_envs_eq m
                 · -- HeapEvolution: heaps unchanged on both sides; the
                   -- levels field changed but HeapEvolution only cares
                   -- about heaps + bisim preservation.
@@ -931,7 +949,7 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
         -- alloc_chain_bisim machinery to the tower model)
         intro ptable level op_a op_b args_a args_b T_a T_b r_a T_a'
               hresp_pt h_resp_at h_pol_eq h_hv_a h_hv_b h_hl_eq
-              h_levs_a h_levs_b h_vv_op h_lvv hv_opa hv_opb
+              h_levs_a h_levs_b h_levs_eq h_vv_op h_lvv hv_opa hv_opb
               hv_argsa hv_argsb h_eval
         have h_vv1 : ValVis_aux 1 op_a op_b T_a.heap T_b.heap := h_vv_op 1
         cases op_a with
@@ -978,7 +996,7 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                       ih_applyDirect ptable level actualOp_a actualOp_b
                         operands_a operands_b T_a T_b r_a T_a'
                         hresp_pt h_resp_at h_pol_eq h_hv_a h_hv_b h_hl_eq
-                        h_levs_a h_levs_b h_vv_actual h_lvv_ops
+                        h_levs_a h_levs_b h_levs_eq h_vv_actual h_lvv_ops
                         hv_actual_a hv_actual_b hv_ops_a hv_ops_b h_eval
                     refine ⟨r_b, T_b', ?_, h_vv_r, h_he', h_tc, hv_ra, hv_rb⟩
                     simp only [applyDirect, hl_b, h_eval_b]
@@ -1009,7 +1027,7 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                     h_lvv hv_argsa hv_argsb v_a' hp_a
                 refine ⟨r_b, T_b, ?_, h_vv_r, HeapEvolution.refl _ _,
                         TowerCross.refl _ _ _ h_hl_eq h_pol_eq h_hv_a h_hv_b
-                          h_levs_a h_levs_b h_resp_at,
+                          h_levs_a h_levs_b h_resp_at h_levs_eq,
                         hv_ra, hv_rb⟩
                 simp only [applyDirect, hp_b]
         | closure ps body cenv =>
@@ -1092,7 +1110,7 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                     T_a_alloc T_b_alloc level :=
                 ⟨h_pol_eq, hh_a', hh_b', hev_a', hev_b', h_resp_at,
                  h_alloc_env_eq, h_alloc_len_eq,
-                 h_levs_a_alloc, h_levs_b_alloc⟩
+                 h_levs_a_alloc, h_levs_b_alloc, h_levs_eq⟩
               -- Apply ih_eval on body.
               obtain ⟨r_b, T_b', h_eval_b, h_vv_r, h_ctx_body, h_he_body,
                       _h_env_body, hv_ra, hv_rb⟩ :=
@@ -1127,7 +1145,7 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                  h_levs_mono_a, h_levs_mono_b,
                  h_ctx_body.hv_a, h_ctx_body.hv_b,
                  h_ctx_body.level_envs_valid_a, h_ctx_body.level_envs_valid_b,
-                 h_ctx_body.policy_resp⟩
+                 h_ctx_body.policy_resp, h_ctx_body.level_envs_eq⟩
               refine ⟨r_b, T_b', ?_, h_vv_r, h_he_chain, h_tc_out, hv_ra, hv_rb⟩
               -- Goal: applyDirect (k+1) ptable level (.closure ps body cenv_b) args_b T_b
               --       = some (r_b, T_b')
