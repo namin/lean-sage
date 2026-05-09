@@ -241,24 +241,45 @@ private theorem TowerCE_of_heap_extends (T T' : TowerState)
   exact CE_weaken_h_ref n T.heap T'.heap h_len oldApply oldApply
     (h_self n idx oldApply oldApply h_lookup h_old h_old)
 
+/-- HeapValid is preserved by appending a single ValValid value. -/
+private theorem HeapValid_alloc_one (h : Heap) (v : Val)
+    (h_hv : HeapValid h) (hv_v : ValValid v h) :
+    HeapValid (h ++ [v]) := by
+  intro i v_at_i hp
+  by_cases h_lt : i < h.length
+  · have hp_old : h[i]? = some v_at_i := by
+      rw [← List.getElem?_append_left h_lt]; exact hp
+    exact ValValid.heap_extends v_at_i (h_hv i v_at_i hp_old) ⟨[v], rfl⟩
+  · have h_le : h.length ≤ i := Nat.not_lt.mp h_lt
+    have h_lt_total : i < (h ++ [v]).length :=
+      (List.getElem?_eq_some_iff.mp hp).1
+    have h_eq : i = h.length := by
+      simp [List.length_append] at h_lt_total; omega
+    subst h_eq
+    rw [List.getElem?_append_right (Nat.le_refl _)] at hp
+    simp at hp
+    rw [← hp]
+    exact ValValid.heap_extends v hv_v ⟨[v], rfl⟩
+
 /-- An expression is *atomic* if its evaluation reduces to a result
     pair `(cv, T)` without mutating the tower state. The atomic
-    constructors are: `.num`, `.bool`, `.lam`, `.var`, `.quote`. -/
-def Expr.IsAtomic : Expr → Prop
-  | .num _   => True
-  | .bool _  => True
-  | .lam _ _ => True
-  | .var _   => True
-  | .quote _ => True
-  | _        => False
+    constructors are: `.num`, `.bool`, `.lam`, `.var`, `.quote`.
 
-/-- For atomic expressions, `eval` doesn't change the tower state.
-    A useful lemma for proving compound cases of `eval_tower_safe`
-    where the first sub-eval is on an atomic expression. -/
+    Returns `Bool` (not `Prop`) so it's directly decidable for
+    `by_cases` reasoning. -/
+def Expr.IsAtomic : Expr → Bool
+  | .num _   => true
+  | .bool _  => true
+  | .lam _ _ => true
+  | .var _   => true
+  | .quote _ => true
+  | _        => false
+
+/-- For atomic expressions, `eval` doesn't change the tower state. -/
 private theorem eval_atomic_T_unchanged
     (k : Nat) (ptable : PolicyTable) (level : Nat) (c : Expr)
     (env : Env) (T : TowerState) (cv : Val) (T_mid : TowerState)
-    (h_atomic : c.IsAtomic)
+    (h_atomic : c.IsAtomic = true)
     (h_eval : eval k ptable level c env T = some (cv, T_mid)) :
     T_mid = T := by
   cases c with
@@ -661,96 +682,76 @@ theorem eval_tower_safe
                                 h_heap_mono_23 h_levs_mono_12 hh_mid hh_T'
                                 h_tce_e h_tce_rest
       | ifte c t e =>
-          -- For atomic conditions (.num/.bool/.lam/.quote/.var), eval c
-          -- doesn't change T, so the branch eval handles everything via
-          -- IH. For non-atomic c, composition is required (deferred).
-          cases c with
-          | num i =>
+          -- Use TowerCE_trans uniformly. The structure:
+          -- eval c → (cv, T_mid). IH gives TowerCE T T_mid + SafeEvolution T_mid.
+          -- Cases on cv to dispatch to t or e branch. IH on branch.
+          -- Compose via TowerCE_trans.
+          cases k with
+          | zero => simp [eval] at h_eval
+          | succ j =>
               simp only [eval] at h_eval
-              -- h_eval reduces: eval k ... = some (v, T') for the t-branch.
-              -- eval k ptable level (.num i) env T = some (.num i, T) when k > 0.
-              cases k with
-              | zero => simp [eval] at h_eval
-              | succ j =>
-                  simp only [eval] at h_eval
-                  -- h_eval : eval (j+1) ... t env T = some (v, T') (true branch)
-                  apply ih <;> assumption
-          | bool b =>
-              simp only [eval] at h_eval
-              cases k with
-              | zero => simp [eval] at h_eval
-              | succ j =>
-                  cases b with
-                  | true =>
-                      simp only [eval] at h_eval
-                      apply ih <;> assumption
-                  | false =>
-                      simp only [eval] at h_eval
-                      apply ih <;> assumption
-          | lam ps body =>
-              simp only [eval] at h_eval
-              cases k with
-              | zero => simp [eval] at h_eval
-              | succ j =>
-                  simp only [eval] at h_eval
-                  -- closure is not .bool false, so falls to t-branch.
-                  apply ih <;> assumption
-          | var x =>
-              cases k with
-              | zero => simp [eval] at h_eval
-              | succ j =>
-                  simp only [eval] at h_eval
-                  cases hx : env.lookup x with
-                  | none =>
-                      rw [hx] at h_eval; simp at h_eval
-                  | some idx =>
-                      rw [hx] at h_eval
-                      simp only at h_eval
-                      cases hp : T.heap[idx]? with
-                      | none =>
-                          rw [hp] at h_eval; simp at h_eval
-                      | some w =>
-                          rw [hp] at h_eval
-                          simp only at h_eval
-                          -- h_eval now matches on w: .bool false → e branch, else → t.
-                          -- For all cases, the branch eval is at T (no mutation).
-                          cases w with
-                          | bool b =>
-                              cases b with
-                              | true => apply ih <;> assumption
-                              | false => apply ih <;> assumption
-                          | num _ | nilV | sym _ | cons _ _ | closure _ _ _
-                          | prim _ | builtinBaseApply =>
-                              apply ih <;> assumption
-          | quote w =>
-              cases k with
-              | zero => simp [eval] at h_eval
-              | succ j =>
-                  simp only [eval] at h_eval
-                  by_cases hc : closedValB w = true
-                  · simp only [hc, if_true] at h_eval
-                    cases w with
-                    | bool b =>
-                        cases b with
-                        | true => apply ih <;> assumption
-                        | false => apply ih <;> assumption
-                    | num _ | nilV | sym _ | cons _ _ | closure _ _ _
-                    | prim _ | builtinBaseApply =>
-                        apply ih <;> assumption
-                  · simp only [hc, if_false] at h_eval
-                    simp at h_eval
-          | _ =>
-              -- Non-atomic c: composition via TowerCE_trans is in principle
-              -- doable, but `cases c with | _ =>` specializes c per-constructor
-              -- and `simp [eval] at h_eval` then unfolds the inner eval
-              -- aggressively (since c is concrete in each arm). Need a
-              -- different proof structure that keeps c opaque. Deferred.
-              sorry
+              cases h_c : eval (j+1) ptable level c env T with
+              | none => rw [h_c] at h_eval; simp at h_eval
+              | some pr =>
+                  rw [h_c] at h_eval
+                  cases pr with
+                  | mk cv T_mid =>
+                      obtain ⟨h_tce_c, h_safe_mid⟩ :=
+                        ih level c env T hh hev h_levs h_resp_all h_bisim
+                          h_pol_resp_at h_env_self h_safe cv T_mid h_c
+                      obtain ⟨hh_mid, h_levs_mid, h_resp_all_mid,
+                              h_bisim_mid, hev_mid, _, h_heap_mono_12⟩ :=
+                        eval_preserves_self_invariants (j+1) ptable level c
+                          env T cv T_mid hh hev h_levs h_resp_all h_pt
+                          h_pol_resp_at h_env_self h_c
+                      have h_pol_resp_at_mid :
+                          ∀ p, T_mid.policyAt? level = some p →
+                               PolicyRespectsBisimT p :=
+                        fun p hp => h_resp_all_mid level p hp
+                      have h_env_self_mid :
+                          EnvVis env env T_mid.heap T_mid.heap :=
+                        EnvVis_self_of_valid env T_mid.heap hev_mid hh_mid
+                      have h_levs_mono_12 :
+                          ∀ n env_n, T.envAt? n = some env_n →
+                                     T_mid.envAt? n = some env_n :=
+                        fun n env_n h_env =>
+                          eval_preserves_envAt (j+1) ptable level c env T cv
+                            T_mid n env_n h_c h_env
+                      have run_branch :
+                          ∀ (branch_exp : Expr),
+                            eval (j+1) ptable level branch_exp env T_mid
+                                = some (v, T') →
+                            TowerCE T T' ∧ SafeEvolution ptable T' := by
+                        intro branch_exp h_eval_branch
+                        obtain ⟨h_tce_branch, h_safe_T'⟩ :=
+                          ih level branch_exp env T_mid hh_mid hev_mid
+                            h_levs_mid h_resp_all_mid h_bisim_mid
+                            h_pol_resp_at_mid h_env_self_mid h_safe_mid
+                            v T' h_eval_branch
+                        obtain ⟨hh_T', _, _, _, _, _, h_heap_mono_23⟩ :=
+                          eval_preserves_self_invariants (j+1) ptable level
+                            branch_exp env T_mid v T' hh_mid hev_mid
+                            h_levs_mid h_resp_all_mid h_pt
+                            h_pol_resp_at_mid h_env_self_mid h_eval_branch
+                        refine ⟨?_, h_safe_T'⟩
+                        exact TowerCE_trans T T_mid T' h_heap_mono_12
+                          h_heap_mono_23 h_levs_mono_12 hh_mid hh_T'
+                          h_tce_c h_tce_branch
+                      cases cv with
+                      | bool b =>
+                          cases b with
+                          | true => exact run_branch t h_eval
+                          | false => exact run_branch e h_eval
+                      | num _ | nilV | sym _ | cons _ _ | closure _ _ _
+                      | prim _ | builtinBaseApply =>
+                          exact run_branch t h_eval
       | _ =>
-          -- Remaining cases: app/primApp/letE (heap extended
-          -- but base-apply cells unchanged → TowerCE preserved via
-          -- length_mono), em (heap extended via materialize), set
-          -- (heap mutated via gated update; SoundForCE → CE preserved).
+          -- Remaining cases: app/primApp (multi-step composition with
+          -- evalList/applyVia which lack their own TowerCE preservation
+          -- theorems), letE (alloc + eval body — pattern works but
+          -- EnvValid manipulation through alloc requires more plumbing),
+          -- em (architectural acceptAllPolicy concern), set (gated
+          -- mutation with SoundForCE direct invocation).
           sorry
 
 /-! ## Necessity
