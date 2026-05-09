@@ -913,11 +913,111 @@ theorem eval_tower_safe
           -- 4-way mutual induction). See DUMP0 Session C.
           sorry
       | em body =>
-          -- Architectural: `materializeStep` defaults new levels to
-          -- `acceptAllPolicy`, which is NOT UnivSoundAt. Either change
-          -- default to `rejectAllPolicy` (Session B) or weaken
-          -- SafeEvolution to allow extension levels.
-          sorry
+          -- After `materializeStep`'s default was changed to
+          -- `rejectAllPolicy` (UnivSoundAt by vacuity),
+          -- SafeEvolution.1 is preserved across `.em`. The proof:
+          -- (1) materialize gives heap-prefix-extension, so TowerCE T T_mat
+          --     reduces to TowerCE T T (via `TowerCE_of_heap_extends`);
+          -- (2) IH on body at level+1 in T_mat → TowerCE T_mat T' and
+          --     SafeEvolution ptable T';
+          -- (3) compose via `TowerCE_trans`.
+          cases k with
+          | zero =>
+              simp only [eval] at h_eval
+              cases h_mat : T.materialize (level + 1) with
+              | none => rw [h_mat] at h_eval; simp at h_eval
+              | some T_mat =>
+                  rw [h_mat] at h_eval
+                  simp only at h_eval
+                  cases h_env_mat : T_mat.envAt? (level + 1) with
+                  | none => rw [h_env_mat] at h_eval; simp at h_eval
+                  | some upEnv =>
+                      rw [h_env_mat] at h_eval
+                      simp [eval] at h_eval
+          | succ j =>
+              simp only [eval] at h_eval
+              cases h_mat : T.materialize (level + 1) with
+              | none => rw [h_mat] at h_eval; simp at h_eval
+              | some T_mat =>
+                  rw [h_mat] at h_eval
+                  simp only at h_eval
+                  cases h_env_mat : T_mat.envAt? (level + 1) with
+                  | none => rw [h_env_mat] at h_eval; simp at h_eval
+                  | some upEnv =>
+                      rw [h_env_mat] at h_eval
+                      simp only at h_eval
+                      -- Single-side preservation facts.
+                      have hh_mat : HeapValid T_mat.heap :=
+                        materialize_HeapValid_preserves T T_mat (level + 1) h_mat hh
+                      have h_levs_mat :
+                          ∀ m env_m, T_mat.envAt? m = some env_m →
+                                     EnvValid env_m T_mat.heap :=
+                        materialize_level_envs_valid_preserves T T_mat (level + 1)
+                          h_mat hh h_levs
+                      have h_resp_all_mat :
+                          ∀ m p, T_mat.policyAt? m = some p →
+                                 PolicyRespectsBisimT p :=
+                        materialize_policies_resp_preserves T T_mat (level + 1)
+                          PolicyRespectsBisimT h_mat h_resp_all
+                          rejectAllPolicy_respects_bisimT
+                      have h_bisim_mat :
+                          ∀ m env_m, T_mat.envAt? m = some env_m →
+                                     EnvVis env_m env_m T_mat.heap T_mat.heap :=
+                        fun m env_m hen =>
+                          EnvVis_self_of_valid env_m T_mat.heap
+                            (h_levs_mat m env_m hen) hh_mat
+                      have h_pol_resp_at_mat :
+                          ∀ p, T_mat.policyAt? (level + 1) = some p →
+                               PolicyRespectsBisimT p :=
+                        fun p h => h_resp_all_mat (level + 1) p h
+                      have hev_upEnv : EnvValid upEnv T_mat.heap :=
+                        h_levs_mat (level + 1) upEnv h_env_mat
+                      have h_env_self_mat : EnvVis upEnv upEnv T_mat.heap T_mat.heap :=
+                        h_bisim_mat (level + 1) upEnv h_env_mat
+                      -- SafeEvolution preservation: pre-existing levels carry
+                      -- over via h_safe.1; new levels get rejectAllPolicy which
+                      -- is UnivSoundAt by vacuity (admits nothing).
+                      have h_safe_mat : SafeEvolution ptable T_mat := by
+                        refine ⟨?_, h_safe.2⟩
+                        apply materialize_policies_resp_preserves T T_mat (level + 1)
+                          (fun p => ∀ m, p.UnivSoundAt m) h_mat h_safe.1
+                        intro m
+                        unfold BlackPolicy.UnivSoundAt
+                        exact rejectAllPolicy_soundForCE m
+                      -- IH on body at level+1.
+                      obtain ⟨h_tce_body, h_safe_T'⟩ :=
+                        ih (level + 1) body upEnv T_mat hh_mat hev_upEnv
+                          h_levs_mat h_resp_all_mat h_bisim_mat
+                          h_pol_resp_at_mat h_env_self_mat h_safe_mat v T' h_eval
+                      -- T_mat.heap = T.heap ++ extras (heap-prefix-extension).
+                      obtain ⟨extras, h_heap_eq⟩ :=
+                        T.materialize_heap_extends T_mat (level + 1) h_mat
+                      -- TowerCE T T_mat via TowerCE_of_heap_extends.
+                      have h_tce_T_mat : TowerCE T T_mat :=
+                        TowerCE_of_heap_extends T T_mat ⟨extras, h_heap_eq⟩
+                          (TowerCE.refl T hh h_levs h_resp_all h_bisim)
+                      -- Heap mono.
+                      have h_heap_mono_T_Tmat :
+                          T.heap.length ≤ T_mat.heap.length := by
+                        rw [h_heap_eq]; simp [List.length_append]
+                      -- T_mat preserves T's envs at pre-existing levels.
+                      have h_levs_mono_T_Tmat :
+                          ∀ n env_n, T.envAt? n = some env_n →
+                                     T_mat.envAt? n = some env_n :=
+                        fun n env_n h_env =>
+                          T.materialize_envAt?_preserves T_mat (level + 1) n env_n
+                            h_mat h_env
+                      -- HeapValid + heap_mono for T'.
+                      obtain ⟨hh_T', _, _, _, _, _, h_heap_mono_Tmat_T'⟩ :=
+                        eval_preserves_self_invariants (j+1) ptable (level + 1) body
+                          upEnv T_mat v T' hh_mat hev_upEnv h_levs_mat
+                          h_resp_all_mat h_pt h_pol_resp_at_mat h_env_self_mat
+                          h_eval
+                      -- Compose T → T_mat → T'.
+                      refine ⟨?_, h_safe_T'⟩
+                      exact TowerCE_trans T T_mat T' h_heap_mono_T_Tmat
+                        h_heap_mono_Tmat_T' h_levs_mono_T_Tmat hh_mat hh_T'
+                        h_tce_T_mat h_tce_body
       | set x e =>
           -- Gated mutation. Strengthened `SafeEvolution.1` (universal
           -- soundness) makes the meta-mutation case tractable: the

@@ -80,6 +80,12 @@ theorem acceptAllPolicy_respects_bisimT :
     PolicyRespectsBisimT acceptAllPolicy := by
   unfold PolicyRespectsBisimT acceptAllPolicy; intros; rfl
 
+/-- `rejectAllPolicy` refuses every mutation, so trivially respects bisim
+    (both sides return `false` regardless). -/
+theorem rejectAllPolicy_respects_bisimT :
+    PolicyRespectsBisimT rejectAllPolicy := by
+  unfold PolicyRespectsBisimT rejectAllPolicy; intros; rfl
+
 /-! ## Single-side materialize preservation lemmas
 
     Used by `.em` and `applyVia` cases below. Each says materialize
@@ -340,7 +346,7 @@ private theorem materializeStep_iter_fresh_env_lookups_geq
           omega
         · -- m > T_k.levels.length: out of bounds.
           have h_oob : (T_k.levels ++
-              [({env := (freshLevelEnv T_k.heap).snd, policy := acceptAllPolicy} :
+              [({env := (freshLevelEnv T_k.heap).snd, policy := rejectAllPolicy} :
                 LevelState)])[m]? = none := by
             apply List.getElem?_eq_none
             simp [List.length_append]; omega
@@ -378,7 +384,7 @@ private theorem materializeStep_level_envs_valid_preserves
       exact freshLevelEnv_env_valid T.heap
     · -- Out of bounds
       let new_ls : LevelState :=
-        { env := (freshLevelEnv T.heap).2, policy := acceptAllPolicy }
+        { env := (freshLevelEnv T.heap).2, policy := rejectAllPolicy }
       have h_oob : (T.levels ++ [new_ls]).length ≤ m := by
         simp [List.length_append]; omega
       rw [List.getElem?_eq_none h_oob] at hen
@@ -421,7 +427,7 @@ theorem materialize_level_envs_valid_preserves
 private theorem materializeStep_policies_resp_preserves
     (T : TowerState) (P : BlackPolicy → Prop)
     (h_resp : ∀ m p, T.policyAt? m = some p → P p)
-    (h_acceptAll : P acceptAllPolicy) :
+    (h_rejectAll : P rejectAllPolicy) :
     ∀ m p, (materializeStep T).policyAt? m = some p → P p := by
   intro m p hp
   unfold materializeStep at hp
@@ -436,9 +442,9 @@ private theorem materializeStep_policies_resp_preserves
       rw [List.getElem?_append_right (Nat.le_refl _)] at hp
       simp at hp
       rw [← hp]
-      exact h_acceptAll
+      exact h_rejectAll
     · let new_ls : LevelState :=
-        { env := (freshLevelEnv T.heap).2, policy := acceptAllPolicy }
+        { env := (freshLevelEnv T.heap).2, policy := rejectAllPolicy }
       have h_oob : (T.levels ++ [new_ls]).length ≤ m := by
         simp [List.length_append]; omega
       rw [List.getElem?_eq_none h_oob] at hp
@@ -448,21 +454,21 @@ private theorem materializeStep_policies_resp_preserves
 private theorem materializeStep_iter_policies_resp_preserves
     (T : TowerState) (k : Nat) (P : BlackPolicy → Prop)
     (h_resp : ∀ m p, T.policyAt? m = some p → P p)
-    (h_acceptAll : P acceptAllPolicy) :
+    (h_rejectAll : P rejectAllPolicy) :
     ∀ m p, (Nat.fold k (fun _ _ T' => materializeStep T') T).policyAt? m = some p → P p := by
   induction k with
   | zero => simp [Nat.fold]; exact h_resp
   | succ k ih =>
       simp only [Nat.fold]
-      exact materializeStep_policies_resp_preserves _ P ih h_acceptAll
+      exact materializeStep_policies_resp_preserves _ P ih h_rejectAll
 
 /-- Materialize preserves "all policies satisfy P" provided P holds for
-    `acceptAllPolicy` (which materialize uses for new levels). -/
+    `rejectAllPolicy` (which materialize uses for new levels). -/
 theorem materialize_policies_resp_preserves
     (T T' : TowerState) (n : Nat) (P : BlackPolicy → Prop)
     (h_mat : T.materialize n = some T')
     (h_resp : ∀ m p, T.policyAt? m = some p → P p)
-    (h_acceptAll : P acceptAllPolicy) :
+    (h_rejectAll : P rejectAllPolicy) :
     ∀ m p, T'.policyAt? m = some p → P p := by
   unfold TowerState.materialize at h_mat
   by_cases h1 : n ≥ Tower.maxDepth
@@ -475,7 +481,7 @@ theorem materialize_policies_resp_preserves
     · simp [h2] at h_mat
       obtain rfl := h_mat.symm
       exact materializeStep_iter_policies_resp_preserves T
-        (n + 1 - T.levels.length) P h_resp h_acceptAll
+        (n + 1 - T.levels.length) P h_resp h_rejectAll
 
 /-- Tower well-formedness at a specific level. -/
 structure WFCtxT (env_a env_b : Env) (T_a T_b : TowerState) (level : Nat)
@@ -508,14 +514,14 @@ structure WFCtxT (env_a env_b : Env) (T_a T_b : TowerState) (level : Nat)
       which is single-level). Preserved by every eval operation: pure
       ops don't touch policies; `installPolicy` applies the same
       `setPolicyAt` cross-side; materialize adds new levels with
-      `acceptAllPolicy` deterministically. -/
+      `rejectAllPolicy` deterministically. -/
   policies_eq : ∀ n, T_a.policyAt? n = T_b.policyAt? n
   /-- Every policy at every level respects bisim. Strengthens
       `policy_resp` (single-level) to a tower-wide invariant. Needed by
       `.em` to construct `policy_resp` at the new active level (level+1).
       Preserved: pure ops don't touch policies; `installPolicy` admits a
       new policy from the bisim-respecting `ptable`; materialize adds
-      `acceptAllPolicy` (which respects bisim trivially). -/
+      `rejectAllPolicy` (which respects bisim trivially). -/
   policies_resp_all : ∀ n p, T_a.policyAt? n = some p → PolicyRespectsBisimT p
   /-- Cross-side: cells referenced by any materialized level's env are
       bisim-related on both sides. With `level_envs_eq` (envs equal
@@ -1730,7 +1736,7 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                         ∀ m p, T_a_mat.policyAt? m = some p → PolicyRespectsBisimT p :=
                       materialize_policies_resp_preserves T_a T_a_mat (level + 1)
                         PolicyRespectsBisimT hm_a h_ctx.policies_resp_all
-                        acceptAllPolicy_respects_bisimT
+                        rejectAllPolicy_respects_bisimT
                     -- Build WFCtxT for the IH at level+1
                     have h_pol_resp_at :
                         ∀ p, T_a_mat.policyAt? (level + 1) = some p → PolicyRespectsBisimT p :=
@@ -2361,7 +2367,7 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                 ∀ m p, T_a_mat.policyAt? m = some p → PolicyRespectsBisimT p :=
               materialize_policies_resp_preserves T_a T_a_mat (level + 1)
                 PolicyRespectsBisimT hm_a h_resp_all
-                acceptAllPolicy_respects_bisimT
+                rejectAllPolicy_respects_bisimT
             -- HeapEvolution from materialize.
             have h_he_mat : HeapEvolution T_a T_b T_a_mat T_b_mat :=
               HeapEvolution.from_heapExt h_hv_a h_hv_b

@@ -32,6 +32,23 @@ import LeanBlack.Eval
 
 def fuel : Nat := 10000
 
+/-! ## Policy table for the demo
+
+    `materializeStep` defaults newly-materialized levels to
+    `rejectAllPolicy` (UnivSoundAt by vacuity). To demonstrate
+    behaviors that require a permissive gate (multn install,
+    ungoverned bad-mod), tests explicitly install
+    `acceptAllPolicy` (= ptable[0]) at the relevant level via
+    `(em ... (installPolicy 0))`. -/
+
+def smokeTable : PolicyTable := [acceptAllPolicy]
+
+/-- Install acceptAllPolicy at level 1 (from level 0). -/
+def acceptAtLevel1 : Expr := .em (.installPolicy 0)
+
+/-- Install acceptAllPolicy at level 2 (from level 0). -/
+def acceptAtLevel2 : Expr := .em (.em (.installPolicy 0))
+
 /-! ## Programs (shared) -/
 
 /-- The multn wrapper, identical to lean-green's. Detects `num?`
@@ -67,12 +84,12 @@ def test_no_multn : Option Val :=
 /-! ## Scene 2: single-level reflection -/
 
 def test_multn_oneup : Option Val :=
-  evalProgram fuel [] <|
-    .seq [installMultnOneUp, .app [.num 2, .num 3, .num 4]]
+  evalProgram fuel smokeTable <|
+    .seq [acceptAtLevel1, installMultnOneUp, .app [.num 2, .num 3, .num 4]]
 
 def test_oneup_preserves_plus : Option Val :=
-  evalProgram fuel [] <|
-    .seq [installMultnOneUp, .app [.var "+", .num 1, .num 2]]
+  evalProgram fuel smokeTable <|
+    .seq [acceptAtLevel1, installMultnOneUp, .app [.var "+", .num 1, .num 2]]
 
 /-! ## Scene 3: two-level reflection (the new thing) -/
 
@@ -80,8 +97,8 @@ def test_oneup_preserves_plus : Option Val :=
     now multn-at-level-1. To observe this, we need to do an
     application at level 1 — which we do by `(em ...)`. -/
 def test_multn_twoup : Option Val :=
-  evalProgram fuel [] <|
-    .seq [installMultnTwoUp,
+  evalProgram fuel smokeTable <|
+    .seq [acceptAtLevel2, installMultnTwoUp,
           .em (.app [.num 2, .num 3, .num 4])]
 
 /-- Two-level multn install does NOT change level 0's apply
@@ -89,8 +106,8 @@ def test_multn_twoup : Option Val :=
     `base-apply` (still `builtinBaseApply` — only level 2's was
     rewired). -/
 def test_twoup_preserves_level0 : Option Val :=
-  evalProgram fuel [] <|
-    .seq [installMultnTwoUp, .app [.num 2, .num 3, .num 4]]
+  evalProgram fuel smokeTable <|
+    .seq [acceptAtLevel2, installMultnTwoUp, .app [.num 2, .num 3, .num 4]]
 
 /-! ## Scene 4: governance gates set! at the level it happens
 
@@ -107,19 +124,19 @@ def badModWrapper : Expr :=
 def installBadModOneUp : Expr :=
   .em <| .set "base-apply" badModWrapper
 
-/-- Un-governed: bad-mod admits, level-0 `(+ 1 2)` returns `0`. -/
+/-- Un-governed: explicit `acceptAllPolicy` admits bad-mod,
+    level-0 `(+ 1 2)` returns `0`. -/
 def test_badmod_breaks_plus_ungoverned : Option Val :=
-  evalProgram fuel [] <|
-    .seq [installBadModOneUp, .app [.var "+", .num 1, .num 2]]
+  evalProgram fuel smokeTable <|
+    .seq [acceptAtLevel1, installBadModOneUp,
+          .app [.var "+", .num 1, .num 2]]
 
-/-- Governed via `(em (installPolicy 0))` (= install `rejectAllPolicy`
-    at level 1): bad-mod is refused. `(+ 1 2)` returns `3`. The
-    table entry at index 0 is `rejectAllPolicy`. -/
+/-- Governed: `materializeStep`'s default `rejectAllPolicy` at level 1
+    refuses the bad-mod. `(+ 1 2)` returns `3`. Demonstrates that
+    the safe default protects level 0 from un-installed `.set`s. -/
 def test_badmod_refused_governed : Option Val :=
-  let table : PolicyTable := [rejectAllPolicy]
-  evalProgram fuel table <|
-    .seq [.em (.installPolicy 0),
-          installBadModOneUp,
+  evalProgram fuel [] <|
+    .seq [installBadModOneUp,
           .app [.var "+", .num 1, .num 2]]
 
 /-! ## Runner -/

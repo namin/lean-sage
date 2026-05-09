@@ -108,7 +108,7 @@ def buildTower (n : Nat) : TowerState :=
   let init : TowerState := { heap := [], levels := [] }
   Nat.fold n (fun _ _ T =>
     let (h', env) := freshLevelEnv T.heap
-    { heap := h', levels := T.levels ++ [{ env := env, policy := acceptAllPolicy }] })
+    { heap := h', levels := T.levels ++ [{ env := env, policy := rejectAllPolicy }] })
     init
 
 /-- The level-0 starting tower: just level 0 materialized. -/
@@ -127,7 +127,7 @@ def initUserEnv (T : TowerState) : Env :=
     by name (rather than to an anonymous lambda inside the `fold`). -/
 def materializeStep (T : TowerState) : TowerState :=
   let (h', env) := freshLevelEnv T.heap
-  { heap := h', levels := T.levels ++ [{ env := env, policy := acceptAllPolicy }] }
+  { heap := h', levels := T.levels ++ [{ env := env, policy := rejectAllPolicy }] }
 
 /-- Ensure level `n` is materialized in `T`. Returns the (potentially
     extended) tower, or `none` if `n ≥ maxDepth`. -/
@@ -274,7 +274,7 @@ private theorem materializeStep_iter_levels_prefix (T : TowerState) (k : Nat) :
       simp only [Nat.fold]
       let T_k := Nat.fold k (fun _ _ T' => materializeStep T') T
       let new_ls : LevelState :=
-        { env := (freshLevelEnv T_k.heap).2, policy := acceptAllPolicy }
+        { env := (freshLevelEnv T_k.heap).2, policy := rejectAllPolicy }
       refine ⟨extras ++ [new_ls], ?_, ?_⟩
       · show (materializeStep T_k).levels = T.levels ++ (extras ++ [new_ls])
         unfold materializeStep
@@ -685,11 +685,11 @@ private theorem materializeStep_cross_side
         simp [h_lvl_len, h_env_eq]
       · -- m > T_a.levels.length; both out of bounds
         have h_a_oob : (T_a.levels ++
-            [({env := (freshLevelEnv T_a.heap).2, policy := acceptAllPolicy}
+            [({env := (freshLevelEnv T_a.heap).2, policy := rejectAllPolicy}
               : LevelState)]).length ≤ m := by
           simp [List.length_append]; omega
         have h_b_oob : (T_b.levels ++
-            [({env := (freshLevelEnv T_b.heap).2, policy := acceptAllPolicy}
+            [({env := (freshLevelEnv T_b.heap).2, policy := rejectAllPolicy}
               : LevelState)]).length ≤ m := by
           simp [List.length_append]; omega
         rw [List.getElem?_eq_none h_a_oob, List.getElem?_eq_none h_b_oob]
@@ -730,11 +730,11 @@ private theorem materializeStep_cross_side_policies
           List.getElem?_append_right (h_lvl_len ▸ Nat.le_refl _)]
       simp [h_lvl_len]
     · have h_a_oob : (T_a.levels ++
-          [({env := (freshLevelEnv T_a.heap).2, policy := acceptAllPolicy}
+          [({env := (freshLevelEnv T_a.heap).2, policy := rejectAllPolicy}
             : LevelState)]).length ≤ m := by
         simp [List.length_append]; omega
       have h_b_oob : (T_b.levels ++
-          [({env := (freshLevelEnv T_b.heap).2, policy := acceptAllPolicy}
+          [({env := (freshLevelEnv T_b.heap).2, policy := rejectAllPolicy}
             : LevelState)]).length ≤ m := by
         simp [List.length_append]; omega
       rw [List.getElem?_eq_none h_a_oob, List.getElem?_eq_none h_b_oob]
