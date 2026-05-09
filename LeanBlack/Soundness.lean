@@ -908,9 +908,13 @@ theorem eval_tower_safe
                         h_levs_mono_T_alloc hh_alloc hh_T'
                         h_tce_T_alloc h_tce_body
       | _ =>
-          -- Remaining cases: app/primApp (multi-step composition with
-          -- evalList/applyVia), em (architectural acceptAllPolicy
-          -- concern), set (SoundForCE direct invocation).
+          -- Remaining cases: `.primApp` (multi-step like `.app cons`,
+          -- needs evalList preservation), `.em` (architectural —
+          -- `materializeStep` default `acceptAllPolicy` breaks
+          -- universal SafeEvolution.1), `.set` (gated mutation —
+          -- strengthened `SafeEvolution.1` makes meta-mutation
+          -- tractable via SoundForCE; non-meta needs a "no env-
+          -- aliasing-with-base-apply" runtime invariant).
           sorry
 
 /-! ## Necessity
