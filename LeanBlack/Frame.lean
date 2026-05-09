@@ -728,17 +728,31 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                     obtain ⟨r_b, T_b', h_eval_b, h_vv, h_ctx_out, h_he, h_env_out, hv_ra, hv_rb⟩ :=
                       ih_eval ptable (level + 1) body upEnv_a upEnv_a T_a_mat T_b_mat r_a T_a'
                         hresp_pt h_ctx_mat h_env_mat h_eval
-                    -- Construct outputs at the OUTER level (not level+1)
-                    -- WFCtxT env_a env_b T_a' T_b' level
-                    -- HeapEvolution from materialize + body
-                    have h_he_outer : HeapEvolution T_a T_b T_a' T_b' := by
-                      sorry  -- HeapEvolution from (T_a, T_b) → (T_a_mat, T_b_mat) via materialize
-                             -- composed with h_he. Needs materialize_HeapEvolution lemma.
-                    have h_ctx_outer : WFCtxT env_a env_b T_a' T_b' level := by
-                      -- Project from h_ctx_out's per-level invariants and lift env_a/b validity
-                      sorry  -- mechanical construction
-                    have h_env_outer : EnvVis env_a env_b T_a'.heap T_b'.heap := by
-                      sorry  -- env_a/env_b lifted via HeapEvolution
+                    -- Construct outputs at the OUTER level (not level+1).
+                    -- HeapEvolution composes materialize step with body's HeapEvolution.
+                    -- materialize_HeapEvolution: T → T_mat preserves bisim trivially since
+                    -- only fresh cells are appended (don't reference any existing idxes).
+                    have h_he_mat : HeapEvolution T_a T_b T_a_mat T_b_mat := by
+                      sorry  -- needs materialize_heap_extends lemma + HeapEvolution.from_heapExt
+                    have h_he_outer : HeapEvolution T_a T_b T_a' T_b' :=
+                      HeapEvolution.trans h_he_mat h_he
+                    -- Outer EnvVis: lift via HeapEvolution.envVis_preserve
+                    have h_env_outer : EnvVis env_a env_b T_a'.heap T_b'.heap :=
+                      h_he_outer.envVis_preserve env_a env_b h_ctx.env_eq
+                        h_ctx.ev_a h_ctx.ev_b h_env
+                    -- Outer WFCtxT: project from h_ctx_out (at level+1, with upEnv_a env)
+                    -- back to (env_a env_b at outer level). Single-side env validity lifted
+                    -- via length_mono. Policies/level-envs facts come from the IH output
+                    -- which inherits all tower-wide invariants.
+                    have h_ctx_outer : WFCtxT env_a env_b T_a' T_b' level :=
+                      ⟨h_ctx_out.policies_eq level, h_ctx_out.hv_a, h_ctx_out.hv_b,
+                       h_ctx.ev_a.length_mono h_he_outer.len_a,
+                       h_ctx.ev_b.length_mono h_he_outer.len_b,
+                       h_ctx_out.policies_resp_all level,
+                       h_ctx.env_eq, h_ctx_out.heap_len_eq,
+                       h_ctx_out.level_envs_valid_a, h_ctx_out.level_envs_valid_b,
+                       h_ctx_out.level_envs_eq, h_ctx_out.policies_eq,
+                       h_ctx_out.policies_resp_all⟩
                     refine ⟨r_b, T_b', ?_, h_vv, h_ctx_outer, h_he_outer,
                             h_env_outer, hv_ra, hv_rb⟩
                     simp [eval, hm_b, he_b, h_eval_b]
