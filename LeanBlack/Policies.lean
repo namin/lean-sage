@@ -118,6 +118,63 @@ theorem rejectAllPolicy_soundForCE (level : Nat) :
     rejectAllPolicy.SoundForCE level := by
   intro _ _ _ h; simp [rejectAllPolicy] at h
 
+/-! ## Numerical helpers (ported from lean-green:Policies.lean:155-186)
+
+    Used by the multnExact CE soundness theorem to split into the
+    vacuous numerical case (`op = .num n`, where `builtinBaseApply`
+    returns none) and the substantive non-numerical case. -/
+
+/-- `op` is not a number. -/
+def OpNotNum (op : Val) : Prop := ∀ n, op ≠ .num n
+
+theorem applyDirect_num_returns_none (fuel : Nat) (ptable : PolicyTable)
+    (level : Nat) (n : Int) (operands : List Val) (T : TowerState) :
+    applyDirect fuel ptable level (.num n) operands T = none := by
+  cases fuel with
+  | zero => simp [applyDirect]
+  | succ k => simp [applyDirect]
+
+theorem callAsBaseApply_builtin_num_none
+    (fuel : Nat) (ptable : PolicyTable) (level : Nat) (n : Int)
+    (operands : List Val) (T : TowerState) :
+    callAsBaseApply fuel ptable level .builtinBaseApply (.num n) operands T
+        = none := by
+  unfold callAsBaseApply
+  exact applyDirect_num_returns_none fuel ptable level n operands T
+
+theorem applyPrim_numq_nonnum (op : Val) (h_op : OpNotNum op) :
+    applyPrim "num?" [op] = some (.bool false) := by
+  cases op with
+  | num n     => exact absurd rfl (h_op n)
+  | bool _    => rfl
+  | nilV      => rfl
+  | cons _ _  => rfl
+  | sym _     => rfl
+  | closure _ _ _    => rfl
+  | prim _           => rfl
+  | builtinBaseApply => rfl
+
+/-- **Numerical-operator half** of `multnExact_soundForCE_first_install_tower`
+    (vacuous). When `op = .num n`, `callAsBaseApply` through
+    `builtinBaseApply` returns `none` regardless of fuel — so the
+    premise is unsatisfiable and the conclusion follows trivially.
+    Ported from lean-green:Policies.lean:1076. -/
+theorem multnExact_CE_num_case_vacuous
+    (new : Val) (fuel : Nat) (ptable : PolicyTable) (level : Nat)
+    (n : Int) (operands : List Val) (T : TowerState)
+    (r : Val) (T' : TowerState) :
+    callAsBaseApply fuel ptable level .builtinBaseApply (.num n) operands T
+        = some (r, T') →
+    ∃ fuel' T'' r',
+      callAsBaseApply fuel' ptable level new (.num n) operands T = some (r', T'') ∧
+      ValVis_weak r r' T'.heap T''.heap ∧
+      T'.policyAt? level = T''.policyAt? level ∧
+      HeapValid T''.heap ∧
+      T.heap.length ≤ T''.heap.length := by
+  intro h
+  rw [callAsBaseApply_builtin_num_none] at h
+  contradiction
+
 /-! ## `numGuardPolicy` — loose structural shape
 
     Admits any closure with `(λ (op args). (if (num? op) <anything>
@@ -256,5 +313,19 @@ theorem multnExact_soundForCE_first_install_tower
         ValVis_weak r r' T'.heap T''.heap ∧
         T'.policyAt? level = T''.policyAt? level ∧
         HeapValid T''.heap ∧
-        T.heap.length ≤ T''.heap.length :=
-  sorry
+        T.heap.length ≤ T''.heap.length := by
+  -- Mirror lean-green:Policies.lean:1228-1236: split on whether op is
+  -- a number. The numerical case is vacuous (premise unsatisfiable);
+  -- the non-numerical case is the substantive trace through the
+  -- closure body and remains sorry'd pending ports of InstallFacts /
+  -- RuntimeWF / *Deep / *RespectsShift infrastructure.
+  by_cases hn : ∃ n, op = .num n
+  · obtain ⟨n, hop⟩ := hn
+    subst hop
+    exact multnExact_CE_num_case_vacuous new fuel ptable level n operands T r T' h_old
+  · have _h_op : OpNotNum op := fun n hop_num => hn ⟨n, hop_num⟩
+    -- Substantive non-num case: requires lean-green's
+    -- multnExact_CE_nonnum_case (~600 LOC) plus the InstallFacts /
+    -- RuntimeWF / *Deep / *RespectsShift infrastructure that hasn't
+    -- been ported yet. See DUMP.md.
+    sorry
