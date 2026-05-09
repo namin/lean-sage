@@ -356,6 +356,11 @@ theorem TowerState.materialize_envAt?_preserves
       rw [this]
       exact h_env
 
+/-! Single-side materialize preservation lemmas (HeapValid, level
+    envs valid in heap, all-policies-respect-bisim) live in
+    `Frame.lean` since they reference `HeapValid`/`EnvValid` (which
+    live in `Bisim.lean`, not visible to `Tower`). -/
+
 /-- `materialize` only grows the heap. -/
 theorem TowerState.materialize_heap_grows
     (T T' : TowerState) (n : Nat)

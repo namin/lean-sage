@@ -74,6 +74,51 @@ def PolicyRespectsBisimT (p : BlackPolicy) : Prop :=
 def PolicyTableRespectsBisimT (ptable : PolicyTable) : Prop :=
   ∀ (idx : Nat) p, ptable[idx]? = some p → PolicyRespectsBisimT p
 
+/-- `acceptAllPolicy` admits every mutation, so trivially respects bisim
+    (both sides return `true` regardless). -/
+theorem acceptAllPolicy_respects_bisimT :
+    PolicyRespectsBisimT acceptAllPolicy := by
+  unfold PolicyRespectsBisimT acceptAllPolicy; intros; rfl
+
+/-! ## Single-side materialize preservation lemmas
+
+    Used by `.em` and `applyVia` cases below. Each says materialize
+    preserves a single-side invariant (HeapValid, level-envs-valid,
+    all-policies-respect-bisim). Bodies sorry'd — straightforward
+    inductions over Nat.fold + appeal to `freshLevelEnv`'s
+    deterministic structure. -/
+
+/-- Materialize preserves heap validity (each `freshLevelEnv` step
+    only appends `.prim`/`.builtinBaseApply` cells, all trivially
+    valid since they don't reference any heap idxes). -/
+theorem materialize_HeapValid_preserves
+    (T T' : TowerState) (n : Nat)
+    (_h_mat : T.materialize n = some T')
+    (_h_hv : HeapValid T.heap) :
+    HeapValid T'.heap :=
+  sorry
+
+/-- Materialize preserves "level envs valid in heap": existing levels
+    extend trivially via `EnvValid.heap_extends`; new levels' envs are
+    constructed from `freshLevelEnv` to be valid in the extended heap. -/
+theorem materialize_level_envs_valid_preserves
+    (T T' : TowerState) (n : Nat)
+    (_h_mat : T.materialize n = some T')
+    (_h_hv : HeapValid T.heap)
+    (_h_levs : ∀ m env, T.envAt? m = some env → EnvValid env T.heap) :
+    ∀ m env, T'.envAt? m = some env → EnvValid env T'.heap :=
+  sorry
+
+/-- Materialize preserves "all policies satisfy P" provided P holds for
+    `acceptAllPolicy` (which materialize uses for new levels). -/
+theorem materialize_policies_resp_preserves
+    (T T' : TowerState) (n : Nat) (P : BlackPolicy → Prop)
+    (_h_mat : T.materialize n = some T')
+    (_h_resp : ∀ m p, T.policyAt? m = some p → P p)
+    (_h_acceptAll : P acceptAllPolicy) :
+    ∀ m p, T'.policyAt? m = some p → P p :=
+  sorry
+
 /-- Tower well-formedness at a specific level. -/
 structure WFCtxT (env_a env_b : Env) (T_a T_b : TowerState) (level : Nat)
     : Prop where
@@ -609,15 +654,94 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                             h_he_chain, h_env_out, hv_ra, hv_rb⟩
                     simp [eval, h_eval_f_b, h_eval_args_b, h_eval_av_b]
         | set _ _          => sorry  -- USES policy_eq_at + ValVis_aux_update; substantial
-        | em _             =>
-            -- Cross-side materialize-bisim — the genuinely new logic
-            -- vs lean-green. Single-side lemmas are now in Tower.lean
-            -- (materialize_envAt?_preserves, materialize_heap_grows
-            -- both fully proved). Remaining gap: cross-side parallel
-            -- materialization needs `level_envs_eq` cross-side in
-            -- WFCtxT, which would need to propagate through all the
-            -- proven cases. Deferred.
-            sorry
+        | em body =>
+            -- Cross-side materialize-bisim. Now that all the Tower
+            -- cross-side lemmas are proved, the .em case threads them
+            -- to construct WFCtxT for the IH at level+1.
+            simp only [eval] at h_eval
+            cases hm_a : T_a.materialize (level + 1) with
+            | none => simp [hm_a] at h_eval
+            | some T_a_mat =>
+                simp only [hm_a] at h_eval
+                cases he_a : T_a_mat.envAt? (level + 1) with
+                | none => simp [he_a] at h_eval
+                | some upEnv_a =>
+                    simp only [he_a] at h_eval
+                    -- h_eval : eval k ptable (level+1) body upEnv_a T_a_mat = some (r_a, T_a')
+                    -- Cross-side: T_b materializes too
+                    have hm_b_some : (T_b.materialize (level + 1)).isSome := by
+                      cases h_some : T_b.materialize (level + 1) with
+                      | none =>
+                          have h_a_none : T_a.materialize (level + 1) = none :=
+                            (T_a.materialize_cross_side_some_iff T_b _).mpr h_some
+                          rw [h_a_none] at hm_a; exact Option.noConfusion hm_a
+                      | some _ => simp
+                    obtain ⟨T_b_mat, hm_b⟩ := Option.isSome_iff_exists.mp hm_b_some
+                    -- Cross-side parallel facts
+                    obtain ⟨h_heap_eq_mat, h_envs_eq_mat⟩ :=
+                      T_a.materialize_cross_side_envs_eq T_b T_a_mat T_b_mat (level + 1)
+                        h_ctx.heap_len_eq h_ctx.level_envs_eq hm_a hm_b
+                    have h_pols_eq_mat :=
+                      T_a.materialize_cross_side_policies_eq T_b T_a_mat T_b_mat (level + 1)
+                        h_ctx.heap_len_eq h_ctx.policies_eq h_ctx.level_envs_eq hm_a hm_b
+                    have he_b : T_b_mat.envAt? (level + 1) = some upEnv_a := by
+                      rw [← h_envs_eq_mat (level + 1)]; exact he_a
+                    -- Single-side preservation facts (Tower lemmas)
+                    have h_hv_a_mat : HeapValid T_a_mat.heap :=
+                      materialize_HeapValid_preserves T_a T_a_mat (level + 1) hm_a h_ctx.hv_a
+                    have h_hv_b_mat : HeapValid T_b_mat.heap :=
+                      materialize_HeapValid_preserves T_b T_b_mat (level + 1) hm_b h_ctx.hv_b
+                    have h_levs_valid_a_mat :
+                        ∀ m env, T_a_mat.envAt? m = some env → EnvValid env T_a_mat.heap :=
+                      materialize_level_envs_valid_preserves T_a T_a_mat (level + 1) hm_a
+                        h_ctx.hv_a h_ctx.level_envs_valid_a
+                    have h_levs_valid_b_mat :
+                        ∀ m env, T_b_mat.envAt? m = some env → EnvValid env T_b_mat.heap :=
+                      materialize_level_envs_valid_preserves T_b T_b_mat (level + 1) hm_b
+                        h_ctx.hv_b h_ctx.level_envs_valid_b
+                    have h_resp_all_mat :
+                        ∀ m p, T_a_mat.policyAt? m = some p → PolicyRespectsBisimT p :=
+                      materialize_policies_resp_preserves T_a T_a_mat (level + 1)
+                        PolicyRespectsBisimT hm_a h_ctx.policies_resp_all
+                        acceptAllPolicy_respects_bisimT
+                    -- Build WFCtxT for the IH at level+1
+                    have h_pol_resp_at :
+                        ∀ p, T_a_mat.policyAt? (level + 1) = some p → PolicyRespectsBisimT p :=
+                      fun p h => h_resp_all_mat (level + 1) p h
+                    have h_ev_a : EnvValid upEnv_a T_a_mat.heap :=
+                      h_levs_valid_a_mat (level + 1) upEnv_a he_a
+                    have h_ev_b : EnvValid upEnv_a T_b_mat.heap :=
+                      h_levs_valid_b_mat (level + 1) upEnv_a he_b
+                    have h_ctx_mat : WFCtxT upEnv_a upEnv_a T_a_mat T_b_mat (level + 1) :=
+                      ⟨h_pols_eq_mat (level + 1), h_hv_a_mat, h_hv_b_mat,
+                       h_ev_a, h_ev_b, h_pol_resp_at,
+                       rfl, h_heap_eq_mat,
+                       h_levs_valid_a_mat, h_levs_valid_b_mat,
+                       h_envs_eq_mat, h_pols_eq_mat, h_resp_all_mat⟩
+                    -- Need EnvVis upEnv_a upEnv_a T_a_mat.heap T_b_mat.heap (self-bisim)
+                    -- This requires showing upEnv_a's bindings are bisim-related cross-side
+                    -- — which holds since heap-len-equal and same env content.
+                    have h_env_mat : EnvVis upEnv_a upEnv_a T_a_mat.heap T_b_mat.heap := by
+                      sorry  -- env self-bisim across bisim-related heaps;
+                             -- needs an EnvVis-self-via-heap-len-eq lemma
+                    -- IH on body at level+1
+                    obtain ⟨r_b, T_b', h_eval_b, h_vv, h_ctx_out, h_he, h_env_out, hv_ra, hv_rb⟩ :=
+                      ih_eval ptable (level + 1) body upEnv_a upEnv_a T_a_mat T_b_mat r_a T_a'
+                        hresp_pt h_ctx_mat h_env_mat h_eval
+                    -- Construct outputs at the OUTER level (not level+1)
+                    -- WFCtxT env_a env_b T_a' T_b' level
+                    -- HeapEvolution from materialize + body
+                    have h_he_outer : HeapEvolution T_a T_b T_a' T_b' := by
+                      sorry  -- HeapEvolution from (T_a, T_b) → (T_a_mat, T_b_mat) via materialize
+                             -- composed with h_he. Needs materialize_HeapEvolution lemma.
+                    have h_ctx_outer : WFCtxT env_a env_b T_a' T_b' level := by
+                      -- Project from h_ctx_out's per-level invariants and lift env_a/b validity
+                      sorry  -- mechanical construction
+                    have h_env_outer : EnvVis env_a env_b T_a'.heap T_b'.heap := by
+                      sorry  -- env_a/env_b lifted via HeapEvolution
+                    refine ⟨r_b, T_b', ?_, h_vv, h_ctx_outer, h_he_outer,
+                            h_env_outer, hv_ra, hv_rb⟩
+                    simp [eval, hm_b, he_b, h_eval_b]
         | letE x e body =>
             -- Mechanical port from lean-green's `.letE`:
             -- 1) IH on e
