@@ -25,26 +25,39 @@ infrastructure.
 The asymmetry: lean-grey has the **shape**, lean-green has the **substance**.
 Neither alone is the whole picture.
 
-## The encoding: levels as heap cells
+## The encoding: per-level envs, one global heap
 
-The single elegant move: **each level's `RunState` is a heap cell in the level
-above's heap**. The infinite tower exists conceptually; only finitely many
-levels are realized at runtime, just like Black's lazy meta-continuation
-streams (and answering lean-grey's `Open` item on meta-continuations).
+> **Implementation note.** The first draft of this design proposed
+> per-level heaps (each `LevelState = { heap, policy }`). When the
+> runtime hit the cross-level closure invocation problem — a closure
+> `set!`-ed into level N's `base-apply` from level N+1 carries a
+> captured env with idxes that were valid at level N+1, but the
+> closure now runs at level N — the cleaner answer turned out to be
+> **one global heap, per-level envs and policies**. The "level"
+> abstraction is then about which name bindings are *root* at each
+> level, not about which cells are physically located there.
 
 ```
-Tower                 ≡  coinductive stream of RunState
-RunState (per level)  ≡  { heap : Heap, policy : BlackPolicy }   -- from lean-green
-Tower.level n         ≡  the RunState materialized at depth n (lazy)
+TowerState  ≡  { heap : Heap,        -- global, level-uniform allocation
+                 levels : List LevelState }
+LevelState  ≡  { env : Env,          -- root bindings at this level
+                 policy : BlackPolicy }  -- gates set!s happening at this level
 ```
 
-`(em body)` at level N: shifts to level N+1, materializing it on demand. The
-level-N+1 `RunState` lives at a heap cell in level N+2's heap (which is itself
-materialized lazily if `(em (em body))` ever fires). Concretely, the runtime
-need only realize `levels.take (max-em-depth + 1)`.
+`(em body)` at level N: shifts to level N+1, materializing it on demand. A
+fresh level allocates its own primitive cells + a fresh `base-apply ↦
+builtinBaseApply` cell, all in the global heap; the level's env binds those
+names to the new idxes.
 
-The infinite-in-principle / finite-in-practice gap is exactly Black's
-meta-continuation discipline.
+Cross-level closure invocation Just Works: a closure created at level N+1
+captures global-heap idxes; those stay valid no matter who dispatches it.
+This avoids a cascade of "translate the captured env" complications that
+per-level heaps would have forced.
+
+The infinite-in-principle / finite-in-practice gap is preserved: only
+finitely many levels are materialized at runtime (`Tower.maxDepth = 16`
+in the runtime; the soundness theorem will quantify over arbitrary
+materialized prefixes).
 
 ## The three primitives, unified
 
