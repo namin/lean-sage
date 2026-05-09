@@ -70,6 +70,13 @@ def callAsBaseApply (fuel : Nat) (ptable : PolicyTable) (level : Nat)
     version specializes to the level-of-interest. -/
 def CE (level : Nat) (old new : Val) : Prop :=
   ∀ fuel ptable op operands T r T',
+    HeapValid T.heap → ValValid op T.heap → ListValValid operands T.heap →
+    ValValid old T.heap → ValValid new T.heap →
+    PolicyTableRespectsBisimT ptable →
+    (∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p) →
+    (∀ n env, T.envAt? n = some env → EnvValid env T.heap) →
+    (∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p) →
+    (∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap) →
     callAsBaseApply fuel ptable level old op operands T = some (r, T') →
     ∃ fuel' T'' r',
       callAsBaseApply fuel' ptable level new op operands T = some (r', T'') ∧
@@ -84,6 +91,13 @@ def CE (level : Nat) (old new : Val) : Prop :=
     `WAND.md` for the full architectural argument. -/
 def CE_weak (level : Nat) (old new : Val) : Prop :=
   ∀ fuel ptable op operands T r T',
+    HeapValid T.heap → ValValid op T.heap → ListValValid operands T.heap →
+    ValValid old T.heap → ValValid new T.heap →
+    PolicyTableRespectsBisimT ptable →
+    (∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p) →
+    (∀ n env, T.envAt? n = some env → EnvValid env T.heap) →
+    (∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p) →
+    (∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap) →
     callAsBaseApply fuel ptable level old op operands T = some (r, T') →
     ∃ fuel' T'' r',
       callAsBaseApply fuel' ptable level new op operands T = some (r', T'') ∧
