@@ -110,8 +110,13 @@ def eval (fuel : Nat) (ptable : PolicyTable) (level : Nat) (exp : Expr)
                         some (.bool false, T')
                   | _, _ => none
                 else
-                  -- Plain mutation: not gated. Returns true uniformly.
-                  some (.bool true, T'.updateHeap idx v)
+                  -- Non-meta mutation: rejected. `.set` is for governed
+                  -- meta-env modifications only. A plain (ungated) mutation
+                  -- of an arbitrary heap cell could break tower-level CE if
+                  -- the cell aliases a base-apply. Aligns with the design
+                  -- intent that all `.set`s are meta-mutations gated by the
+                  -- level's policy.
+                  none
     | .em body      =>
         -- Shift up: materialize level+1, evaluate body there with
         -- the new level's env in scope.

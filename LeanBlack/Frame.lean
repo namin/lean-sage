@@ -686,9 +686,7 @@ theorem all_preserves_envAt (n : Nat) :
                           exact h_env_e
                       · simp at h_eval
                     · rw [if_neg hm] at h_eval
-                      simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
-                      obtain ⟨_, h_T⟩ := h_eval; subst h_T
-                      rw [TowerState.updateHeap_envAt?]; exact h_env_e
+                      simp at h_eval
         | em body =>
             simp only [eval] at h_eval
             cases hm : T.materialize (level + 1) with
@@ -1663,30 +1661,15 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                                             h_gate_b_false]
                                     · intro d
                                       cases d with | zero => trivial | succ _ => rfl
-                    · -- PLAIN MUTATION case.
-                      have h_meta_mut_b_eq : isMetaMutation x env_b T_b_inner level =
-                          isMetaMutation x env_a T_a_inner level := by
-                        unfold isMetaMutation
-                        rw [h_ctx.env_eq, h_ctx_inner.level_envs_eq]
+                    · -- Non-meta `.set` is now rejected by eval (returns
+                      -- `none`), so this branch is vacuous.
                       have h_meta_mut_a_false :
                           isMetaMutation x env_a T_a_inner level = false := by
                         cases h_dec : isMetaMutation x env_a T_a_inner level
                         · rfl
                         · exact absurd h_dec h_meta_mut
-                      have h_meta_mut_b_false :
-                          isMetaMutation x env_b T_b_inner level = false := by
-                        rw [h_meta_mut_b_eq]; exact h_meta_mut_a_false
                       rw [h_meta_mut_a_false] at h_eval
-                      simp only [Bool.false_eq_true, ↓reduceIte,
-                                 Option.some.injEq, Prod.mk.injEq] at h_eval
-                      obtain ⟨h_r, h_T⟩ := h_eval
-                      subst h_r; subst h_T
-                      refine ⟨.bool true, T_b_inner.updateHeap idx v_b, ?_, ?_,
-                              h_ctx_upd_full, h_he_chain_upd, h_env_out_upd,
-                              trivial, trivial⟩
-                      · simp [eval, h_eval_e_b, hl_b, h_meta_mut_b_false]
-                      · intro d
-                        cases d with | zero => trivial | succ _ => rfl
+                      simp at h_eval
         | em body =>
             -- Cross-side materialize-bisim. Now that all the Tower
             -- cross-side lemmas are proved, the .em case threads them

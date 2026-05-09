@@ -1187,17 +1187,14 @@ theorem eval_tower_safe
                                       obtain ⟨_, h_T_eq⟩ := h_eval
                                       subst h_T_eq
                                       exact ⟨h_tce_e, h_safe_mid⟩
-                          · -- Non-meta mutation: needs aliasing invariant. Sorry.
+                          · -- Non-meta `.set` is now rejected by eval
+                            -- (returns `none`), so this branch is vacuous.
                             have h_meta_false : isMetaMutation x env T_mid level = false := by
                               cases h : isMetaMutation x env T_mid level with
                               | true => exact absurd h h_meta
                               | false => rfl
                             rw [h_meta_false] at h_eval
-                            simp only [Bool.false_eq_true, ↓reduceIte,
-                                       Option.some.injEq, Prod.mk.injEq] at h_eval
-                            obtain ⟨_, h_T_eq⟩ := h_eval
-                            subst h_T_eq
-                            sorry
+                            simp at h_eval
 
 /-! ## Necessity
 
