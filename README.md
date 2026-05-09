@@ -179,6 +179,4 @@ The reflective rewiring of `base-apply` lets you:
   first install conservatively extends `builtinBaseApply` for CE_weak
   (non-num operators behave identically; num operators get the multn fold).
 
-See [`DESIGN.md`](DESIGN.md) for the full architectural rationale and
-[`DUMP.md`](DUMP.md) / [`DUMP2.md`](DUMP2.md) for the proof-development log
-(Sessions A through D).
+See [`DESIGN.md`](DESIGN.md) for the full architectural rationale.
