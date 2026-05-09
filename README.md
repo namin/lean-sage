@@ -20,7 +20,8 @@ Status, by file:
 | `Tower.lean` | done | LevelState, TowerState, materialization, accessors, `RunState := TowerState` shim |
 | `Eval.lean` | done | tower-indexed eval/evalList/applyVia/applyDirect |
 | `Smoke.lean` | done | 8 tests across 4 scenes — all pass |
-| `Bisim.lean` | partial (3057/7580 LOC) | depth-indexed bisim, validity, heap-extension, in-place-update preservation, `HeapEvolution`, list/listToVal/applyPrim bisim, alloc-chain, `bisim_imp_eq` — all ported verbatim via the `RunState := TowerState` shim. **Frame theorem and post-frame (shift, Deep, runtime invariants) deferred** — frame's signature drops lean-green's `metaEnv` parameter and adds `level`, and the `.em` case is genuinely new logic, so those sections need real engineering, not a port |
+| `Bisim.lean` | partial (3057/7580 LOC) | depth-indexed bisim, validity, heap-extension, in-place-update preservation, `HeapEvolution`, list/listToVal/applyPrim bisim, alloc-chain, `bisim_imp_eq` — all ported verbatim via the `RunState := TowerState` shim |
+| `Frame.lean` | scaffold + trivial cases | tower-aware `WFCtxT`, `FrameStmtT`, `frame_tower` defined. Proved cases: `zero`, `.num`, `.bool`, `.lam`, `.quote`, `.var`. Sorry'd with named TODOs: `.ifte`, `.app`, `.primApp`, `.set`, `.em`, `.letE`, `.seq`, `.installPolicy`, plus the `evalList`, `applyVia`, `applyDirect` cases |
 | `Policies.lean` | TODO | will port multnExactPolicy + soundness theorem |
 | `Soundness.lean` | TODO | the headline `eval_tower_safe` theorem |
 | `DESIGN.md` | done | architectural rationale, decisions, scope |
