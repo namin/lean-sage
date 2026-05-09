@@ -192,22 +192,17 @@ theorem TowerCE.refl (T : TowerState)
       simp only [callAsBaseApply]; exact h_call_b
 
 /-- `CE` is covariant in `h_ref` (a smaller `h_ref` gives a stronger CE
-    that implies the CE for any larger `h_ref`). When `h₂` extends `h₁`,
-    the test states extending `h₂` are a subset of those extending `h₁`,
-    so `CE level h₁ old new` implies `CE level h₂ old new`. -/
+    that implies the CE for any larger `h_ref`). With length-only
+    monotonicity premise, this is just `Nat.le_trans`. -/
 private theorem CE_weaken_h_ref (level : Nat) (h₁ h₂ : Heap)
-    (h_ext : ∃ extras, h₂ = h₁ ++ extras)
+    (h_le : h₁.length ≤ h₂.length)
     (old new : Val) (h_ce : CE level h₁ old new) :
     CE level h₂ old new := by
-  intro fuel ptable op operands T r T' h_ext_T hh hv_op hv_args
+  intro fuel ptable op operands T r T' h_len_T hh hv_op hv_args
         hv_old hv_new h_pt h_pol_resp h_levs h_resp_all h_bisim h_call
-  obtain ⟨e2, he2⟩ := h_ext
-  obtain ⟨e1, he1⟩ := h_ext_T
-  have h_ext_T_h₁ : ∃ extras, T.heap = h₁ ++ extras := by
-    refine ⟨e2 ++ e1, ?_⟩
-    rw [he1, he2, List.append_assoc]
-  exact h_ce fuel ptable op operands T r T' h_ext_T_h₁ hh hv_op hv_args
-        hv_old hv_new h_pt h_pol_resp h_levs h_resp_all h_bisim h_call
+  exact h_ce fuel ptable op operands T r T' (Nat.le_trans h_le h_len_T)
+        hh hv_op hv_args hv_old hv_new h_pt h_pol_resp h_levs h_resp_all
+        h_bisim h_call
 
 /-- If `T'` has the same heap as `T` (e.g., after `setPolicyAt`), then
     `TowerCE T T'` reduces to `TowerCE T T`. The heap-equality forces
@@ -240,8 +235,10 @@ private theorem TowerCE_of_heap_extends (T T' : TowerState)
   have h_eq_app : oldApply = newApply := Option.some.inj h_new
   subst h_eq_app
   -- h_self gives CE n T.heap oldApply oldApply; we need CE n T'.heap.
-  -- T'.heap extends T.heap by h_ext, so apply CE_weaken_h_ref.
-  exact CE_weaken_h_ref n T.heap T'.heap ⟨extras, h_eq⟩ oldApply oldApply
+  -- T'.heap extends T.heap by h_ext, so length is monotone; apply CE_weaken_h_ref.
+  have h_len : T.heap.length ≤ T'.heap.length := by
+    rw [h_eq]; simp [List.length_append]
+  exact CE_weaken_h_ref n T.heap T'.heap h_len oldApply oldApply
     (h_self n idx oldApply oldApply h_lookup h_old h_old)
 
 /-- An expression is *atomic* if its evaluation reduces to a result
@@ -313,67 +310,68 @@ private theorem eval_atomic_T_unchanged
   | primApp _ _ | letE _ _ _ | seq _ | installPolicy _ =>
       simp [Expr.IsAtomic] at h_atomic
 
-/-- **TowerCE composition (transitivity).** Given two-step CE chain
-    `T → T_mid → T''` with appropriate monotonicity, derives
-    `TowerCE T T''`. The strengthened CE (with `h_ref` premise) is
-    what makes this work: a test state `T₀` extending `T''.heap`
-    also extends `T_mid.heap` (by transitivity of heap-prefix), so
-    intermediate values from `T_mid.heap` remain ValValid in
-    `T₀.heap` — the precondition needed to invoke the second CE.
+/-- **TowerCE composition (transitivity), general version.** Given a
+    two-step CE chain `T → T_mid → T''`, with length monotonicity and
+    env stability across the first transition, derives `TowerCE T T''`.
+    Handles mutating first sub-evals (where `T_mid.heap[idx]` may
+    differ from `T.heap[idx]`) via `ValVis_trans` for the bisim chain.
 
-    Depends on `ValVis_trans` (currently sorry'd in `Bisim.lean`)
-    for chaining the bisim conclusion of the two CE invocations.
-
-    Preconditions:
-    - `T_mid.heap` extends `T.heap` (no mutations in first sub-eval
-      of base-apply cells)
-    - `T''.heap` extends `T_mid.heap` (heap monotonicity)
-    - per-level envs are stable across the first transition
-    - `HeapValid T_mid.heap` (so intermediate values are ValValid)
-
-    Note: this is the *general* composition lemma. For specific
-    cases where one of the heaps is unchanged (e.g., `.installPolicy`),
-    use `TowerCE_of_heap_eq` instead — it doesn't need ValVis_trans. -/
+    Preconditions (all length-only, no prefix-extension required):
+    - `T.heap.length ≤ T_mid.heap.length` (mono of first eval)
+    - `T_mid.heap.length ≤ T''.heap.length` (mono of second eval)
+    - `T_mid.envAt? n = T.envAt? n` for all n (env stability across
+      first transition — typically holds since most evals don't
+      change envs except `.em` which adds new levels)
+    - `HeapValid T_mid.heap`, `HeapValid T''.heap` -/
 private theorem TowerCE_trans (T T_mid T'' : TowerState)
-    (h_mono_12 : ∃ extras, T_mid.heap = T.heap ++ extras)
-    (h_mono_23 : ∃ extras, T''.heap = T_mid.heap ++ extras)
-    (h_env_eq_12 : ∀ n, T_mid.envAt? n = T.envAt? n)
+    (h_mono_12 : T.heap.length ≤ T_mid.heap.length)
+    (h_mono_23 : T_mid.heap.length ≤ T''.heap.length)
+    (h_levs_mono_12 : ∀ n env, T.envAt? n = some env → T_mid.envAt? n = some env)
     (h_hh_mid : HeapValid T_mid.heap)
     (h_hh_T'' : HeapValid T''.heap)
     (h12 : TowerCE T T_mid)
     (h23 : TowerCE T_mid T'') :
     TowerCE T T'' := by
   intro n idx oldApply newApply h_lookup h_old h_new
-  -- Get mid = T_mid.heap[idx]?. Some by monotonicity.
-  obtain ⟨extras12, h_eq_12⟩ := h_mono_12
-  have h_lt : idx < T.heap.length := (List.getElem?_eq_some_iff.mp h_old).1
-  have h_t_mid_idx : T_mid.heap[idx]? = T.heap[idx]? := by
-    rw [h_eq_12]; exact List.getElem?_append_left h_lt
-  have h_mid : T_mid.heap[idx]? = some oldApply := h_t_mid_idx.trans h_old
-  -- Apply h12 at (n, idx, old, mid).
-  obtain ⟨extras23, h_eq_23⟩ := h_mono_23
-  -- TowerCE T T_mid uses T_mid.heap as h_ref. We have T_mid.heap[idx] = some oldApply
-  -- (from h_mid). Apply h12 to get CE n T_mid.heap oldApply oldApply
-  -- (since old = mid because heap is unchanged at this idx).
-  have h_ce_12 : CE n T_mid.heap oldApply oldApply :=
-    h12 n idx oldApply oldApply h_lookup h_old h_mid
-  -- TowerCE T_mid T'' uses T''.heap as h_ref. Apply h23 at (n, idx, oldApply, newApply)
-  -- with the env lookup lifted via h_env_eq_12.
+  -- mid = T_mid.heap[idx]?. Some by length monotonicity.
+  have h_lt_T : idx < T.heap.length := (List.getElem?_eq_some_iff.mp h_old).1
+  have h_lt_mid : idx < T_mid.heap.length := Nat.lt_of_lt_of_le h_lt_T h_mono_12
+  obtain ⟨mid, h_mid⟩ : ∃ mid, T_mid.heap[idx]? = some mid := by
+    refine ⟨T_mid.heap[idx], ?_⟩
+    exact List.getElem?_eq_some_iff.mpr ⟨h_lt_mid, rfl⟩
+  have hv_mid_in_mid : ValValid mid T_mid.heap := h_hh_mid idx mid h_mid
+  -- Lift the lookup from T to T_mid via levels_mono.
   have h_lookup_mid : (T_mid.envAt? (n + 1)).bind (·.lookup "base-apply") = some idx := by
-    rw [h_env_eq_12]; exact h_lookup
-  have h_ce_23 : CE n T''.heap oldApply newApply :=
-    h23 n idx oldApply newApply h_lookup_mid h_mid h_new
-  -- Goal: CE n T''.heap oldApply newApply.
-  -- We have h_ce_23 directly. Wait — but what about h_ce_12's contribution?
-  -- If oldApply = newApply (no mutation), CE refl works. Otherwise, need
-  -- ValVis_trans to chain through mid (= oldApply).
-  -- For now, just use h_ce_23 (which directly answers the question).
-  -- The composition only matters if mid ≠ old, in which case h_ce_12 gives
-  -- CE old mid (which is the chain T → T_mid). That's needed to chain through
-  -- if T''.heap[idx] differs from T.heap[idx] AND from T_mid.heap[idx].
-  -- Since T_mid.heap[idx] = T.heap[idx] = oldApply (heap monotonicity preserved
-  -- old), we just have CE n T''.heap oldApply newApply directly.
-  exact h_ce_23
+    obtain ⟨env_n, h_env_T, h_lookup_x⟩ := Option.bind_eq_some_iff.mp h_lookup
+    have h_env_mid : T_mid.envAt? (n + 1) = some env_n := h_levs_mono_12 (n + 1) env_n h_env_T
+    rw [h_env_mid]
+    exact Option.bind_eq_some_iff.mpr ⟨env_n, rfl, h_lookup_x⟩
+  -- Apply h12 at (n, idx, oldApply, mid).
+  have h_ce_12 : CE n T_mid.heap oldApply mid :=
+    h12 n idx oldApply mid h_lookup h_old h_mid
+  -- Apply h23 at (n, idx, mid, newApply).
+  have h_ce_23 : CE n T''.heap mid newApply :=
+    h23 n idx mid newApply h_lookup_mid h_mid h_new
+  -- Now construct CE n T''.heap oldApply newApply via composition.
+  intro fuel ptable op operands T₀ r T₀' h_len_T₀ hh_T₀ hv_op hv_args
+        hv_old hv_new h_pt h_pol_resp h_levs h_resp_all h_bisim h_call_old
+  -- ValValid mid T₀.heap by length_mono.
+  have h_len_mid_T₀ : T_mid.heap.length ≤ T₀.heap.length :=
+    Nat.le_trans h_mono_23 h_len_T₀
+  have hv_mid_T₀ : ValValid mid T₀.heap :=
+    ValValid.length_mono mid hv_mid_in_mid h_len_mid_T₀
+  -- Apply h_ce_12 at T₀ (length premise: T_mid.heap.length ≤ T₀.heap.length).
+  obtain ⟨fuel1, T1, r1, h_call_mid, h_vis_r_r1, h_pol_eq_12, h_hv_T1, h_len_T₀_T1⟩ :=
+    h_ce_12 fuel ptable op operands T₀ r T₀' h_len_mid_T₀ hh_T₀ hv_op hv_args
+      hv_old hv_mid_T₀ h_pt h_pol_resp h_levs h_resp_all h_bisim h_call_old
+  -- Apply h_ce_23 at T₀ (length premise: T''.heap.length ≤ T₀.heap.length).
+  obtain ⟨fuel2, T2, r', h_call_new, h_vis_r1_r', h_pol_eq_23, h_hv_T2, h_len_T₀_T2⟩ :=
+    h_ce_23 fuel1 ptable op operands T₀ r1 T1 h_len_T₀ hh_T₀ hv_op hv_args
+      hv_mid_T₀ hv_new h_pt h_pol_resp h_levs h_resp_all h_bisim h_call_mid
+  -- Compose: ValVis r r' T₀'.heap T2.heap via ValVis_trans through T1.heap.
+  refine ⟨fuel2, T2, r', h_call_new, ?_, ?_, h_hv_T2, h_len_T₀_T2⟩
+  · exact ValVis_trans r r1 r' T₀'.heap T1.heap T2.heap h_vis_r_r1 h_vis_r1_r'
+  · exact h_pol_eq_12.trans h_pol_eq_23
 
 /-- If `T_mid` shares its heap and per-level envs with `T`, then
     `TowerCE T_mid T''` lifts to `TowerCE T T''`. Useful when a
@@ -422,11 +420,12 @@ private theorem eval_preserves_self_invariants
     (∀ n p, T'.policyAt? n = some p → PolicyRespectsBisimT p) ∧
     (∀ n e, T'.envAt? n = some e → EnvVis e e T'.heap T'.heap) ∧
     EnvValid env T'.heap ∧
-    ValValid v T'.heap := by
+    ValValid v T'.heap ∧
+    T.heap.length ≤ T'.heap.length := by
   obtain ⟨ih_eval, _, _, _⟩ := frame_tower fuel
   have h_ctx : WFCtxT env env T T level :=
     WFCtxT.refl env T level hh hev h_pol_resp_at h_levs h_resp_all
-  obtain ⟨v_b, T_b', h_eval_b, _, h_ctx_out, _, _, hv_va, _⟩ :=
+  obtain ⟨v_b, T_b', h_eval_b, _, h_ctx_out, h_he, _, hv_va, _⟩ :=
     ih_eval ptable level exp env env T T v T'
       h_pt h_ctx h_env_self h_eval
   -- eval is deterministic: v_b = v, T_b' = T'.
@@ -437,7 +436,7 @@ private theorem eval_preserves_self_invariants
   subst h_v_eq; subst h_T_eq
   exact ⟨h_ctx_out.hv_a, h_ctx_out.level_envs_valid_a,
          h_ctx_out.policies_resp_all, h_ctx_out.heap_content_bisim_at_levels,
-         h_ctx_out.ev_a, hv_va⟩
+         h_ctx_out.ev_a, hv_va, h_he.len_a⟩
 
 /-- **Tower safety**. Under `SafeEvolution`, evaluating any program
     — with `(em ...)`, `(set! base-apply ...)`, `(installPolicy n)`
@@ -608,9 +607,59 @@ theorem eval_tower_safe
                               subst h_T_eq
                               apply ih <;> assumption
                   | _ =>
-                      -- Non-atomic e: composition required (DUMP.md
-                      -- "Architectural blocker").
-                      sorry
+                      -- Non-atomic e: use TowerCE_trans to compose.
+                      simp only [eval] at h_eval
+                      cases h_e : eval k ptable level _ env T with
+                      | none => rw [h_e] at h_eval; simp at h_eval
+                      | some pr =>
+                          rw [h_e] at h_eval
+                          cases pr with
+                          | mk cv T_mid =>
+                              simp only at h_eval
+                              -- IH on first sub-eval e at T → (cv, T_mid).
+                              -- Note: h_pt is captured from outer context (not generalized),
+                              -- so it's not in IH's parameter list.
+                              obtain ⟨h_tce_e, h_safe_mid⟩ :=
+                                ih level _ env T hh hev h_levs h_resp_all
+                                  h_bisim h_pol_resp_at h_env_self h_safe
+                                  cv T_mid h_e
+                              -- Get T_mid invariants (heap mono, etc.).
+                              obtain ⟨hh_mid, h_levs_mid, h_resp_all_mid,
+                                      h_bisim_mid, hev_mid, _, h_heap_mono_12⟩ :=
+                                eval_preserves_self_invariants k ptable level _
+                                  env T cv T_mid hh hev h_levs h_resp_all h_pt
+                                  h_pol_resp_at h_env_self h_e
+                              have h_pol_resp_at_mid :
+                                  ∀ p, T_mid.policyAt? level = some p →
+                                       PolicyRespectsBisimT p :=
+                                fun p hp => h_resp_all_mid level p hp
+                              have h_env_self_mid :
+                                  EnvVis env env T_mid.heap T_mid.heap :=
+                                EnvVis_self_of_valid env T_mid.heap hev_mid hh_mid
+                              -- IH on .seq rest at T_mid → (v, T').
+                              obtain ⟨h_tce_rest, h_safe_T'⟩ :=
+                                ih level (.seq (e' :: rest')) env T_mid
+                                  hh_mid hev_mid h_levs_mid h_resp_all_mid
+                                  h_bisim_mid h_pol_resp_at_mid
+                                  h_env_self_mid h_safe_mid v T' h_eval
+                              -- Heap mono and HeapValid for second eval.
+                              obtain ⟨hh_T', _, _, _, _, _, h_heap_mono_23⟩ :=
+                                eval_preserves_self_invariants k ptable level
+                                  (.seq (e' :: rest')) env T_mid v T'
+                                  hh_mid hev_mid h_levs_mid h_resp_all_mid h_pt
+                                  h_pol_resp_at_mid h_env_self_mid h_eval
+                              -- levels_mono via eval_preserves_envAt.
+                              have h_levs_mono_12 :
+                                  ∀ n env_n, T.envAt? n = some env_n →
+                                             T_mid.envAt? n = some env_n :=
+                                fun n env_n h_env =>
+                                  eval_preserves_envAt k ptable level _ env T cv
+                                    T_mid n env_n h_e h_env
+                              -- Compose via TowerCE_trans.
+                              refine ⟨?_, h_safe_T'⟩
+                              exact TowerCE_trans T T_mid T' h_heap_mono_12
+                                h_heap_mono_23 h_levs_mono_12 hh_mid hh_T'
+                                h_tce_e h_tce_rest
       | ifte c t e =>
           -- For atomic conditions (.num/.bool/.lam/.quote/.var), eval c
           -- doesn't change T, so the branch eval handles everything via
@@ -691,9 +740,11 @@ theorem eval_tower_safe
                   · simp only [hc, if_false] at h_eval
                     simp at h_eval
           | _ =>
-              -- Recursive c (.ifte/.app/.primApp/.letE/.seq/.set/.em/.installPolicy):
-              -- composition required (deferred — see DUMP.md
-              -- "Architectural blocker").
+              -- Non-atomic c: composition via TowerCE_trans is in principle
+              -- doable, but `cases c with | _ =>` specializes c per-constructor
+              -- and `simp [eval] at h_eval` then unfolds the inner eval
+              -- aggressively (since c is concrete in each arm). Need a
+              -- different proof structure that keeps c opaque. Deferred.
               sorry
       | _ =>
           -- Remaining cases: app/primApp/letE (heap extended
@@ -876,11 +927,11 @@ theorem safeEvolution_necessary :
     have hv_old_cex : ValValid Val.builtinBaseApply cex_T'.heap := trivial
     have hv_new_cex : ValValid cex_div_closure cex_T'.heap :=
       cex_T'_envValid_cex_envL1
-    -- Test state extends cex_T'.heap trivially (use cex_T' itself).
-    have h_ext : ∃ extras, cex_T'.heap = cex_T'.heap ++ extras := ⟨[], by simp⟩
+    -- Test state has length ≥ cex_T'.heap.length trivially.
+    have h_len : cex_T'.heap.length ≤ cex_T'.heap.length := Nat.le_refl _
     obtain ⟨fuel', T'', r', h_call, _⟩ :=
       h_ce 10 [] (.prim "+") [.num 1, .num 2] cex_T' (.num 3) cex_T'
-        h_ext
+        h_len
         cex_T'_heapValid trivial ⟨trivial, trivial, trivial⟩
         hv_old_cex hv_new_cex
         h_pt_empty h_pol_resp cex_T'_envValid_at cex_T'_policyResp_all

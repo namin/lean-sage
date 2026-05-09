@@ -63,24 +63,14 @@ def callAsBaseApply (fuel : Nat) (ptable : PolicyTable) (level : Nat)
     call through `new` with a `ValVis`-related result and well-
     formed post-state.
 
-    Cross-side policy equality is checked *at `level`*: a
-    reflective replacement that hijacked the policy at the
-    governing level would violate this (and so violate CE). The
-    lean-green version asks `s'.policy = s''.policy`; the tower
-    version specializes to the level-of-interest.
-
     **`h_ref` parameter (compositional CE):** the test state's heap
-    is required to extend `h_ref` (`∃ extras, T.heap = h_ref ++ extras`).
-    This lets us compose CE chains: when proving CE n h_ref old new
-    via CE n h_ref old mid composed with CE n h_ref mid new, the
-    `mid` value sits in some intermediate state's heap that is a
-    prefix of the test state's heap, so `ValValid mid T.heap`
-    follows from heap-extension. Without `h_ref`, the test state
-    is unrestricted and composition fails (cf. lean-green's CE,
-    which is single-stage and doesn't need this). -/
+    has length ≥ `h_ref.length`. This length-monotonicity premise
+    is sufficient for ValValid lifting (via `ValValid.length_mono`)
+    and supports composition across mutating sub-evals (where the
+    intermediate heap is no longer a strict prefix-extension). -/
 def CE (level : Nat) (h_ref : Heap) (old new : Val) : Prop :=
   ∀ fuel ptable op operands T r T',
-    (∃ extras, T.heap = h_ref ++ extras) →
+    h_ref.length ≤ T.heap.length →
     HeapValid T.heap → ValValid op T.heap → ListValValid operands T.heap →
     ValValid old T.heap → ValValid new T.heap →
     PolicyTableRespectsBisimT ptable →
@@ -99,7 +89,7 @@ def CE (level : Nat) (h_ref : Heap) (old new : Val) : Prop :=
 /-- Same as `CE` but with `ValVis_weak` in the conclusion. -/
 def CE_weak (level : Nat) (h_ref : Heap) (old new : Val) : Prop :=
   ∀ fuel ptable op operands T r T',
-    (∃ extras, T.heap = h_ref ++ extras) →
+    h_ref.length ≤ T.heap.length →
     HeapValid T.heap → ValValid op T.heap → ListValValid operands T.heap →
     ValValid old T.heap → ValValid new T.heap →
     PolicyTableRespectsBisimT ptable →
