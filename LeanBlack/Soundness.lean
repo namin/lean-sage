@@ -184,6 +184,18 @@ theorem TowerCE.refl (T : TowerState)
       refine ⟨fuel, T_b', r_b, ?_, h_vv_r, h_tc.policy_eq_at, h_tc.hv_b_out, h_he.len_b⟩
       simp only [callAsBaseApply]; exact h_call_b
 
+/-- If `T'` has the same heap as `T` (e.g., after `setPolicyAt`), then
+    `TowerCE T T'` reduces to `TowerCE T T`. The heap-equality forces
+    `oldApply = newApply` in TowerCE's premises, and the rest follows
+    from self-CE. -/
+private theorem TowerCE_of_heap_eq (T T' : TowerState)
+    (h_heap_eq : T'.heap = T.heap)
+    (h_self : TowerCE T T) :
+    TowerCE T T' := by
+  intro n idx oldApply newApply h_lookup h_old h_new
+  have h_new_T : T.heap[idx]? = some newApply := h_heap_eq ▸ h_new
+  exact h_self n idx oldApply newApply h_lookup h_old h_new_T
+
 /-! ## Safe evolution -/
 
 /-- Every materialized level's policy is universally sound (at its
@@ -266,11 +278,14 @@ theorem eval_tower_safe
     (h_eval : eval fuel ptable level exp env T = some (v, T')) :
     TowerCE T T' ∧ SafeEvolution ptable T' := by
   -- Easy cases: where T' = T, both conjuncts follow trivially.
-  -- Hard cases (.set/.installPolicy/recursive): require cross-level induction
-  -- + per-case SoundForCE arguments. See DUMP.md for the full strategy.
-  cases fuel with
+  -- Recursive cases (.seq/.ifte/.app/.primApp/.letE/.em): use the IH on
+  -- fuel k via `induction fuel generalizing ...`. Note `level` is also
+  -- generalized because `.em` changes it.
+  -- Hard cases (.set, .em-with-fresh-policies, multi-step composition):
+  -- require cross-level architecture arguments — see DUMP.md.
+  induction fuel generalizing exp env T v T' level with
   | zero => simp [eval] at h_eval
-  | succ k =>
+  | succ k ih =>
       cases exp with
       | num i =>
           simp [eval] at h_eval
@@ -310,14 +325,84 @@ theorem eval_tower_safe
                   obtain ⟨_, h_T⟩ := h_eval
                   subst h_T
                   exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
+      | installPolicy idx =>
+          -- T' is either T (when ptable[idx]? = none) or
+          -- T.setPolicyAt level newPolicy (heap unchanged).
+          -- TowerCE: heap unchanged ⇒ reduces to self-CE via TowerCE.refl.
+          -- SafeEvolution: the new policy comes from ptable, which by
+          -- h_safe.2 is UnivSoundAt at every level (including `level`).
+          simp only [eval] at h_eval
+          cases h_pt_idx : ptable[idx]? with
+          | none =>
+              rw [h_pt_idx] at h_eval
+              simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+              obtain ⟨_, h_T⟩ := h_eval
+              subst h_T
+              exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
+          | some newPolicy =>
+              rw [h_pt_idx] at h_eval
+              simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+              obtain ⟨_, h_T⟩ := h_eval
+              subst h_T
+              have h_heap_eq : (T.setPolicyAt level newPolicy).heap = T.heap :=
+                TowerState.setPolicyAt_heap T level newPolicy
+              refine ⟨?_, ?_, h_safe.2⟩
+              · exact TowerCE_of_heap_eq T (T.setPolicyAt level newPolicy)
+                  h_heap_eq (TowerCE.refl T hh h_levs h_resp_all h_bisim)
+              · -- ∀ n p, (T.setPolicyAt level newPolicy).policyAt? n
+                --       = some p → p.UnivSoundAt n
+                intro n p hp
+                by_cases hnl : level = n
+                · subst hnl
+                  rw [TowerState.setPolicyAt_policyAt?_self] at hp
+                  cases h_orig : T.policyAt? level with
+                  | none => rw [h_orig] at hp; simp at hp
+                  | some p_orig =>
+                      rw [h_orig] at hp
+                      simp only [Option.map_some, Option.some.injEq] at hp
+                      have h_in : newPolicy ∈ ptable :=
+                        List.mem_of_getElem? h_pt_idx
+                      rw [← hp]
+                      exact h_safe.2 newPolicy h_in level
+                · rw [TowerState.setPolicyAt_policyAt?_other T level n newPolicy hnl]
+                    at hp
+                  exact h_safe.1 n p hp
+      | app exps =>
+          -- Empty `.app` returns `none` (contradiction); non-empty
+          -- requires multi-step CE composition (architectural — DUMP).
+          cases exps with
+          | nil => simp [eval] at h_eval
+          | cons _ _ =>
+              -- Composition case — sorry.
+              sorry
+      | seq exps =>
+          -- Three sub-cases: empty seq (T' = T trivially), singleton
+          -- seq (delegates to inner eval — pure IH application), and
+          -- multi-element seq (compositional — requires CE-chaining).
+          cases exps with
+          | nil =>
+              simp [eval] at h_eval
+              obtain ⟨_, h_T⟩ := h_eval
+              subst h_T
+              exact ⟨TowerCE.refl T hh h_levs h_resp_all h_bisim, h_safe⟩
+          | cons e rest =>
+              cases rest with
+              | nil =>
+                  -- exps = [e] — eval at fuel k delegates to inner.
+                  simp only [eval] at h_eval
+                  -- h_eval : eval k ptable level e env T = some (v, T')
+                  apply ih <;> assumption
+              | cons e' rest' =>
+                  -- exps = e :: e' :: rest' — multi-step composition.
+                  -- TowerCE composition has architectural issues (DUMP.md):
+                  -- the second CE invocation needs ValValid mid T₀.heap
+                  -- where T₀ is the test state. Deferred.
+                  sorry
       | _ =>
-          -- All other cases: lam (T' = T), var (T' = T), quote (T' = T),
-          -- ifte/app/seq/primApp/letE (heap extended but base-apply
-          -- cells unchanged → TowerCE preserved via length_mono),
-          -- em (heap extended via materialize), set (heap mutated via
-          -- gated update; SoundForCE → CE preserved), installPolicy
-          -- (policy at level changed to ptable policy; UnivSoundAt by
-          -- SafeEvolution).
+          -- Remaining cases: ifte/app/primApp/letE (heap extended
+          -- but base-apply cells unchanged → TowerCE preserved via
+          -- length_mono), em (heap extended via materialize), set
+          -- (heap mutated via gated update; SoundForCE → CE preserved).
           sorry
 
 /-! ## Necessity
