@@ -157,6 +157,79 @@ def TowerState.alloc (T : TowerState) (v : Val) : TowerState × Nat :=
   let (h', idx) := T.heap.alloc v
   ({ T with heap := h' }, idx)
 
+/-! ## Foundational lemmas about Tower mutations
+
+    Used by Frame.lean to discharge cross-side WFCtxT preservation
+    across `setPolicyAt`, `updateHeap`, and `alloc` operations. -/
+
+/-! ### `setPolicyAt` lemmas -/
+
+theorem TowerState.setPolicyAt_heap (T : TowerState) (n : Nat) (p : BlackPolicy) :
+    (T.setPolicyAt n p).heap = T.heap := by
+  unfold setPolicyAt; split <;> rfl
+
+theorem TowerState.setPolicyAt_levels_length (T : TowerState) (n : Nat) (p : BlackPolicy) :
+    (T.setPolicyAt n p).levels.length = T.levels.length := by
+  unfold setPolicyAt
+  split
+  · simp [setLevel, List.length_set]
+  · rfl
+
+theorem TowerState.setPolicyAt_envAt? (T : TowerState) (n m : Nat) (p : BlackPolicy) :
+    (T.setPolicyAt n p).envAt? m = T.envAt? m := by
+  unfold setPolicyAt setLevel envAt? levelAt?
+  split
+  · rename_i ls h_ls
+    by_cases hnm : n = m
+    · subst hnm
+      have h_lt : n < T.levels.length := List.getElem?_eq_some_iff.mp h_ls |>.1
+      rw [List.getElem?_set_self h_lt, h_ls]
+      rfl
+    · rw [List.getElem?_set_ne hnm]
+  · rfl
+
+theorem TowerState.setPolicyAt_policyAt?_self (T : TowerState) (n : Nat) (p : BlackPolicy) :
+    (T.setPolicyAt n p).policyAt? n = (T.policyAt? n).map (fun _ => p) := by
+  unfold setPolicyAt setLevel policyAt? levelAt?
+  split
+  · rename_i ls h_ls
+    have h_lt : n < T.levels.length := List.getElem?_eq_some_iff.mp h_ls |>.1
+    rw [List.getElem?_set_self h_lt, h_ls]
+    rfl
+  · rename_i h_none
+    rw [h_none]
+    rfl
+
+theorem TowerState.setPolicyAt_policyAt?_other (T : TowerState) (n m : Nat) (p : BlackPolicy)
+    (h : n ≠ m) :
+    (T.setPolicyAt n p).policyAt? m = T.policyAt? m := by
+  unfold setPolicyAt setLevel policyAt? levelAt?
+  split
+  · rw [List.getElem?_set_ne h]
+  · rfl
+
+/-! ### `updateHeap` lemmas -/
+
+theorem TowerState.updateHeap_levels (T : TowerState) (idx : Nat) (v : Val) :
+    (T.updateHeap idx v).levels = T.levels := by rfl
+
+theorem TowerState.updateHeap_policyAt? (T : TowerState) (idx : Nat) (v : Val) (n : Nat) :
+    (T.updateHeap idx v).policyAt? n = T.policyAt? n := by rfl
+
+theorem TowerState.updateHeap_envAt? (T : TowerState) (idx : Nat) (v : Val) (n : Nat) :
+    (T.updateHeap idx v).envAt? n = T.envAt? n := by rfl
+
+/-! ### `alloc` lemmas -/
+
+theorem TowerState.alloc_levels (T : TowerState) (v : Val) :
+    (T.alloc v).1.levels = T.levels := by rfl
+
+theorem TowerState.alloc_policyAt? (T : TowerState) (v : Val) (n : Nat) :
+    (T.alloc v).1.policyAt? n = T.policyAt? n := by rfl
+
+theorem TowerState.alloc_envAt? (T : TowerState) (v : Val) (n : Nat) :
+    (T.alloc v).1.envAt? n = T.envAt? n := by rfl
+
 /-! ## RunState compatibility shim
 
     The bisim infrastructure ported from lean-green is written

@@ -529,7 +529,175 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                     simp [eval, h_eval_f_b, h_eval_args_b, h_eval_av_b]
         | set _ _          => sorry  -- USES policy_eq_at + ValVis_aux_update; substantial
         | em _             => sorry  -- NEW: needs Tower.materialize bisim-preservation
-        | letE _ _ _       => sorry  -- mechanical with ih_eval + Heap.alloc preservation
+        | letE x e body =>
+            -- Mechanical port from lean-green's `.letE`:
+            -- 1) IH on e
+            -- 2) alloc v_a / v_b in respective heaps
+            -- 3) build WFCtxT for the body call (cons-extended env, alloc'd state)
+            -- 4) IH on body
+            -- 5) chain HeapEvolutions, build output WFCtxT
+            simp only [eval] at h_eval
+            cases he : eval k ptable level e env_a T_a with
+            | none => rw [he] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨v_a, T_a_inner⟩ := pr
+                rw [he] at h_eval
+                obtain ⟨v_b, T_b_inner, h_eval_e_b, h_vv_v, h_ctx_inner, h_he_inner,
+                        h_env_inner, hv_va, hv_vb⟩ :=
+                  ih_eval ptable level e env_a env_b T_a T_b v_a T_a_inner
+                    hresp_pt h_ctx h_env he
+                -- Reduce h_eval: T_a_inner.alloc v_a unfolds.
+                simp only [TowerState.alloc, Heap.alloc] at h_eval
+                have h_lookup_a :
+                    (T_a_inner.heap ++ [v_a])[T_a_inner.heap.length]? = some v_a := by
+                  rw [List.getElem?_append_right (Nat.le_refl _)]; simp
+                have h_lookup_b :
+                    (T_b_inner.heap ++ [v_b])[T_b_inner.heap.length]? = some v_b := by
+                  rw [List.getElem?_append_right (Nat.le_refl _)]; simp
+                -- HeapValid on alloc heaps.
+                have hh_a_alloc : HeapValid (T_a_inner.heap ++ [v_a]) := by
+                  intro i v hp
+                  by_cases h_lt : i < T_a_inner.heap.length
+                  · have hp_old : T_a_inner.heap[i]? = some v := by
+                      have heq := getElem?_prefix T_a_inner.heap [v_a] i h_lt
+                      rw [← heq]; exact hp
+                    exact ValValid.heap_extends v (h_ctx_inner.hv_a i v hp_old)
+                      ⟨[v_a], rfl⟩
+                  · have h_eq : i = T_a_inner.heap.length := by
+                      have h_le : i < (T_a_inner.heap ++ [v_a]).length := by
+                        rw [List.getElem?_eq_some_iff] at hp
+                        obtain ⟨h, _⟩ := hp; exact h
+                      simp [List.length_append] at h_le; omega
+                    subst h_eq
+                    rw [h_lookup_a] at hp
+                    simp only [Option.some.injEq] at hp
+                    subst hp
+                    exact ValValid.heap_extends v_a hv_va ⟨[v_a], rfl⟩
+                have hh_b_alloc : HeapValid (T_b_inner.heap ++ [v_b]) := by
+                  intro i v hp
+                  by_cases h_lt : i < T_b_inner.heap.length
+                  · have hp_old : T_b_inner.heap[i]? = some v := by
+                      have heq := getElem?_prefix T_b_inner.heap [v_b] i h_lt
+                      rw [← heq]; exact hp
+                    exact ValValid.heap_extends v (h_ctx_inner.hv_b i v hp_old)
+                      ⟨[v_b], rfl⟩
+                  · have h_eq : i = T_b_inner.heap.length := by
+                      have h_le : i < (T_b_inner.heap ++ [v_b]).length := by
+                        rw [List.getElem?_eq_some_iff] at hp
+                        obtain ⟨h, _⟩ := hp; exact h
+                      simp [List.length_append] at h_le; omega
+                    subst h_eq
+                    rw [h_lookup_b] at hp
+                    simp only [Option.some.injEq] at hp
+                    subst hp
+                    exact ValValid.heap_extends v_b hv_vb ⟨[v_b], rfl⟩
+                -- EnvValid the cons-extended envs in the alloc heaps.
+                have hev_a' : EnvValid (.cons x T_a_inner.heap.length env_a)
+                    (T_a_inner.heap ++ [v_a]) := by
+                  intro name i hl
+                  simp only [List.length_append, List.length_singleton]
+                  simp only [Env.lookup] at hl
+                  by_cases h_eq : x = name
+                  · subst h_eq
+                    simp only [beq_self_eq_true, ↓reduceIte, Option.some.injEq] at hl
+                    omega
+                  · have h_neq : (x == name) = false := by
+                      rw [beq_eq_false_iff_ne]; exact h_eq
+                    simp only [h_neq, Bool.false_eq_true, ↓reduceIte] at hl
+                    have := h_ctx_inner.ev_a name i hl
+                    omega
+                have hev_b' : EnvValid (.cons x T_b_inner.heap.length env_b)
+                    (T_b_inner.heap ++ [v_b]) := by
+                  intro name i hl
+                  simp only [List.length_append, List.length_singleton]
+                  simp only [Env.lookup] at hl
+                  by_cases h_eq : x = name
+                  · subst h_eq
+                    simp only [beq_self_eq_true, ↓reduceIte, Option.some.injEq] at hl
+                    omega
+                  · have h_neq : (x == name) = false := by
+                      rw [beq_eq_false_iff_ne]; exact h_eq
+                    simp only [h_neq, Bool.false_eq_true, ↓reduceIte] at hl
+                    have := h_ctx_inner.ev_b name i hl
+                    omega
+                -- Cons-extended envs match cross-side: same name x,
+                -- same alloc index (h_ctx_inner.heap_len_eq), same env (env_eq).
+                have h_cons_eq :
+                    (.cons x T_a_inner.heap.length env_a : Env)
+                      = (.cons x T_b_inner.heap.length env_b) := by
+                  rw [h_ctx_inner.env_eq, h_ctx_inner.heap_len_eq]
+                have h_alloc_len_eq :
+                    (T_a_inner.heap ++ [v_a]).length =
+                      (T_b_inner.heap ++ [v_b]).length := by
+                  simp [List.length_append, h_ctx_inner.heap_len_eq]
+                -- Level envs valid in alloc heap (single-side, via
+                -- length_mono on h_ctx_inner.level_envs_valid_*).
+                have h_levs_a_alloc : ∀ n env, T_a_inner.envAt? n = some env →
+                    EnvValid env (T_a_inner.heap ++ [v_a]) := fun n env hen =>
+                  EnvValid.heap_extends (h_ctx_inner.level_envs_valid_a n env hen)
+                    ⟨[v_a], rfl⟩
+                have h_levs_b_alloc : ∀ n env, T_b_inner.envAt? n = some env →
+                    EnvValid env (T_b_inner.heap ++ [v_b]) := fun n env hen =>
+                  EnvValid.heap_extends (h_ctx_inner.level_envs_valid_b n env hen)
+                    ⟨[v_b], rfl⟩
+                -- T_a_inner with new heap, same levels.
+                let T_a_alloc : TowerState :=
+                  { T_a_inner with heap := T_a_inner.heap ++ [v_a] }
+                let T_b_alloc : TowerState :=
+                  { T_b_inner with heap := T_b_inner.heap ++ [v_b] }
+                -- WFCtxT for the body call.
+                have h_ctx_alloc :
+                    WFCtxT (.cons x T_a_inner.heap.length env_a)
+                      (.cons x T_b_inner.heap.length env_b) T_a_alloc T_b_alloc level :=
+                  ⟨h_ctx_inner.policy_eq_at, hh_a_alloc, hh_b_alloc,
+                   hev_a', hev_b', h_ctx_inner.policy_resp, h_cons_eq, h_alloc_len_eq,
+                   h_levs_a_alloc, h_levs_b_alloc⟩
+                -- ValVis v_a v_b lifted to alloc heaps.
+                have h_vv_v_alloc :
+                    ValVis v_a v_b (T_a_inner.heap ++ [v_a]) (T_b_inner.heap ++ [v_b]) :=
+                  ValVis_extends v_a v_b T_a_inner.heap T_b_inner.heap [v_a] [v_b]
+                    h_ctx_inner.hv_a h_ctx_inner.hv_b hv_va hv_vb h_vv_v
+                -- EnvVis env_a env_b at alloc heaps.
+                have h_env_alloc :
+                    EnvVis env_a env_b (T_a_inner.heap ++ [v_a]) (T_b_inner.heap ++ [v_b]) :=
+                  EnvVis_extends env_a env_b T_a_inner.heap T_b_inner.heap [v_a] [v_b]
+                    h_ctx_inner.hv_a h_ctx_inner.hv_b h_ctx_inner.ev_a h_ctx_inner.ev_b
+                    h_env_inner
+                -- EnvVis on cons-extended envs at alloc heaps.
+                have h_env' :
+                    EnvVis (.cons x T_a_inner.heap.length env_a)
+                      (.cons x T_b_inner.heap.length env_b)
+                      (T_a_inner.heap ++ [v_a]) (T_b_inner.heap ++ [v_b]) :=
+                  EnvVis_cons x T_a_inner.heap.length T_b_inner.heap.length env_a env_b
+                    (T_a_inner.heap ++ [v_a]) (T_b_inner.heap ++ [v_b]) v_a v_b
+                    h_lookup_a h_lookup_b h_vv_v_alloc h_env_alloc
+                -- IH on body.
+                obtain ⟨r_b, T_b', h_eval_b_b, h_vv_r, h_ctx_body, h_he_body,
+                        _h_env_body, hv_ra, hv_rb⟩ :=
+                  ih_eval ptable level body
+                    (.cons x T_a_inner.heap.length env_a)
+                    (.cons x T_b_inner.heap.length env_b) T_a_alloc T_b_alloc r_a T_a'
+                    hresp_pt h_ctx_alloc h_env' h_eval
+                -- HeapEvolution from inner to alloc (just heap-prefix).
+                have h_he_alloc : HeapEvolution T_a_inner T_b_inner T_a_alloc T_b_alloc :=
+                  HeapEvolution.from_heapExt h_ctx_inner.hv_a h_ctx_inner.hv_b
+                    ⟨[v_a], rfl⟩ ⟨[v_b], rfl⟩
+                have h_he_chain : HeapEvolution T_a T_b T_a' T_b' :=
+                  HeapEvolution.trans h_he_inner
+                    (HeapEvolution.trans h_he_alloc h_he_body)
+                have h_ctx_out : WFCtxT env_a env_b T_a' T_b' level :=
+                  ⟨h_ctx_body.policy_eq_at, h_ctx_body.hv_a, h_ctx_body.hv_b,
+                   h_ctx.ev_a.length_mono h_he_chain.len_a,
+                   h_ctx.ev_b.length_mono h_he_chain.len_b,
+                   h_ctx_body.policy_resp, h_ctx.env_eq, h_ctx_body.heap_len_eq,
+                   h_ctx_body.level_envs_valid_a, h_ctx_body.level_envs_valid_b⟩
+                have h_env_out : EnvVis env_a env_b T_a'.heap T_b'.heap :=
+                  h_he_chain.envVis_preserve env_a env_b h_ctx.env_eq
+                    h_ctx.ev_a h_ctx.ev_b h_env
+                refine ⟨r_b, T_b', ?_, h_vv_r, h_ctx_out,
+                        h_he_chain, h_env_out, hv_ra, hv_rb⟩
+                simp only [eval, h_eval_e_b, TowerState.alloc, Heap.alloc]
+                exact h_eval_b_b
         | seq exps =>
             -- Three sub-cases: empty, singleton, e :: e2 :: rest2.
             -- Mechanical port of lean-green's template, threading
@@ -579,7 +747,88 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                                 HeapEvolution.trans h_he_inner h_he',
                                 h_env', hv_ra, hv_rb⟩
                         simp [eval, h_eval_e_b, h_eval_seq_b]
-        | installPolicy _  => sorry  -- needs setPolicyAt-preserves-heap/envs lemmas
+        | installPolicy idx =>
+            -- Both sides install the same policy at the same level.
+            -- Heaps unchanged; cross-side WFCtxT preserved with the
+            -- new policy (which respects bisim — from hresp_pt).
+            simp only [eval] at h_eval
+            cases hp : ptable[idx]? with
+            | none =>
+                rw [hp] at h_eval
+                simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                obtain ⟨h_r, h_T⟩ := h_eval
+                subst h_r; subst h_T
+                refine ⟨.bool false, T_b, ?_, ?_, h_ctx,
+                        HeapEvolution.refl _ _, h_env, trivial, trivial⟩
+                · simp [eval, hp]
+                · intro depth
+                  cases depth with | zero => trivial | succ _ => rfl
+            | some newPolicy =>
+                rw [hp] at h_eval
+                simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                obtain ⟨h_r, h_T⟩ := h_eval
+                subst h_r; subst h_T
+                have h_resp_new : PolicyRespectsBisimT newPolicy :=
+                  hresp_pt idx newPolicy hp
+                -- T_a' = T_a.setPolicyAt level newPolicy.
+                -- T_b' = T_b.setPolicyAt level newPolicy.
+                -- Cross-side: heap unchanged, level envs unchanged,
+                -- policy at `level` is some newPolicy on both sides
+                -- (when level was materialized; otherwise unchanged).
+                have h_pol_a := T_a.setPolicyAt_policyAt?_self level newPolicy
+                have h_pol_b := T_b.setPolicyAt_policyAt?_self level newPolicy
+                have h_heap_a := T_a.setPolicyAt_heap level newPolicy
+                have h_heap_b := T_b.setPolicyAt_heap level newPolicy
+                have h_envs_a : ∀ m,
+                    (T_a.setPolicyAt level newPolicy).envAt? m = T_a.envAt? m :=
+                  fun m => T_a.setPolicyAt_envAt? level m newPolicy
+                have h_envs_b : ∀ m,
+                    (T_b.setPolicyAt level newPolicy).envAt? m = T_b.envAt? m :=
+                  fun m => T_b.setPolicyAt_envAt? level m newPolicy
+                refine ⟨.bool true, T_b.setPolicyAt level newPolicy, ?_, ?_,
+                        ?_, ?_, ?_, trivial, trivial⟩
+                · simp [eval, hp]
+                · intro depth
+                  cases depth with | zero => trivial | succ _ => rfl
+                · -- WFCtxT for output state
+                  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, h_ctx.env_eq, ?_, ?_, ?_⟩
+                  · -- policy_eq_at: rewrite with the .map fact, both sides
+                    rw [h_pol_a, h_pol_b, h_ctx.policy_eq_at]
+                  · rw [h_heap_a]; exact h_ctx.hv_a
+                  · rw [h_heap_b]; exact h_ctx.hv_b
+                  · rw [h_heap_a]; exact h_ctx.ev_a
+                  · rw [h_heap_b]; exact h_ctx.ev_b
+                  · -- policy_resp at output: from hresp_pt for newPolicy
+                    intro p h_eq
+                    rw [h_pol_a] at h_eq
+                    cases h_old : T_a.policyAt? level with
+                    | none => rw [h_old] at h_eq; simp at h_eq
+                    | some _ => rw [h_old] at h_eq; simp at h_eq; subst h_eq; exact h_resp_new
+                  · -- heap_len_eq: heaps unchanged
+                    rw [h_heap_a, h_heap_b]; exact h_ctx.heap_len_eq
+                  · -- level_envs_valid_a: envs and heap unchanged
+                    intro m env h_env_eq
+                    rw [h_envs_a m] at h_env_eq
+                    rw [h_heap_a]
+                    exact h_ctx.level_envs_valid_a m env h_env_eq
+                  · intro m env h_env_eq
+                    rw [h_envs_b m] at h_env_eq
+                    rw [h_heap_b]
+                    exact h_ctx.level_envs_valid_b m env h_env_eq
+                · -- HeapEvolution: heaps unchanged on both sides; the
+                  -- levels field changed but HeapEvolution only cares
+                  -- about heaps + bisim preservation.
+                  refine ⟨?_, ?_, ?_, ?_⟩
+                  · rw [h_heap_a]; exact Nat.le_refl _
+                  · rw [h_heap_b]; exact Nat.le_refl _
+                  · intro _ _ _ _ _ _ h_vis
+                    rw [h_heap_a, h_heap_b]
+                    exact h_vis
+                  · intro _ _ _ _ _ h_vis
+                    rw [h_heap_a, h_heap_b]
+                    exact h_vis
+                · -- EnvVis env_a env_b T_a'.heap T_b'.heap
+                  rw [h_heap_a, h_heap_b]; exact h_env
       · -- evalList (k+1) — mechanical port from lean-green
         intro ptable level exps env_a env_b T_a T_b rs_a T_a'
               hresp_pt h_ctx h_env h_eval
