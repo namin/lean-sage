@@ -732,8 +732,10 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                     -- HeapEvolution composes materialize step with body's HeapEvolution.
                     -- materialize_HeapEvolution: T → T_mat preserves bisim trivially since
                     -- only fresh cells are appended (don't reference any existing idxes).
-                    have h_he_mat : HeapEvolution T_a T_b T_a_mat T_b_mat := by
-                      sorry  -- needs materialize_heap_extends lemma + HeapEvolution.from_heapExt
+                    have h_he_mat : HeapEvolution T_a T_b T_a_mat T_b_mat :=
+                      HeapEvolution.from_heapExt h_ctx.hv_a h_ctx.hv_b
+                        (T_a.materialize_heap_extends T_a_mat (level + 1) hm_a)
+                        (T_b.materialize_heap_extends T_b_mat (level + 1) hm_b)
                     have h_he_outer : HeapEvolution T_a T_b T_a' T_b' :=
                       HeapEvolution.trans h_he_mat h_he
                     -- Outer EnvVis: lift via HeapEvolution.envVis_preserve

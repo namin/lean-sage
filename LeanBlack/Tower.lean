@@ -311,6 +311,31 @@ private theorem freshLevelEnv_heap_grows (h : Heap) :
         exact Nat.le_trans h_step h_rest
   exact Nat.le_trans (h_inner _ (h, .nil)) (Nat.le_succ _)
 
+/-- The buildBindings foldl extends the heap by a prefix of fresh cells.
+    Stated with projection-form lambda (matching what simp produces). -/
+private theorem buildBindings_foldl_extends_loc
+    (pairs : List (String × Val)) (h : Heap) (env : Env) :
+    ∃ extras, (pairs.foldl
+      (fun (acc : Heap × Env) (kv : String × Val) =>
+        (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
+      (h, env)).1 = h ++ extras := by
+  induction pairs generalizing h env with
+  | nil => exact ⟨[], by simp [List.foldl]⟩
+  | cons p rest ih =>
+      simp only [List.foldl]
+      obtain ⟨extras, h_eq⟩ := ih (h ++ [p.2]) (.cons p.1 h.length env)
+      refine ⟨[p.2] ++ extras, ?_⟩
+      rw [h_eq, List.append_assoc]
+
+/-- `freshLevelEnv h` extends the heap by a prefix. -/
+theorem freshLevelEnv_heap_extends (h : Heap) :
+    ∃ extras, (freshLevelEnv h).1 = h ++ extras := by
+  unfold freshLevelEnv
+  simp only [Heap.alloc]
+  obtain ⟨extras, h_eq⟩ := buildBindings_foldl_extends_loc primPairs h .nil
+  refine ⟨extras ++ [.builtinBaseApply], ?_⟩
+  rw [h_eq, List.append_assoc]
+
 /-- After k applications of the fold step, the heap grows monotonically. -/
 private theorem materializeStep_iter_heap_grows (T : TowerState) (k : Nat) :
     T.heap.length ≤ (Nat.fold k (fun _ _ T' => materializeStep T') T).heap.length := by
@@ -360,6 +385,40 @@ theorem TowerState.materialize_envAt?_preserves
     envs valid in heap, all-policies-respect-bisim) live in
     `Frame.lean` since they reference `HeapValid`/`EnvValid` (which
     live in `Bisim.lean`, not visible to `Tower`). -/
+
+/-- After k applications of materializeStep, the heap is a prefix-extension. -/
+private theorem materializeStep_iter_heap_extends (T : TowerState) (k : Nat) :
+    ∃ extras, (Nat.fold k (fun _ _ T' => materializeStep T') T).heap = T.heap ++ extras := by
+  induction k with
+  | zero => exact ⟨[], by simp [Nat.fold]⟩
+  | succ k ih =>
+      simp only [Nat.fold]
+      obtain ⟨extras_k, h_k⟩ := ih
+      have h_step : ∃ extras, (materializeStep
+          (Nat.fold k (fun _ _ T' => materializeStep T') T)).heap =
+          (Nat.fold k (fun _ _ T' => materializeStep T') T).heap ++ extras := by
+        unfold materializeStep
+        exact freshLevelEnv_heap_extends _
+      obtain ⟨extras_step, h_step_eq⟩ := h_step
+      refine ⟨extras_k ++ extras_step, ?_⟩
+      rw [h_step_eq, h_k, List.append_assoc]
+
+/-- `materialize` extends the heap by a prefix. -/
+theorem TowerState.materialize_heap_extends
+    (T T' : TowerState) (n : Nat)
+    (h_mat : T.materialize n = some T') :
+    ∃ extras, T'.heap = T.heap ++ extras := by
+  unfold materialize at h_mat
+  by_cases h1 : n ≥ Tower.maxDepth
+  · simp [h1] at h_mat
+  · simp [h1] at h_mat
+    by_cases h2 : T.levels.length > n
+    · simp [h2] at h_mat
+      obtain rfl := h_mat.symm
+      exact ⟨[], by simp⟩
+    · simp [h2] at h_mat
+      obtain rfl := h_mat.symm
+      exact materializeStep_iter_heap_extends T (n + 1 - T.levels.length)
 
 /-- `materialize` only grows the heap. -/
 theorem TowerState.materialize_heap_grows
