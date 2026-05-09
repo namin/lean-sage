@@ -3418,3 +3418,892 @@ theorem ValVis_trans (va vb vc : Val) (ha hb hc : Heap) :
   intro h12 h23 n
   exact ValVis_aux_trans n va vb vc ha hb hc (h12 n) (h23 n)
 
+/-! ## Functional shift: heap-prefix-insertion as a syntactic operation
+
+    Ported from lean-green/Bisim.lean:4869+, adapted for tower-aware
+    eval. The shift apparatus is the engine of the prefix-extension
+    proof for `applyDirect`: shifting a value/env/heap commutes with
+    `eval`/`evalList`/`applyVia`/`applyDirect` (under suitable
+    `PolicyRespectsShift` hypotheses), so closing the loop with
+    `shift_*_id` (identity on `AllBelow`-bounded inputs) and
+    `shift_heap_id_of_deep` (heap-deep state shifts to heap ++ padding)
+    gives `applyDirect_heap_extend_weak`. -/
+
+/-- Shift an absolute heap index: indices `< cutoff` are unchanged;
+    indices `≥ cutoff` are bumped up by `offset`. -/
+def shift_idx (cutoff offset i : Nat) : Nat :=
+  if i < cutoff then i else i + offset
+
+mutual
+def shift_val (cutoff offset : Nat) : Val → Val
+  | .num n              => .num n
+  | .bool b             => .bool b
+  | .nilV               => .nilV
+  | .cons x y           =>
+      .cons (shift_val cutoff offset x) (shift_val cutoff offset y)
+  | .sym s              => .sym s
+  | .prim s             => .prim s
+  | .builtinBaseApply   => .builtinBaseApply
+  | .closure ps body cenv => .closure ps body (shift_env cutoff offset cenv)
+
+def shift_env (cutoff offset : Nat) : Env → Env
+  | .nil               => .nil
+  | .cons name idx rest =>
+      .cons name (shift_idx cutoff offset idx) (shift_env cutoff offset rest)
+end
+
+def shift_listVal (cutoff offset : Nat) : List Val → List Val
+  | []      => []
+  | v :: vs => shift_val cutoff offset v :: shift_listVal cutoff offset vs
+
+/-- Shift a heap by inserting `padding` at position `cutoff`. -/
+def shift_heap (cutoff : Nat) (padding : Heap) (h : Heap) : Heap :=
+  (h.map (shift_val cutoff padding.length)).take cutoff ++ padding ++
+    (h.map (shift_val cutoff padding.length)).drop cutoff
+
+/-- Tower-aware shift: shifts heap and shifts each level's env.
+    Policies are functions on `MutationCtx`; we don't shift them
+    structurally but require shift-respect (`PolicyRespectsShift`). -/
+def shift_state (cutoff : Nat) (padding : Heap) (T : TowerState) : TowerState :=
+  { heap := shift_heap cutoff padding T.heap,
+    levels := T.levels.map
+      (fun ls => { ls with env := shift_env cutoff padding.length ls.env }) }
+
+/-! ## Injectivity of shift -/
+
+theorem shift_idx_injective (cutoff offset : Nat) :
+    ∀ i j, shift_idx cutoff offset i = shift_idx cutoff offset j → i = j := by
+  intro i j h
+  unfold shift_idx at h
+  by_cases hi : i < cutoff
+  · by_cases hj : j < cutoff
+    · rw [if_pos hi, if_pos hj] at h; exact h
+    · rw [if_pos hi, if_neg hj] at h; omega
+  · by_cases hj : j < cutoff
+    · rw [if_neg hi, if_pos hj] at h; omega
+    · rw [if_neg hi, if_neg hj] at h; omega
+
+mutual
+  theorem shift_val_injective (cutoff offset : Nat) :
+      ∀ a b : Val, shift_val cutoff offset a = shift_val cutoff offset b → a = b
+    | .num _,   .num _,   h => by simp [shift_val] at h; exact h ▸ rfl
+    | .num _,   .bool _,  h => by simp [shift_val] at h
+    | .num _,   .nilV,    h => by simp [shift_val] at h
+    | .num _,   .sym _,   h => by simp [shift_val] at h
+    | .num _,   .cons _ _, h => by simp [shift_val] at h
+    | .num _,   .prim _,  h => by simp [shift_val] at h
+    | .num _,   .builtinBaseApply, h => by simp [shift_val] at h
+    | .num _,   .closure _ _ _, h => by simp [shift_val] at h
+    | .bool _,  .num _,   h => by simp [shift_val] at h
+    | .bool _,  .bool _,  h => by simp [shift_val] at h; exact h ▸ rfl
+    | .bool _,  .nilV,    h => by simp [shift_val] at h
+    | .bool _,  .sym _,   h => by simp [shift_val] at h
+    | .bool _,  .cons _ _, h => by simp [shift_val] at h
+    | .bool _,  .prim _,  h => by simp [shift_val] at h
+    | .bool _,  .builtinBaseApply, h => by simp [shift_val] at h
+    | .bool _,  .closure _ _ _, h => by simp [shift_val] at h
+    | .nilV,    .num _,   h => by simp [shift_val] at h
+    | .nilV,    .bool _,  h => by simp [shift_val] at h
+    | .nilV,    .nilV,    _ => rfl
+    | .nilV,    .sym _,   h => by simp [shift_val] at h
+    | .nilV,    .cons _ _, h => by simp [shift_val] at h
+    | .nilV,    .prim _,  h => by simp [shift_val] at h
+    | .nilV,    .builtinBaseApply, h => by simp [shift_val] at h
+    | .nilV,    .closure _ _ _, h => by simp [shift_val] at h
+    | .sym _,   .num _,   h => by simp [shift_val] at h
+    | .sym _,   .bool _,  h => by simp [shift_val] at h
+    | .sym _,   .nilV,    h => by simp [shift_val] at h
+    | .sym _,   .sym _,   h => by simp [shift_val] at h; exact h ▸ rfl
+    | .sym _,   .cons _ _, h => by simp [shift_val] at h
+    | .sym _,   .prim _,  h => by simp [shift_val] at h
+    | .sym _,   .builtinBaseApply, h => by simp [shift_val] at h
+    | .sym _,   .closure _ _ _, h => by simp [shift_val] at h
+    | .cons _ _, .num _,   h => by simp [shift_val] at h
+    | .cons _ _, .bool _,  h => by simp [shift_val] at h
+    | .cons _ _, .nilV,    h => by simp [shift_val] at h
+    | .cons _ _, .sym _,   h => by simp [shift_val] at h
+    | .cons xa ya, .cons xb yb, h => by
+        simp [shift_val] at h
+        obtain ⟨hx, hy⟩ := h
+        rw [shift_val_injective cutoff offset xa xb hx,
+            shift_val_injective cutoff offset ya yb hy]
+    | .cons _ _, .prim _,  h => by simp [shift_val] at h
+    | .cons _ _, .builtinBaseApply, h => by simp [shift_val] at h
+    | .cons _ _, .closure _ _ _, h => by simp [shift_val] at h
+    | .prim _,  .num _,   h => by simp [shift_val] at h
+    | .prim _,  .bool _,  h => by simp [shift_val] at h
+    | .prim _,  .nilV,    h => by simp [shift_val] at h
+    | .prim _,  .sym _,   h => by simp [shift_val] at h
+    | .prim _,  .cons _ _, h => by simp [shift_val] at h
+    | .prim _,  .prim _,  h => by simp [shift_val] at h; exact h ▸ rfl
+    | .prim _,  .builtinBaseApply, h => by simp [shift_val] at h
+    | .prim _,  .closure _ _ _, h => by simp [shift_val] at h
+    | .builtinBaseApply, .num _,   h => by simp [shift_val] at h
+    | .builtinBaseApply, .bool _,  h => by simp [shift_val] at h
+    | .builtinBaseApply, .nilV,    h => by simp [shift_val] at h
+    | .builtinBaseApply, .sym _,   h => by simp [shift_val] at h
+    | .builtinBaseApply, .cons _ _, h => by simp [shift_val] at h
+    | .builtinBaseApply, .prim _,  h => by simp [shift_val] at h
+    | .builtinBaseApply, .builtinBaseApply, _ => rfl
+    | .builtinBaseApply, .closure _ _ _, h => by simp [shift_val] at h
+    | .closure _ _ _, .num _,   h => by simp [shift_val] at h
+    | .closure _ _ _, .bool _,  h => by simp [shift_val] at h
+    | .closure _ _ _, .nilV,    h => by simp [shift_val] at h
+    | .closure _ _ _, .sym _,   h => by simp [shift_val] at h
+    | .closure _ _ _, .cons _ _, h => by simp [shift_val] at h
+    | .closure _ _ _, .prim _,  h => by simp [shift_val] at h
+    | .closure _ _ _, .builtinBaseApply, h => by simp [shift_val] at h
+    | .closure psa bdya cenva, .closure psb bdyb cenvb, h => by
+        simp [shift_val] at h
+        obtain ⟨hps, hbdy, hcenv⟩ := h
+        rw [hps, hbdy, shift_env_injective cutoff offset cenva cenvb hcenv]
+
+  theorem shift_env_injective (cutoff offset : Nat) :
+      ∀ a b : Env, shift_env cutoff offset a = shift_env cutoff offset b → a = b
+    | .nil, .nil, _ => rfl
+    | .nil, .cons _ _ _, h => by simp [shift_env] at h
+    | .cons _ _ _, .nil, h => by simp [shift_env] at h
+    | .cons name_a idx_a rest_a, .cons name_b idx_b rest_b, h => by
+        simp [shift_env] at h
+        obtain ⟨hname, hidx, hrest⟩ := h
+        rw [hname, shift_idx_injective cutoff offset idx_a idx_b hidx,
+            shift_env_injective cutoff offset rest_a rest_b hrest]
+end
+
+/-! ## Structural facts about shift -/
+
+theorem shift_idx_below {cutoff offset i : Nat} (h : i < cutoff) :
+    shift_idx cutoff offset i = i := by
+  unfold shift_idx; rw [if_pos h]
+
+theorem shift_idx_above {cutoff offset i : Nat} (h : ¬ i < cutoff) :
+    shift_idx cutoff offset i = i + offset := by
+  unfold shift_idx; rw [if_neg h]
+
+theorem shift_listVal_length (cutoff offset : Nat) (xs : List Val) :
+    (shift_listVal cutoff offset xs).length = xs.length := by
+  induction xs with
+  | nil => rfl
+  | cons _ _ ih => simp [shift_listVal, ih]
+
+theorem shift_listVal_append (cutoff offset : Nat) (xs ys : List Val) :
+    shift_listVal cutoff offset (xs ++ ys) =
+      shift_listVal cutoff offset xs ++ shift_listVal cutoff offset ys := by
+  induction xs with
+  | nil => rfl
+  | cons _ _ ih => simp [shift_listVal, ih]
+
+theorem shift_heap_length (cutoff : Nat) (padding h : Heap) :
+    (shift_heap cutoff padding h).length = h.length + padding.length := by
+  unfold shift_heap
+  simp only [List.length_append, List.length_take, List.length_drop, List.length_map]
+  omega
+
+/-! ## `shift` is identity on `AllBelow` bounded inputs -/
+
+theorem shift_env_id (cutoff offset : Nat) :
+    ∀ {env : Env}, Env.AllBelow cutoff env →
+      shift_env cutoff offset env = env
+  | .nil,            _ => rfl
+  | .cons name idx rest, ⟨h_idx, h_rest⟩ => by
+      simp only [shift_env, shift_idx_below h_idx, shift_env_id cutoff offset h_rest]
+
+theorem shift_val_id (cutoff offset : Nat) :
+    ∀ {v : Val}, Val.AllBelow cutoff v → shift_val cutoff offset v = v
+  | .num _,            _ => rfl
+  | .bool _,           _ => rfl
+  | .nilV,             _ => rfl
+  | .sym _,            _ => rfl
+  | .prim _,           _ => rfl
+  | .builtinBaseApply, _ => rfl
+  | .cons x y,         ⟨hx, hy⟩ => by
+      simp only [shift_val, shift_val_id cutoff offset hx, shift_val_id cutoff offset hy]
+  | .closure ps body cenv, h => by
+      simp only [shift_val, shift_env_id cutoff offset h]
+
+theorem shift_listVal_id (cutoff offset : Nat) :
+    ∀ {xs : List Val}, ListVal.AllBelow cutoff xs →
+      shift_listVal cutoff offset xs = xs
+  | [],      _ => rfl
+  | _ :: _, ⟨h, t⟩ => by
+      simp only [shift_listVal, shift_val_id cutoff offset h,
+                 shift_listVal_id cutoff offset t]
+
+/-! ## `shift` commutes with key operations -/
+
+theorem shift_env_lookup (cutoff offset : Nat) :
+    ∀ (env : Env) (x : String) (i : Nat),
+      env.lookup x = some i →
+      (shift_env cutoff offset env).lookup x = some (shift_idx cutoff offset i)
+  | .nil, _, _, h => by simp [Env.lookup] at h
+  | .cons name idx rest, x, i, h => by
+      simp only [Env.lookup] at h
+      simp only [shift_env, Env.lookup]
+      by_cases h_eq : name == x
+      · simp only [h_eq, if_true] at h ⊢
+        injection h with h_idx
+        subst h_idx
+        rfl
+      · simp only [h_eq, if_false] at h ⊢
+        exact shift_env_lookup cutoff offset rest x i h
+
+theorem shift_env_lookup_none (cutoff offset : Nat) :
+    ∀ (env : Env) (x : String),
+      env.lookup x = none →
+      (shift_env cutoff offset env).lookup x = none
+  | .nil, _, _ => rfl
+  | .cons name idx rest, x, h => by
+      simp only [Env.lookup] at h
+      simp only [shift_env, Env.lookup]
+      by_cases h_eq : name == x
+      · simp only [h_eq, if_true] at h
+        exact absurd h (by simp)
+      · simp only [h_eq, if_false] at h ⊢
+        exact shift_env_lookup_none cutoff offset rest x h
+
+theorem shift_heap_getElem? (cutoff : Nat) (padding h : Heap) (i : Nat)
+    (h_cutoff : cutoff ≤ h.length) :
+    (shift_heap cutoff padding h)[shift_idx cutoff padding.length i]?
+      = (h[i]?).map (shift_val cutoff padding.length) := by
+  unfold shift_heap shift_idx
+  have sh_len : (h.map (shift_val cutoff padding.length)).length = h.length := by
+    simp [List.length_map]
+  have sh_get : ∀ (k : Nat), (h.map (shift_val cutoff padding.length))[k]?
+                  = (h[k]?).map (shift_val cutoff padding.length) := by
+    intro k; simp [List.getElem?_map]
+  have h_take_len : ((h.map (shift_val cutoff padding.length)).take cutoff).length = cutoff := by
+    rw [List.length_take, sh_len]; omega
+  have h_drop_len :
+      ((h.map (shift_val cutoff padding.length)).drop cutoff).length = h.length - cutoff := by
+    rw [List.length_drop, sh_len]
+  by_cases h_lt : i < cutoff
+  · rw [if_pos h_lt]
+    have h_take_lt :
+        i < ((h.map (shift_val cutoff padding.length)).take cutoff).length := by
+      rw [h_take_len]; exact h_lt
+    have h_left_lt :
+        i < ((h.map (shift_val cutoff padding.length)).take cutoff ++ padding).length := by
+      rw [List.length_append, h_take_len]; omega
+    rw [List.getElem?_append_left h_left_lt]
+    rw [List.getElem?_append_left h_take_lt]
+    rw [List.getElem?_take]
+    rw [if_pos h_lt]
+    exact sh_get i
+  · rw [if_neg h_lt]
+    have h_le : cutoff ≤ i := Nat.le_of_not_lt h_lt
+    have h_left_len :
+        ((h.map (shift_val cutoff padding.length)).take cutoff ++ padding).length
+          = cutoff + padding.length := by
+      rw [List.length_append, h_take_len]
+    have h_skip_left :
+        ((h.map (shift_val cutoff padding.length)).take cutoff ++ padding).length
+          ≤ i + padding.length := by rw [h_left_len]; omega
+    rw [List.getElem?_append_right h_skip_left]
+    have h_idx_eq :
+        i + padding.length
+          - ((h.map (shift_val cutoff padding.length)).take cutoff ++ padding).length
+          = i - cutoff := by rw [h_left_len]; omega
+    rw [h_idx_eq]
+    rw [List.getElem?_drop]
+    have h_eq : cutoff + (i - cutoff) = i := by omega
+    rw [h_eq]
+    exact sh_get i
+
+theorem shift_idx_lt_shift_heap_length (cutoff : Nat) (padding h : Heap) (idx : Nat)
+    (h_cutoff : cutoff ≤ h.length) (h_idx_lt : idx < h.length) :
+    shift_idx cutoff padding.length idx < (shift_heap cutoff padding h).length := by
+  rw [shift_heap_length]
+  unfold shift_idx
+  by_cases h_lt : idx < cutoff
+  · rw [if_pos h_lt]; omega
+  · rw [if_neg h_lt]; omega
+
+theorem shift_heap_getElem?_padding (cutoff : Nat) (padding h : Heap) (k : Nat)
+    (h_cutoff : cutoff ≤ h.length)
+    (h_lo : cutoff ≤ k) (h_hi : k < cutoff + padding.length) :
+    (shift_heap cutoff padding h)[k]? = padding[k - cutoff]? := by
+  unfold shift_heap
+  have h_take_len : ((h.map (shift_val cutoff padding.length)).take cutoff).length = cutoff := by
+    rw [List.length_take, List.length_map]; omega
+  have h_left_len :
+      ((h.map (shift_val cutoff padding.length)).take cutoff ++ padding).length
+        = cutoff + padding.length := by
+    rw [List.length_append, h_take_len]
+  have h_skip : ((h.map (shift_val cutoff padding.length)).take cutoff).length ≤ k := by
+    rw [h_take_len]; exact h_lo
+  have h_left_lt : k < ((h.map (shift_val cutoff padding.length)).take cutoff ++ padding).length := by
+    rw [h_left_len]; exact h_hi
+  rw [List.getElem?_append_left h_left_lt]
+  rw [List.getElem?_append_right h_skip]
+  rw [h_take_len]
+
+theorem shift_heap_update_length' (cutoff : Nat) (padding h : Heap) (idx : Nat) (v : Val)
+    (h_cutoff : cutoff ≤ h.length) :
+    (shift_heap cutoff padding (h.update idx v)).length
+      = (shift_heap cutoff padding h).length := by
+  rw [shift_heap_length, shift_heap_length, Heap.update_length]
+
+theorem shift_listVal_eq_map (cutoff offset : Nat) :
+    ∀ (xs : List Val),
+      shift_listVal cutoff offset xs = xs.map (shift_val cutoff offset)
+  | []      => rfl
+  | _ :: xs => by simp [shift_listVal, shift_listVal_eq_map cutoff offset xs]
+
+theorem shift_val_listToVal (cutoff offset : Nat) :
+    ∀ (xs : List Val),
+      shift_val cutoff offset (listToVal xs) =
+        listToVal (shift_listVal cutoff offset xs)
+  | []      => rfl
+  | _ :: xs => by simp [listToVal, shift_listVal, shift_val, shift_val_listToVal cutoff offset xs]
+
+theorem shift_listVal_valToList (cutoff offset : Nat) :
+    ∀ (v : Val),
+      valToList (shift_val cutoff offset v) =
+        (valToList v).map (shift_listVal cutoff offset)
+  | .nilV               => rfl
+  | .cons x xs => by
+      simp only [shift_val, valToList]
+      rw [shift_listVal_valToList cutoff offset xs]
+      cases valToList xs with
+      | none => rfl
+      | some rest => simp [shift_listVal]
+  | .num _              => rfl
+  | .bool _             => rfl
+  | .sym _              => rfl
+  | .prim _             => rfl
+  | .builtinBaseApply   => rfl
+  | .closure _ _ _      => rfl
+
+theorem shift_heap_append (cutoff : Nat) (padding h ext : Heap)
+    (h_cutoff : cutoff ≤ h.length) :
+    shift_heap cutoff padding (h ++ ext) =
+      shift_heap cutoff padding h ++ ext.map (shift_val cutoff padding.length) := by
+  unfold shift_heap
+  simp only [List.map_append]
+  rw [List.take_append_of_le_length (by rw [List.length_map]; exact h_cutoff)]
+  rw [List.drop_append_of_le_length (by rw [List.length_map]; exact h_cutoff)]
+  simp [List.append_assoc]
+
+theorem shift_heap_update (cutoff : Nat) (padding h : Heap) (idx : Nat) (v : Val)
+    (h_cutoff : cutoff ≤ h.length) (h_idx_lt : idx < h.length) :
+    shift_heap cutoff padding (h.update idx v) =
+      (shift_heap cutoff padding h).update
+        (shift_idx cutoff padding.length idx)
+        (shift_val cutoff padding.length v) := by
+  apply List.ext_getElem?
+  intro k
+  have h_cutoff' : cutoff ≤ (h.update idx v).length := by
+    rw [Heap.update_length]; exact h_cutoff
+  by_cases h_eq : k = shift_idx cutoff padding.length idx
+  · subst h_eq
+    rw [shift_heap_getElem? cutoff padding (h.update idx v) idx h_cutoff']
+    rw [Heap.update_get_eq h idx v h_idx_lt]
+    have h_shifted_lt :
+        shift_idx cutoff padding.length idx < (shift_heap cutoff padding h).length :=
+      shift_idx_lt_shift_heap_length cutoff padding h idx h_cutoff h_idx_lt
+    rw [Heap.update_get_eq (shift_heap cutoff padding h)
+          (shift_idx cutoff padding.length idx)
+          (shift_val cutoff padding.length v) h_shifted_lt]
+    rfl
+  · rw [Heap.update_get_neq _ _ _ _ h_eq]
+    by_cases h_k_below : k < cutoff
+    · have h_shift_k : shift_idx cutoff padding.length k = k := shift_idx_below h_k_below
+      rw [show k = shift_idx cutoff padding.length k from h_shift_k.symm,
+          shift_heap_getElem? cutoff padding (h.update idx v) k h_cutoff',
+          shift_heap_getElem? cutoff padding h k h_cutoff]
+      have h_k_ne_idx : k ≠ idx := by
+        intro h_eq_idx
+        apply h_eq
+        have h_idx_below : idx < cutoff := by rw [← h_eq_idx]; exact h_k_below
+        rw [h_eq_idx, shift_idx_below h_idx_below]
+      rw [Heap.update_get_neq _ _ _ _ h_k_ne_idx]
+    · have h_k_ge : cutoff ≤ k := Nat.le_of_not_lt h_k_below
+      by_cases h_k_pad : k < cutoff + padding.length
+      · rw [shift_heap_getElem?_padding cutoff padding (h.update idx v) k h_cutoff' h_k_ge h_k_pad]
+        rw [shift_heap_getElem?_padding cutoff padding h k h_cutoff h_k_ge h_k_pad]
+      · have h_k_high : cutoff + padding.length ≤ k := Nat.le_of_not_lt h_k_pad
+        have h_orig_ge : cutoff ≤ k - padding.length := by omega
+        have h_shifted_eq : shift_idx cutoff padding.length (k - padding.length) = k := by
+          unfold shift_idx
+          rw [if_neg (by omega : ¬ k - padding.length < cutoff)]
+          omega
+        rw [← h_shifted_eq]
+        rw [shift_heap_getElem? cutoff padding (h.update idx v) (k - padding.length) h_cutoff']
+        rw [shift_heap_getElem? cutoff padding h (k - padding.length) h_cutoff]
+        have h_orig_ne_idx : k - padding.length ≠ idx := by
+          intro h_eq_idx
+          apply h_eq
+          rw [← h_shifted_eq, h_eq_idx]
+        rw [Heap.update_get_neq _ _ _ _ h_orig_ne_idx]
+
+theorem shift_heap_update_general (cutoff : Nat) (padding h : Heap) (idx : Nat) (v : Val)
+    (h_cutoff : cutoff ≤ h.length) :
+    shift_heap cutoff padding (h.update idx v) =
+      (shift_heap cutoff padding h).update
+        (shift_idx cutoff padding.length idx)
+        (shift_val cutoff padding.length v) := by
+  by_cases h_lt : idx < h.length
+  · exact shift_heap_update cutoff padding h idx v h_cutoff h_lt
+  · have h_oob_a : h.length ≤ idx := Nat.le_of_not_lt h_lt
+    rw [Heap.update_oob h idx v h_oob_a]
+    have h_idx_ge_cutoff : cutoff ≤ idx := Nat.le_trans h_cutoff h_oob_a
+    have h_shift_idx : shift_idx cutoff padding.length idx = idx + padding.length := by
+      unfold shift_idx
+      rw [if_neg (by omega : ¬ idx < cutoff)]
+    have h_shift_idx_oob :
+        (shift_heap cutoff padding h).length
+          ≤ shift_idx cutoff padding.length idx := by
+      rw [shift_heap_length, h_shift_idx]; omega
+    rw [Heap.update_oob _ _ _ h_shift_idx_oob]
+
+private theorem map_shift_val_eq_self_of_AllBelow (cutoff offset : Nat) :
+    ∀ (l : List Val), (∀ v ∈ l, Val.AllBelow cutoff v) →
+    l.map (shift_val cutoff offset) = l
+  | [], _ => rfl
+  | x :: xs, hp => by
+      simp only [List.map_cons]
+      have hx : Val.AllBelow cutoff x := hp x List.mem_cons_self
+      have hxs : ∀ v ∈ xs, Val.AllBelow cutoff v :=
+        fun v hv => hp v (List.mem_cons.mpr (Or.inr hv))
+      rw [shift_val_id cutoff offset hx,
+          map_shift_val_eq_self_of_AllBelow cutoff offset xs hxs]
+
+theorem shift_heap_id_of_deep (padding : Heap) :
+    ∀ (h : Heap), HeapDeep h →
+    shift_heap h.length padding h = h ++ padding := by
+  intro h h_deep
+  unfold shift_heap
+  have h_all_below : ∀ v ∈ h, Val.AllBelow h.length v := by
+    intro v hv_mem
+    obtain ⟨i, hi⟩ := List.getElem?_of_mem hv_mem
+    exact ValDeep.toAllBelow (h_deep i v hi)
+  rw [map_shift_val_eq_self_of_AllBelow h.length padding.length h h_all_below]
+  rw [List.take_length, List.drop_length]
+  simp
+
+/-! ## Self-shift weak bisim -/
+
+private theorem valVis_self_shift_aux (cutoff : Nat) (padding : Heap) :
+    ∀ (n : Nat) (h : Heap), HeapValid h → cutoff ≤ h.length →
+    (∀ (v : Val), ValValid v h →
+      ValVis_aux_weak n v (shift_val cutoff padding.length v)
+        h (shift_heap cutoff padding h)) ∧
+    (∀ (env : Env), EnvValid env h →
+      EnvVis_aux_weak n env (shift_env cutoff padding.length env)
+        h (shift_heap cutoff padding h)) := by
+  intro n
+  induction n with
+  | zero =>
+      intro h h_heap_valid h_cutoff
+      refine ⟨?_, ?_⟩
+      · intro _ _; trivial
+      · intro env hev x
+        cases hxe : env.lookup x with
+        | none => simp [shift_env_lookup_none cutoff padding.length env x hxe]
+        | some idx =>
+            rw [shift_env_lookup cutoff padding.length env x idx hxe]
+            simp only
+            have h_idx_lt : idx < h.length := hev x idx hxe
+            cases hv : h[idx]? with
+            | none =>
+                exfalso
+                rw [List.getElem?_eq_none_iff] at hv
+                omega
+            | some v =>
+                rw [shift_heap_getElem? cutoff padding h idx h_cutoff, hv]
+                simp only [Option.map_some]
+                trivial
+  | succ k ih =>
+      intro h h_heap_valid h_cutoff
+      have ih_h := ih h h_heap_valid h_cutoff
+      obtain ⟨ih_val_k, ih_env_k⟩ := ih_h
+      refine ⟨?_, ?_⟩
+      · intro v hv
+        cases v with
+        | num a => simp [shift_val, ValVis_aux_weak]
+        | bool a => simp [shift_val, ValVis_aux_weak]
+        | nilV => simp [shift_val, ValVis_aux_weak]
+        | sym a => simp [shift_val, ValVis_aux_weak]
+        | prim a => simp [shift_val, ValVis_aux_weak]
+        | builtinBaseApply => simp [shift_val, ValVis_aux_weak]
+        | cons x y =>
+            obtain ⟨hx, hy⟩ := hv
+            simp only [shift_val, ValVis_aux_weak]
+            exact ⟨ih_val_k x hx, ih_val_k y hy⟩
+        | closure ps body cenv =>
+            have hev : EnvValid cenv h := hv
+            simp only [shift_val]
+            rw [ValVis_aux_weak_closure]
+            exact ⟨rfl, rfl, ih_env_k cenv hev⟩
+      · intro env hev x
+        cases hxe : env.lookup x with
+        | none => simp [shift_env_lookup_none cutoff padding.length env x hxe]
+        | some idx =>
+            rw [shift_env_lookup cutoff padding.length env x idx hxe]
+            simp only
+            have h_idx_lt : idx < h.length := hev x idx hxe
+            cases hv : h[idx]? with
+            | none =>
+                exfalso
+                rw [List.getElem?_eq_none_iff] at hv
+                omega
+            | some v =>
+                rw [shift_heap_getElem? cutoff padding h idx h_cutoff, hv]
+                simp only [Option.map_some]
+                have hv_valid : ValValid v h := h_heap_valid idx v hv
+                cases v with
+                | num a => simp [shift_val, ValVis_aux_weak]
+                | bool a => simp [shift_val, ValVis_aux_weak]
+                | nilV => simp [shift_val, ValVis_aux_weak]
+                | sym a => simp [shift_val, ValVis_aux_weak]
+                | prim a => simp [shift_val, ValVis_aux_weak]
+                | builtinBaseApply => simp [shift_val, ValVis_aux_weak]
+                | cons xx yy =>
+                    obtain ⟨hx, hy⟩ := hv_valid
+                    simp only [shift_val, ValVis_aux_weak]
+                    exact ⟨ih_val_k xx hx, ih_val_k yy hy⟩
+                | closure psv bodyv cenvv =>
+                    have hev2 : EnvValid cenvv h := hv_valid
+                    simp only [shift_val]
+                    rw [ValVis_aux_weak_closure]
+                    exact ⟨rfl, rfl, ih_env_k cenvv hev2⟩
+
+theorem valVis_weak_self_shift (cutoff : Nat) (padding : Heap)
+    (h : Heap) (h_heap : HeapValid h) (h_cutoff : cutoff ≤ h.length)
+    (v : Val) (hv : ValValid v h) :
+    ValVis_weak v (shift_val cutoff padding.length v)
+      h (shift_heap cutoff padding h) := by
+  intro n
+  exact (valVis_self_shift_aux cutoff padding n h h_heap h_cutoff).1 v hv
+
+/-! ## Policy shift-respecting predicate -/
+
+/-- A policy is **shift-respecting** for a fixed `cutoff`/`padding` if its
+    verdict is invariant under coordinated shifting of all of its inputs. -/
+def PolicyRespectsShift (cutoff : Nat) (padding : Heap) (p : BlackPolicy) : Prop :=
+  ∀ (target : String) (idx : Nat) (env metaEnv : Env)
+    (heap : Heap) (level : Nat) (oldVal new : Val),
+    cutoff ≤ heap.length →
+    p { target := target, heap := heap, env := env,
+        metaEnv := metaEnv, index := idx, level := level } oldVal new =
+    p { target := target,
+        heap := shift_heap cutoff padding heap,
+        env := shift_env cutoff padding.length env,
+        metaEnv := shift_env cutoff padding.length metaEnv,
+        index := shift_idx cutoff padding.length idx,
+        level := level }
+      (shift_val cutoff padding.length oldVal)
+      (shift_val cutoff padding.length new)
+
+def PolicyTableRespectsShift (cutoff : Nat) (padding : Heap)
+    (ptable : PolicyTable) : Prop :=
+  ∀ (idx : Nat) p, ptable[idx]? = some p → PolicyRespectsShift cutoff padding p
+
+
+/-! ## `shift` commutes with `applyPrim` -/
+
+private theorem shift_mulConsList (cutoff offset : Nat) :
+    ∀ (v : Val),
+      mulConsList (shift_val cutoff offset v) = mulConsList v
+  | .nilV => rfl
+  | .cons (.num _) rest => by
+      simp only [shift_val, mulConsList, shift_mulConsList cutoff offset rest]
+  | .cons (.bool _) _ => rfl
+  | .cons (.closure _ _ _) _ => rfl
+  | .cons .nilV _ => rfl
+  | .cons (.sym _) _ => rfl
+  | .cons (.prim _) _ => rfl
+  | .cons .builtinBaseApply _ => rfl
+  | .cons (.cons _ _) _ => rfl
+  | .num _ => rfl
+  | .bool _ => rfl
+  | .sym _ => rfl
+  | .prim _ => rfl
+  | .builtinBaseApply => rfl
+  | .closure _ _ _ => rfl
+
+theorem shift_applyPrim (cutoff offset : Nat) (name : String) :
+    ∀ (args : List Val),
+      applyPrim name (shift_listVal cutoff offset args)
+        = (applyPrim name args).map (shift_val cutoff offset) := by
+  intro args
+  rw [shift_listVal_eq_map]
+  unfold applyPrim
+  by_cases h_plus : name = "+"
+  · subst h_plus
+    rcases args with _ | ⟨a, _ | ⟨b, _ | _⟩⟩ <;>
+      first
+      | (cases a <;> cases b <;>
+         simp [applyPrim_plus, shift_val, List.map])
+      | simp [applyPrim_plus, shift_val, List.map]
+  · simp only [if_neg h_plus]
+    by_cases h_minus : name = "-"
+    · subst h_minus
+      rcases args with _ | ⟨a, _ | ⟨b, _ | _⟩⟩ <;>
+        first
+        | (cases a <;> cases b <;>
+           simp [applyPrim_minus, shift_val, List.map])
+        | simp [applyPrim_minus, shift_val, List.map]
+    · simp only [if_neg h_minus]
+      by_cases h_times : name = "*"
+      · subst h_times
+        rcases args with _ | ⟨a, _ | ⟨b, _ | _⟩⟩ <;>
+          first
+          | (cases a <;> cases b <;>
+             simp [applyPrim_times, shift_val, List.map])
+          | simp [applyPrim_times, shift_val, List.map]
+      · simp only [if_neg h_times]
+        by_cases h_mul : name = "mul-list"
+        · subst h_mul
+          rcases args with _ | ⟨a, _ | _⟩
+          · simp [applyPrim_mulList, List.map]
+          · simp [applyPrim_mulList, List.map, shift_mulConsList cutoff offset a]
+            cases mulConsList a <;> simp [shift_val]
+          · simp [applyPrim_mulList, List.map]
+        · simp only [if_neg h_mul]
+          by_cases h_eq : name = "="
+          · subst h_eq
+            rcases args with _ | ⟨a, _ | ⟨b, _ | _⟩⟩ <;>
+              first
+              | (cases a <;> cases b <;>
+                 simp [applyPrim_eq, shift_val, List.map])
+              | simp [applyPrim_eq, shift_val, List.map]
+          · simp only [if_neg h_eq]
+            by_cases h_numQ : name = "num?"
+            · subst h_numQ
+              rcases args with _ | ⟨a, _ | _⟩
+              · simp [applyPrim_numQ, List.map]
+              · cases a <;> simp [applyPrim_numQ, shift_val, List.map]
+              · simp [applyPrim_numQ, List.map]
+            · simp only [if_neg h_numQ]
+              by_cases h_boolQ : name = "bool?"
+              · subst h_boolQ
+                rcases args with _ | ⟨a, _ | _⟩
+                · simp [applyPrim_boolQ, List.map]
+                · cases a <;> simp [applyPrim_boolQ, shift_val, List.map]
+                · simp [applyPrim_boolQ, List.map]
+              · simp only [if_neg h_boolQ]
+                by_cases h_clQ : name = "closure?"
+                · subst h_clQ
+                  rcases args with _ | ⟨a, _ | _⟩
+                  · simp [applyPrim_closureQ, List.map]
+                  · cases a <;> simp [applyPrim_closureQ, shift_val, List.map]
+                  · simp [applyPrim_closureQ, List.map]
+                · simp only [if_neg h_clQ]
+                  by_cases h_pQ : name = "prim?"
+                  · subst h_pQ
+                    rcases args with _ | ⟨a, _ | _⟩
+                    · simp [applyPrim_primQ, List.map]
+                    · cases a <;> simp [applyPrim_primQ, shift_val, List.map]
+                    · simp [applyPrim_primQ, List.map]
+                  · simp only [if_neg h_pQ]
+                    by_cases h_cons : name = "cons"
+                    · subst h_cons
+                      rcases args with _ | ⟨a, _ | ⟨b, _ | _⟩⟩ <;>
+                        simp [applyPrim_cons, shift_val, List.map]
+                    · simp only [if_neg h_cons]
+                      by_cases h_car : name = "car"
+                      · subst h_car
+                        rcases args with _ | ⟨a, _ | _⟩
+                        · simp [applyPrim_car, List.map]
+                        · cases a <;> simp [applyPrim_car, shift_val, List.map]
+                        · simp [applyPrim_car, List.map]
+                      · simp only [if_neg h_car]
+                        by_cases h_cdr : name = "cdr"
+                        · subst h_cdr
+                          rcases args with _ | ⟨a, _ | _⟩
+                          · simp [applyPrim_cdr, List.map]
+                          · cases a <;> simp [applyPrim_cdr, shift_val, List.map]
+                          · simp [applyPrim_cdr, List.map]
+                        · simp only [if_neg h_cdr]
+                          by_cases h_null : name = "null?"
+                          · subst h_null
+                            rcases args with _ | ⟨a, _ | _⟩
+                            · simp [applyPrim_nullQ, List.map]
+                            · cases a <;> simp [applyPrim_nullQ, shift_val, List.map]
+                            · simp [applyPrim_nullQ, List.map]
+                          · simp only [if_neg h_null]
+                            simp
+
+/-! ## Tower-shift commutativity
+
+    `shift_state cutoff padding T` shifts the heap and shifts each
+    level's env. These lemmas show that the basic Tower operations
+    commute with shift, threading through proofs of `shift_respect`. -/
+
+theorem shift_state_heap (cutoff : Nat) (padding : Heap) (T : TowerState) :
+    (shift_state cutoff padding T).heap = shift_heap cutoff padding T.heap := rfl
+
+theorem shift_state_heap_length (cutoff : Nat) (padding : Heap) (T : TowerState) :
+    (shift_state cutoff padding T).heap.length = T.heap.length + padding.length := by
+  rw [shift_state_heap, shift_heap_length]
+
+theorem shift_state_levels_length (cutoff : Nat) (padding : Heap) (T : TowerState) :
+    (shift_state cutoff padding T).levels.length = T.levels.length := by
+  simp [shift_state, List.length_map]
+
+theorem shift_state_envAt? (cutoff : Nat) (padding : Heap) (T : TowerState) (n : Nat) :
+    (shift_state cutoff padding T).envAt? n =
+      (T.envAt? n).map (shift_env cutoff padding.length) := by
+  unfold shift_state TowerState.envAt? TowerState.levelAt?
+  simp only [List.getElem?_map]
+  cases h : T.levels[n]? with
+  | none => simp
+  | some ls => simp
+
+theorem shift_state_policyAt? (cutoff : Nat) (padding : Heap) (T : TowerState) (n : Nat) :
+    (shift_state cutoff padding T).policyAt? n = T.policyAt? n := by
+  unfold shift_state TowerState.policyAt? TowerState.levelAt?
+  simp only [List.getElem?_map]
+  cases h : T.levels[n]? with
+  | none => simp
+  | some ls => simp
+
+theorem shift_state_setPolicyAt (cutoff : Nat) (padding : Heap) (T : TowerState)
+    (n : Nat) (p : BlackPolicy) :
+    shift_state cutoff padding (T.setPolicyAt n p) =
+      (shift_state cutoff padding T).setPolicyAt n p := by
+  unfold TowerState.setPolicyAt
+  cases h : T.levelAt? n with
+  | none =>
+      have h2 : (shift_state cutoff padding T).levelAt? n = none := by
+        unfold TowerState.levelAt? at h ⊢
+        show (T.levels.map _)[n]? = none
+        simp [List.getElem?_map, h]
+      rw [h2]
+  | some ls =>
+      have h2 : (shift_state cutoff padding T).levelAt? n =
+          some { ls with env := shift_env cutoff padding.length ls.env } := by
+        unfold TowerState.levelAt? at h ⊢
+        show (T.levels.map _)[n]? = _
+        simp [List.getElem?_map, h]
+      rw [h2]
+      unfold shift_state TowerState.setLevel
+      simp only [TowerState.mk.injEq, true_and]
+      ext i
+      have h_lt : n < T.levels.length := by
+        unfold TowerState.levelAt? at h
+        exact (List.getElem?_eq_some_iff.mp h).1
+      have h_lt' : n < (T.levels.map (fun ls' =>
+          { ls' with env := shift_env cutoff padding.length ls'.env })).length := by
+        rw [List.length_map]; exact h_lt
+      by_cases h_eq : i = n
+      · let ls_after : LevelState :=
+          { env := shift_env cutoff padding.length ls.env, policy := p }
+        have ha : ((T.levels.set n ({ ls with policy := p })).map
+            (fun ls' => { ls' with env := shift_env cutoff padding.length ls'.env }))[i]?
+          = some ls_after := by
+          rw [h_eq, List.getElem?_map, List.getElem?_set_self h_lt]
+          rfl
+        have hb : ((T.levels.map
+            (fun ls' => { ls' with env := shift_env cutoff padding.length ls'.env })).set n
+            ({ env := shift_env cutoff padding.length ls.env, policy := p }))[i]?
+          = some ls_after := by
+          rw [h_eq, List.getElem?_set_self h_lt']
+        rw [ha, hb]
+      · have ha : ((T.levels.set n
+            { ls with policy := p }).map
+            (fun ls' => { ls' with env := shift_env cutoff padding.length ls'.env }))[i]?
+          = (T.levels.map
+              (fun ls' => { ls' with env := shift_env cutoff padding.length ls'.env }))[i]? := by
+          rw [List.getElem?_map, List.getElem?_set_ne (Ne.symm h_eq), List.getElem?_map]
+        have hb : ((T.levels.map
+            (fun ls' => { ls' with env := shift_env cutoff padding.length ls'.env })).set n
+            { ls with env := shift_env cutoff padding.length ls.env, policy := p })[i]?
+          = (T.levels.map
+              (fun ls' => { ls' with env := shift_env cutoff padding.length ls'.env }))[i]? := by
+          rw [List.getElem?_set_ne (Ne.symm h_eq)]
+        rw [ha, hb]
+
+theorem shift_state_updateHeap (cutoff : Nat) (padding : Heap) (T : TowerState)
+    (idx : Nat) (v : Val) (h_cutoff : cutoff ≤ T.heap.length) :
+    shift_state cutoff padding (T.updateHeap idx v) =
+      (shift_state cutoff padding T).updateHeap
+        (shift_idx cutoff padding.length idx)
+        (shift_val cutoff padding.length v) := by
+  unfold shift_state TowerState.updateHeap
+  simp only [TowerState.mk.injEq, true_and, and_true]
+  exact shift_heap_update_general cutoff padding T.heap idx v h_cutoff
+
+theorem shift_state_alloc_idx (cutoff : Nat) (padding : Heap) (T : TowerState)
+    (v : Val) (h_cutoff : cutoff ≤ T.heap.length) :
+    ((shift_state cutoff padding T).alloc (shift_val cutoff padding.length v)).2
+      = shift_idx cutoff padding.length (T.alloc v).2 := by
+  unfold TowerState.alloc Heap.alloc
+  show (shift_state cutoff padding T).heap.length
+       = shift_idx cutoff padding.length T.heap.length
+  rw [shift_state_heap_length]
+  unfold shift_idx
+  by_cases h_eq : T.heap.length < cutoff
+  · -- T.heap.length < cutoff but cutoff ≤ T.heap.length — impossible.
+    omega
+  · rw [if_neg h_eq]
+
+theorem shift_state_alloc_state (cutoff : Nat) (padding : Heap) (T : TowerState)
+    (v : Val) (h_cutoff : cutoff ≤ T.heap.length) :
+    ((shift_state cutoff padding T).alloc (shift_val cutoff padding.length v)).1
+      = shift_state cutoff padding (T.alloc v).1 := by
+  unfold TowerState.alloc shift_state Heap.alloc
+  simp only [TowerState.mk.injEq, true_and, and_true]
+  -- Goal: shift_heap T.heap ++ [shift_val v] = shift_heap (T.heap ++ [v])
+  rw [shift_heap_append cutoff padding T.heap [v] h_cutoff]
+  simp [List.map]
+
+/-! ## allocStep foldl commutes with shift -/
+
+private theorem allocStep_foldl_length :
+    ∀ (lst : List (Val × String)) (h : Heap) (cenv : Env),
+      (lst.foldl allocStep (h, cenv)).1.length = h.length + lst.length
+  | [], h, _ => by simp [List.foldl]
+  | hd :: tl, h, cenv => by
+      simp only [List.foldl, allocStep, Heap.alloc]
+      rw [allocStep_foldl_length tl (h ++ [hd.1]) (.cons hd.2 h.length cenv)]
+      simp [List.length_append]; omega
+
+private theorem allocStep_foldl_heap_prefix :
+    ∀ (lst : List (Val × String)) (h : Heap) (cenv : Env),
+      ∃ ext, (lst.foldl allocStep (h, cenv)).1 = h ++ ext
+  | [], h, _ => ⟨[], by simp [List.foldl]⟩
+  | hd :: tl, h, cenv => by
+      simp only [List.foldl, allocStep, Heap.alloc]
+      obtain ⟨ext, h_ext⟩ :=
+        allocStep_foldl_heap_prefix tl (h ++ [hd.1]) (.cons hd.2 h.length cenv)
+      exact ⟨[hd.1] ++ ext, by rw [h_ext]; simp [List.append_assoc]⟩
+
+private theorem allocStep_foldl_shift (cutoff : Nat) (padding : Heap) :
+    ∀ (lst : List (Val × String)) (h : Heap) (cenv : Env),
+      cutoff ≤ h.length →
+      let lst_b : List (Val × String) :=
+        lst.map (fun vp => (shift_val cutoff padding.length vp.1, vp.2))
+      let result_a := lst.foldl allocStep (h, cenv)
+      let result_b := lst_b.foldl allocStep
+        (shift_heap cutoff padding h, shift_env cutoff padding.length cenv)
+      result_b.1 = shift_heap cutoff padding result_a.1 ∧
+      result_b.2 = shift_env cutoff padding.length result_a.2
+  | [], h, cenv, _h_cutoff => by simp [List.foldl]
+  | (v, p) :: tl, h, cenv, h_cutoff => by
+      simp only [List.foldl, allocStep, Heap.alloc, List.map_cons]
+      have h_heap_eq :
+          shift_heap cutoff padding h ++ [shift_val cutoff padding.length v]
+            = shift_heap cutoff padding (h ++ [v]) := by
+        rw [shift_heap_append cutoff padding h [v] h_cutoff]
+        rfl
+      have h_b_len : (shift_heap cutoff padding h).length = h.length + padding.length :=
+        shift_heap_length cutoff padding h
+      have h_idx_eq :
+          shift_idx cutoff padding.length h.length = h.length + padding.length := by
+        unfold shift_idx
+        rw [if_neg (by omega : ¬ h.length < cutoff)]
+      have h_env_eq :
+          Env.cons p (shift_heap cutoff padding h).length (shift_env cutoff padding.length cenv)
+            = shift_env cutoff padding.length (.cons p h.length cenv) := by
+        simp [shift_env, h_idx_eq, h_b_len]
+      have h_cutoff_next : cutoff ≤ (h ++ [v]).length := by
+        rw [List.length_append]; omega
+      have ih := allocStep_foldl_shift cutoff padding tl (h ++ [v])
+        (.cons p h.length cenv) h_cutoff_next
+      simp only at ih
+      obtain ⟨ih1, ih2⟩ := ih
+      rw [h_heap_eq, h_env_eq]
+      exact ⟨ih1, ih2⟩
+

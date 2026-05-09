@@ -3131,3 +3131,40 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
               have hne : (ps.length != args_a.length) = true := by simp [hlen]
               rw [hne] at h_eval
               simp at h_eval
+
+/-! ## Heap-prefix extension for `applyDirect`
+
+    The substantive framing theorem: `applyDirect` on the prefix-
+    extended state produces a result `ValVis_weak`-related to the
+    result on the original state. In lean-green this is proven via
+    `shift_respect` (lean-green:Bisim.lean:6676+, ~1500 LOC). The
+    tower-aware port is the next major phase of Session D — lengthy
+    but mechanical. Body is `sorry` until that proof lands.
+
+    See DUMP2.md for the roadmap (heap_mono → policy_shift_preserved
+    → shift_respect → applyDirect_heap_extend_via_shift → this). -/
+theorem applyDirect_heap_extend_weak
+    {fuel : Nat} {ptable : PolicyTable} {level : Nat}
+    {op : Val} {operands : List Val} {T : TowerState}
+    (_hresp_pt : PolicyTableRespectsBisimT ptable)
+    (_h_heap : HeapValid T.heap) (_h_op : ValValid op T.heap)
+    (_h_operands : ListValValid operands T.heap)
+    (_h_levels_valid : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
+    (_h_levels_resp : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+    {r : Val} {T' : TowerState}
+    (_h_app : applyDirect fuel ptable level op operands T = some (r, T'))
+    (extras : List Val) (_h_extras : ListValValid extras T.heap)
+    (_h_heap_deep : HeapDeep T.heap) (_h_op_deep : ValDeep op T.heap)
+    (_h_operands_deep : ListValDeep operands T.heap)
+    (_h_levels_deep : ∀ n env, T.envAt? n = some env → EnvDeep env T.heap)
+    (_h_pt_shift : PolicyTableRespectsShift T.heap.length extras ptable)
+    (_h_pol_shift : ∀ p, T.policyAt? level = some p →
+                     PolicyRespectsShift T.heap.length extras p) :
+    ∃ r' T'',
+      applyDirect fuel ptable level op operands { T with heap := T.heap ++ extras }
+        = some (r', T'') ∧
+      ValVis_weak r r' T'.heap T''.heap ∧
+      HeapValid T''.heap ∧
+      (∀ n, T'.policyAt? n = T''.policyAt? n) ∧
+      T.heap.length + extras.length ≤ T''.heap.length := by
+  sorry
