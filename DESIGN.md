@@ -6,9 +6,13 @@ heap+closure+`set!`, value bisimulation à la CakeML). The goal is a single
 formalization that is **both** infinite-and-reflective-in-its-governance **and**
 operationally-faithful-to-Black.
 
-This is a sketch. No code yet. The point is to pin down the encoding and check
-that the existing seams align before committing to ~3-4K LOC of new
-infrastructure.
+> **Status update**: this doc was the initial sketch before any code. The
+> design has been substantially realized — see the README for the current
+> snapshot (~6700 LOC, runtime + ported Bisim foundation + tower-aware
+> framing infrastructure with the cross-level synthesis structurally
+> complete). The architectural decisions below all hold; only the per-level
+> *policy storage* (lines 67-74) deviated from this draft (see correction
+> in that section).
 
 ## What each parent gives
 
@@ -68,10 +72,16 @@ lean-grey has `(em e) | (install n) | (installPolicy n)`. lean-green has
 - `(set! base-apply e)` — at level N+1, mutates the cell that level N's
   `applyVia` dispatches through. Replaces lean-grey's abstract `(install n)`
   with the real Black `set!` mechanism.
-- `(installPolicy n)` — at level N, replaces level N's policy. The cell
-  storing level N's policy lives in level N+1's heap; `(em (installPolicy n))`
-  governs level N+1's policy from level N+2. lean-grey's reflective-governance
-  story, wired through real cells.
+- `(installPolicy n)` — at level N, replaces level N's policy.
+  *(Implementation note: the policy lives directly in the per-level
+  `LevelState = { env, policy }` struct, not in a heap cell. The
+  initial sketch envisioned policy-as-heap-cell to make policy
+  modification reflective-via-`set!`, but a direct `setPolicyAt`
+  primitive turned out simpler and equivalent for the governance
+  story. `(em (installPolicy n))` still governs level N+1's policy
+  from level N+2 — it just does so by mutating the LevelState
+  directly rather than by `set!`-ing a heap cell.)* lean-grey's
+  reflective-governance story is preserved.
 
 `(install n)` is dropped: the abstract `mods`-table indirection was a stand-in
 for "real Black-source modification", and we now have the real thing.
