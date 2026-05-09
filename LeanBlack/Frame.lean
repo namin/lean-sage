@@ -557,14 +557,18 @@ theorem all_preserves_envAt (n : Nat) :
                 | some i =>
                     rw [hl] at h_eval; simp only at h_eval
                     by_cases hm : isMetaMutation x env T_e level
-                    · -- meta-mutation case. The nested `match T_e.heap[idx]?, T_e.policyAt? level with`
-                      -- joint-pair match in eval's body resists clean Lean tactics
-                      -- (cases-rw breaks because the binders substitute, simp-only
-                      -- on hp/hg makes-no-progress, split fails with "consider using
-                      -- set_option trace.split.failure true"). The semantic content
-                      -- is straightforward: T' is either T_e or T_e.updateHeap idx v;
+                    · -- meta-mutation case: T' is either T_e or T_e.updateHeap i v;
                       -- both preserve envAt? via `TowerState.updateHeap_envAt?`.
-                      sorry
+                      rw [if_pos hm] at h_eval
+                      split at h_eval
+                      · split at h_eval
+                        · simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                          obtain ⟨_, h_T⟩ := h_eval; subst h_T
+                          rw [TowerState.updateHeap_envAt?]; exact h_env_e
+                        · simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                          obtain ⟨_, h_T⟩ := h_eval; subst h_T
+                          exact h_env_e
+                      · simp at h_eval
                     · rw [if_neg hm] at h_eval
                       simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
                       obtain ⟨_, h_T⟩ := h_eval; subst h_T
