@@ -543,6 +543,82 @@ private theorem materializeStep_iter_cross_side
       obtain ⟨ih_heap, ih_envs⟩ := ih
       exact materializeStep_cross_side _ _ ih_heap ih_envs
 
+/-- Single materialize step preserves cross-side policy equality. -/
+private theorem materializeStep_cross_side_policies
+    (T_a T_b : TowerState)
+    (h_pols : ∀ m, T_a.policyAt? m = T_b.policyAt? m)
+    (h_envs : ∀ m, T_a.envAt? m = T_b.envAt? m) :
+    ∀ m, (materializeStep T_a).policyAt? m = (materializeStep T_b).policyAt? m := by
+  have h_lvl_len : T_a.levels.length = T_b.levels.length :=
+    levels_length_eq_of_envs_eq T_a T_b h_envs
+  intro m
+  unfold materializeStep TowerState.policyAt? TowerState.levelAt?
+  by_cases h_in : m < T_a.levels.length
+  · rw [List.getElem?_append_left h_in,
+        List.getElem?_append_left (h_lvl_len ▸ h_in)]
+    exact h_pols m
+  · by_cases h_eq : m = T_a.levels.length
+    · subst h_eq
+      rw [List.getElem?_append_right (Nat.le_refl _),
+          List.getElem?_append_right (h_lvl_len ▸ Nat.le_refl _)]
+      simp [h_lvl_len]
+    · have h_a_oob : (T_a.levels ++
+          [({env := (freshLevelEnv T_a.heap).2, policy := acceptAllPolicy}
+            : LevelState)]).length ≤ m := by
+        simp [List.length_append]; omega
+      have h_b_oob : (T_b.levels ++
+          [({env := (freshLevelEnv T_b.heap).2, policy := acceptAllPolicy}
+            : LevelState)]).length ≤ m := by
+        simp [List.length_append]; omega
+      rw [List.getElem?_eq_none h_a_oob, List.getElem?_eq_none h_b_oob]
+
+/-- Iter materializeStep preserves cross-side policy equality. -/
+private theorem materializeStep_iter_cross_side_policies
+    (T_a T_b : TowerState) (k : Nat)
+    (h_heap_len : T_a.heap.length = T_b.heap.length)
+    (h_pols : ∀ m, T_a.policyAt? m = T_b.policyAt? m)
+    (h_envs : ∀ m, T_a.envAt? m = T_b.envAt? m) :
+    ∀ m, (Nat.fold k (fun _ _ T' => materializeStep T') T_a).policyAt? m =
+         (Nat.fold k (fun _ _ T' => materializeStep T') T_b).policyAt? m := by
+  induction k with
+  | zero => simp [Nat.fold]; exact h_pols
+  | succ k ih =>
+      simp only [Nat.fold]
+      have ⟨ih_heap, ih_envs⟩ :=
+        materializeStep_iter_cross_side T_a T_b k h_heap_len h_envs
+      exact materializeStep_cross_side_policies _ _ ih ih_envs
+
+/-- Cross-side: parallel materialize results have equal policyAt? at
+    all indices. -/
+theorem TowerState.materialize_cross_side_policies_eq
+    (T_a T_b T_a' T_b' : TowerState) (n : Nat)
+    (h_heap_len : T_a.heap.length = T_b.heap.length)
+    (h_pols : ∀ m, T_a.policyAt? m = T_b.policyAt? m)
+    (h_envs : ∀ m, T_a.envAt? m = T_b.envAt? m)
+    (h_mat_a : T_a.materialize n = some T_a')
+    (h_mat_b : T_b.materialize n = some T_b') :
+    ∀ m, T_a'.policyAt? m = T_b'.policyAt? m := by
+  have h_lvl_len : T_a.levels.length = T_b.levels.length :=
+    levels_length_eq_of_envs_eq T_a T_b h_envs
+  unfold materialize at h_mat_a h_mat_b
+  by_cases h1 : n ≥ Tower.maxDepth
+  · simp [h1] at h_mat_a
+  · simp [h1] at h_mat_a h_mat_b
+    by_cases h2 : T_a.levels.length > n
+    · have h2_b : T_b.levels.length > n := h_lvl_len ▸ h2
+      simp [h2] at h_mat_a; simp [h2_b] at h_mat_b
+      obtain rfl := h_mat_a.symm
+      obtain rfl := h_mat_b.symm
+      exact h_pols
+    · have h2_b : ¬ T_b.levels.length > n := h_lvl_len ▸ h2
+      simp [h2] at h_mat_a; simp [h2_b] at h_mat_b
+      obtain rfl := h_mat_a.symm
+      obtain rfl := h_mat_b.symm
+      have h_eq_k : n + 1 - T_a.levels.length = n + 1 - T_b.levels.length := by
+        rw [h_lvl_len]
+      rw [h_eq_k]
+      exact materializeStep_iter_cross_side_policies T_a T_b _ h_heap_len h_pols h_envs
+
 /-- Cross-side: parallel materialize results have equal heap.length
     and equal envAt? at all indices. -/
 theorem TowerState.materialize_cross_side_envs_eq
