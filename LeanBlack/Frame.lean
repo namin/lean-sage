@@ -557,7 +557,13 @@ theorem all_preserves_envAt (n : Nat) :
                 | some i =>
                     rw [hl] at h_eval; simp only at h_eval
                     by_cases hm : isMetaMutation x env T_e level
-                    · -- meta-mutation case: gating + heap update
+                    · -- meta-mutation case. The nested `match T_e.heap[idx]?, T_e.policyAt? level with`
+                      -- joint-pair match in eval's body resists clean Lean tactics
+                      -- (cases-rw breaks because the binders substitute, simp-only
+                      -- on hp/hg makes-no-progress, split fails with "consider using
+                      -- set_option trace.split.failure true"). The semantic content
+                      -- is straightforward: T' is either T_e or T_e.updateHeap idx v;
+                      -- both preserve envAt? via `TowerState.updateHeap_envAt?`.
                       sorry
                     · rw [if_neg hm] at h_eval
                       simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
@@ -670,11 +676,44 @@ theorem all_preserves_envAt (n : Nat) :
                             exact ih_applyDirect ptable level op args T_m r T' m env_m h_app h_env_m
                         | num _ | bool _ | nilV | cons _ _ | sym _ | closure _ _ _ | prim _ =>
                             exact ih_applyDirect ptable level _ [op, listToVal args] T_m r T' m env_m h_app h_env_m
-      · -- applyDirect (k+1) — body sorry'd; same template as eval/applyVia
-        -- but Lean's whnf interaction with the closure case's foldl
-        -- makes the rw chain finicky. Mechanical to fix.
-        intro _ _ _ _ _ _ _ _ _ _ _
-        sorry
+      · -- applyDirect (k+1)
+        intro ptable level op args T r T' m env_m h_app h_env
+        cases op with
+        | num _ | bool _ | nilV | cons _ _ | sym _ => simp [applyDirect] at h_app
+        | closure ps body cenv =>
+            simp only [applyDirect] at h_app
+            by_cases hlen : ps.length = args.length
+            · have hne : (ps.length != args.length) = false := by simp [hlen]
+              rw [hne] at h_app
+              simp only [Bool.false_eq_true, ↓reduceIte] at h_app
+              -- h_app : eval k ... body env' T_alloc = some (r, T')
+              have h_env_alloc :
+                  ({T with heap := (args.zip ps |>.foldl allocStep (T.heap, cenv)).1}).envAt? m
+                  = some env_m := h_env
+              exact ih_eval ptable level body _ _ r T' m env_m h_app h_env_alloc
+            · have hne : (ps.length != args.length) = true := by simp [hlen]
+              rw [hne] at h_app
+              simp at h_app
+        | prim name =>
+            simp only [applyDirect] at h_app
+            cases hp : applyPrim name args with
+            | none => rw [hp] at h_app; simp at h_app
+            | some _ =>
+                rw [hp] at h_app
+                simp only [Option.some.injEq, Prod.mk.injEq] at h_app
+                obtain ⟨_, h_T⟩ := h_app; subst h_T; exact h_env
+        | builtinBaseApply =>
+            match args, h_app with
+            | [], h => simp [applyDirect] at h
+            | [_], h => simp [applyDirect] at h
+            | _ :: _ :: _ :: _, h => simp [applyDirect] at h
+            | [actualOp, operandsList], h =>
+                simp only [applyDirect] at h
+                cases hl : valToList operandsList with
+                | none => rw [hl] at h; simp at h
+                | some operands =>
+                    rw [hl] at h
+                    exact ih_applyDirect ptable level actualOp operands T r T' m env_m h h_env
 
 /-- Convenience wrapper for `eval`. -/
 theorem eval_preserves_envAt
