@@ -363,6 +363,50 @@ theorem TowerState.materialize_heap_grows
       obtain rfl := h_mat.symm
       exact materializeStep_iter_heap_grows T (n + 1 - T.levels.length)
 
+/-! ### `freshLevelEnv` content lemmas
+
+    Used by the `materialize_cross_side_*` lemmas: the new level's
+    env+heap contribution depends only on `h.length` (not on `h`'s
+    contents). -/
+
+/-- Foldl helper: each iteration appends exactly one cell to the heap. -/
+private theorem buildBindings_foldl_length (pairs : List (String × Val)) (h : Heap) (env : Env) :
+    (pairs.foldl
+      (fun (acc : Heap × Env) (kv : String × Val) =>
+        let (hh, ee) := acc
+        let (hh', idx) := hh.alloc kv.2
+        (hh', .cons kv.1 idx ee)) (h, env)).1.length = h.length + pairs.length := by
+  induction pairs generalizing h env with
+  | nil => simp [List.foldl]
+  | cons p rest ih =>
+      simp only [List.foldl, List.length_cons]
+      have step : (h.alloc p.2).1.length = h.length + 1 := by
+        simp [Heap.alloc, List.length_append]
+      rw [ih]
+      simp [step]
+      omega
+
+/-- `freshLevelEnv h` produces a heap with exactly 14 more cells than `h`. -/
+theorem freshLevelEnv_heap_length (h : Heap) :
+    (freshLevelEnv h).1.length = h.length + 14 := by
+  unfold freshLevelEnv
+  -- The fold appends 13 cells, then alloc adds one more (= 14 total).
+  simp only [Heap.alloc]
+  -- Pull out the foldl's intermediate length.
+  have h_inner :
+      (([("+", .prim "+"), ("-", .prim "-"), ("*", .prim "*"),
+        ("=", .prim "="), ("num?", .prim "num?"), ("bool?", .prim "bool?"),
+        ("closure?", .prim "closure?"), ("prim?", .prim "prim?"),
+        ("cons", .prim "cons"), ("car", .prim "car"),
+        ("cdr", .prim "cdr"), ("null?", .prim "null?"),
+        ("mul-list", .prim "mul-list")] : List (String × Val)).foldl
+       (fun (acc : Heap × Env) (kv : String × Val) =>
+        let (hh, ee) := acc
+        let (hh', idx) := hh.alloc kv.2
+        (hh', .cons kv.1 idx ee)) (h, .nil)).1.length = h.length + 13 :=
+    buildBindings_foldl_length _ h _
+  simp [List.length_append, h_inner]
+
 /-! ### Cross-side parallelism for `materialize`
 
     These lemmas express that `materialize` is "deterministic up to

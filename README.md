@@ -17,7 +17,7 @@ Status, by file:
 | File | Status | Notes |
 |---|---|---|
 | `Black.lean` | done | Val/Expr/Env, Heap ops, primitives, MutationCtx, BlackPolicy |
-| `Tower.lean` | partial (398 LOC, 1 sorry) | LevelState, TowerState, materialization, accessors, `RunState := TowerState` shim, foundational lemmas (`setPolicyAt`/`updateHeap`/`alloc`/`materialize` preservation facts; `materialize_envAt?_preserves`, `materialize_heap_grows`, `materialize_cross_side_some_iff` all proved). The `materialize_cross_side_envs_eq` lemma (~100 LOC of Nat.fold induction + freshLevelEnv content-equality bookkeeping) is sorry'd — used by `.em` / `applyVia` in Frame |
+| `Tower.lean` | partial (440 LOC, 1 sorry) | LevelState, TowerState, materialization, accessors, `RunState := TowerState` shim, foundational lemmas (`setPolicyAt`/`updateHeap`/`alloc`/`materialize` preservation facts; `materialize_envAt?_preserves`, `materialize_heap_grows`, `materialize_cross_side_some_iff`, `freshLevelEnv_heap_length` all proved). Only `materialize_cross_side_envs_eq` remains sorry'd — needs the `freshLevelEnv_env_eq` companion lemma (env-content depends only on heap.length) plus Nat.fold induction. Used by `.em` / `applyVia` in Frame |
 | `Eval.lean` | done | tower-indexed eval/evalList/applyVia/applyDirect |
 | `Smoke.lean` | done | 8 tests across 4 scenes — all pass |
 | `Bisim.lean` | partial (3057/7580 LOC) | depth-indexed bisim, validity, heap-extension, in-place-update preservation, `HeapEvolution`, list/listToVal/applyPrim bisim, alloc-chain, `bisim_imp_eq` — all ported verbatim via the `RunState := TowerState` shim |
