@@ -4,7 +4,7 @@ A synthesis of [`lean-grey`](../lean-grey/) (abstract infinite tower with
 proved governance coherence) and [`lean-green`](../lean-green/) (Black-faithful
 heap+closure+`set!` interpreter with CakeML-style value bisimulation).
 
-**Current snapshot:** 6284 LOC, 8 sorries (Tower 0, Frame 4, Policies 1, Soundness 3). Smoke 8/8. The cross-level synthesis is structurally complete: `.em` runs end-to-end through real `materialize_cross_side_*` lemmas and a fully-proved chain of materialize-preservation helpers. Only `h_env_mat` (cross-side env self-bisim at materialized level), `eval_preserves_envAt` body, `.set`, and `applyVia` clause remain in Frame.
+**Current snapshot:** ~6500 LOC, 9 sorries (Tower 0, Frame 5, Policies 1, Soundness 3). Smoke 8/8. The cross-level synthesis is structurally complete: `.em` runs end-to-end through real `materialize_cross_side_*` lemmas and a fully-proved chain of materialize-preservation helpers. `eval_preserves_envAt` is wrapped over a conjunction `all_preserves_envAt` whose body is ~70% complete (eval cases except `.set` meta-mutation, full `evalList`, full `applyVia` — applyDirect case + `.set` meta-mutation sub-case sorry'd as `cases-rw` interaction friction).
 
 ## What's here
 
