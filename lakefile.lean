@@ -12,3 +12,6 @@ lean_lib «LeanBlack» where
 
 lean_exe «smoke» where
   root := `Smoke
+
+lean_exe «demos» where
+  root := `Demos

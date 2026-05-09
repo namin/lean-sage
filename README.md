@@ -4,38 +4,31 @@ A synthesis of [`lean-grey`](../lean-grey/) (abstract infinite tower with
 proved governance coherence) and [`lean-green`](../lean-green/) (Black-faithful
 heap+closure+`set!` interpreter with CakeML-style value bisimulation).
 
-**Current snapshot:** 6712 LOC, 8 sorries (Tower 0, Frame 4, Policies 1, Soundness 3). Smoke 8/8. The cross-level synthesis is structurally complete: `.em` runs end-to-end through real `materialize_cross_side_*` lemmas and a fully-proved chain of materialize-preservation helpers. `all_preserves_envAt` (which `eval_preserves_envAt` wraps) is ~95% complete — only the `.set` meta-mutation sub-case remains (Lean tactic friction).
+**Status: 0 sorries.** ~13,571 LOC across 7 files. Smoke 8/8 passing.
+Demos 14/14 passing. All headline theorems proved.
 
-**Sorry breakdown — the 4 Frame sorries cluster around 2 architectural gaps + 2 mechanical issues:**
-- **Architectural** (need cross-side heap-content-bisim invariant added to WFCtxT): `h_env_mat` in `.em`, `applyVia` clause in `frame_tower`. Both blocked on the same gap.
-- **Mechanical** (Lean tactic friction): `.set` meta-mutation sub-case in `all_preserves_envAt` — joint `match T_e.heap[i]?, gate? with` resists clean cases-rw.
-- **Substantial** (heaviest single case): `.set` in `frame_tower` — needs `ValVis_aux_update` machinery + policy gate semantics.
+## What this is
 
-Plus 1 Policies sorry (`multnExact_soundForCE_first_install_tower` headline) and 3 Soundness sorries (`TowerCE.refl`, `eval_tower_safe`, `safeEvolution_necessary`) — all downstream of frame completion.
+A **tower-indexed reflective interpreter** for a Black-style language:
+nested `(em (em ...))` programs, real `set! base-apply` cells reaching
+through arbitrarily many materialized levels, single global heap, per-level
+envs and policies. The cross-level reflection cascade — modifying level N+k's
+apply rule from level N — is fully formalized with mechanized soundness
+proofs.
 
-## What's here
+## Headline theorems (all proved)
 
-This first cut is the **runtime substrate**: a tower-indexed interpreter that
-runs nested `(em (em ...))` programs with real `set! base-apply` cells reaching
-down through multiple levels. The bisim infrastructure and the headline
-soundness theorem are deferred to follow-up rounds — they're additive on top of
-the substrate, and follow lean-green's structure.
+| Theorem | What it says |
+|---|---|
+| `eval_tower_safe` (Soundness.lean) | `eval` preserves `TowerCE` and `SafeEvolution` jointly. The 4-way mutual induction over `eval`/`evalList`/`applyVia`/`applyDirect`. The synthesis of lean-grey's tower-conservativeness with lean-green's CE-soundness. |
+| `frame_tower` (Frame.lean) | Cross-side framing: bisim-related inputs ⇒ bisim-related outputs across `eval`/`evalList`/`applyVia`/`applyDirect`, threading the `WFCtxT` 13-field invariant. Tower-aware port of lean-green's `frame`. |
+| `applyDirect_heap_extend_weak` (Frame.lean) | Prefix-extension: `applyDirect` succeeds with a `ValVis_weak`-related result on the prefix-extended state. Discharged via `shift_respect`. |
+| `shift_respect` (Frame.lean) | `eval`/`evalList`/`applyVia`/`applyDirect` all commute with `shift_state`. ~750 LOC of case analysis × 4 mutual clauses. The technical engine for `applyDirect_heap_extend_weak`. |
+| `materialize_shift_commutes` (Bisim.lean) | `(shift_state T).materialize n = (T.materialize n).map shift_state`. The lemma that lets `.em` and `applyVia` commute with shift in `shift_respect`. |
+| `multnExact_soundForCE_first_install_tower` (Policies.lean) | Tower-aware port of lean-green's headline: a `multnExactPolicy`-admitted modification at first install conservatively extends `builtinBaseApply` for `CE_weak`. Combines numerical case (vacuous) and non-numerical case (substantive trace + framing). |
+| `safeEvolution_necessary` (Soundness.lean) | Counterexample: without per-level policy soundness, `eval` can produce a `T'` that doesn't conservatively extend `T`. Concrete witness via a diverging-closure bad-mod. |
 
-Status, by file:
-
-| File | Status | Notes |
-|---|---|---|
-| `Black.lean` | done | Val/Expr/Env, Heap ops, primitives, MutationCtx, BlackPolicy |
-| `Tower.lean` | **done (~755 LOC, 0 sorries)** | LevelState, TowerState, materialization, accessors, `RunState := TowerState` shim. The primitive bindings list `primPairs` is `@[irreducible]` so proofs about `freshLevelEnv` are decoupled from its 13-element content. **All proved**: `setPolicyAt`/`updateHeap`/`alloc`/`materialize` preservation facts; `materialize_envAt?_preserves`; `materialize_heap_grows`; `materialize_heap_extends` (prefix-extension, used by `.em`'s `HeapEvolution.from_heapExt`); `materialize_cross_side_some_iff`; `materialize_cross_side_envs_eq`; `materialize_cross_side_policies_eq`; `primPairs_length`; `freshLevelEnv_heap_length`; `freshLevelEnv_env_eq`; `freshLevelEnv_heap_extends`; `buildBindings_*` foldl helpers; `materializeStep_iter_*` Nat.fold inductions |
-| `Eval.lean` | done | tower-indexed eval/evalList/applyVia/applyDirect |
-| `Smoke.lean` | done | 8 tests across 4 scenes — all pass |
-| `Bisim.lean` | partial (3057/7580 LOC) | depth-indexed bisim, validity, heap-extension, in-place-update preservation, `HeapEvolution`, list/listToVal/applyPrim bisim, alloc-chain, `bisim_imp_eq` — all ported verbatim via the `RunState := TowerState` shim |
-| `Frame.lean` | partial (1880 LOC, 4 sorries) | tower-aware `WFCtxT` (13 fields), `TowerCross` (12 fields), `FrameStmtT`, `frame_tower` defined. `acceptAllPolicy_respects_bisimT` proved. **All 3 single-side materialize-preservation lemmas fully proved**: `materialize_HeapValid_preserves`, `materialize_level_envs_valid_preserves`, `materialize_policies_resp_preserves`. **`all_preserves_envAt`** (mutual conjunction theorem) — `eval_preserves_envAt` is now a wrapper projecting from it; body ~95% complete (only `.set` meta-mutation sub-case sorry'd). **`frame_tower` proved cases**: zero (all 4); eval `.num`/`.bool`/`.quote`/`.var`/`.lam`/`.ifte`/`.seq`/`.app`/`.primApp`/`.letE`/`.installPolicy`; full `evalList`; applyDirect `.builtinBaseApply`/`.prim`/`.closure`; **`.em` structurally complete** (`h_he_mat` closed via `materialize_heap_extends`). **4 remaining sorries**: `.set` meta-mutation sub-case in `all_preserves_envAt` (Lean tactic friction), `.set` in `frame_tower` (heaviest case), `h_env_mat` in `.em` (needs heap-content-bisim invariant), `applyVia` clause in `frame_tower` (same blocker as `h_env_mat`) |
-| `Policies.lean` | scaffold (246 LOC, 1 sorry) | tower-aware `callAsBaseApply`, per-level `CE`/`CE_weak`, `BlackPolicy.SoundForCE`/`_weak`. Verbatim ports of `numGuardPolicy`/`multnExactPolicy` definitions + `numGuard_sound_for_shape`/`multnExact_sound_for_shape` shape lemmas. `verifiedTable`. Headline statement `multnExact_soundForCE_first_install_tower` (sorry — needs frame). The `*_respects_bisim`/`_respects_shift` theorems will port once Frame is complete |
-| `Soundness.lean` | scaffold (131 LOC, 3 sorries) | the headline `eval_tower_safe` theorem statement (the synthesis of lean-grey's `eval_tower_conservative` and lean-green's `multnExact_soundForCE_first_install`) + `safeEvolution_necessary` counterexample statement + `TowerCE` cross-level CE predicate. All bodies sorry'd — discharging requires Frame + Policies completion |
-| `DESIGN.md` | done | architectural rationale, decisions, scope |
-
-## What works (smoke)
+## Cross-level reflection in action
 
 ```
 $ lake exe smoke
@@ -56,13 +49,50 @@ Scene 4: governance
   OK  rejectAll @ level 1 saves +: expected num(3), got num(3)
 ```
 
-Scenes 1, 2, and 4 are lean-green parity (Scene 2 is exactly lean-green's
-multn demo; Scene 4 is its governance demo). **Scene 3 is the new
-capability** — it installs `multn` at level 2 (via `(em (em ...))` from level
-0) so that level 1's `applyVia` finds the wrapper, and observes the result by
-explicitly invoking application at level 1 via `(em (2 3 4))`. This is the
-cross-level cascade the lean-green stage-1 metaEnv-of-meta-is-self
+```
+$ lake exe demos
+Demo 1: Doubling wrapper (every num result × 2)
+  OK  (+ 1 2) ⇒ doubled: expected num(6), got num(6)
+  OK  (* 5 7) ⇒ doubled: expected num(70), got num(70)
+
+Demo 2: Identity wrapper (transparency)
+  OK  (+ 4 5) unchanged: expected num(9), got num(9)
+
+Demo 3: Tripler (multn variant)
+  OK  (2 3 4) tripler: expected num(24), got num(24)
+  OK  (5 7) tripler: expected num(35), got num(35)
+  OK  (10) tripler: expected num(10), got num(10)
+
+Demo 4: Compose multn THEN doubling
+  OK  (2 3 4) multn→double: expected num(48), got num(48)
+  OK  (+ 1 2) multn→double: expected num(6), got num(6)
+
+Demo 5: Compose doubling THEN multn
+  OK  (2 3 4) double→multn: expected num(24), got num(24)
+  OK  (+ 1 2) double→multn: expected num(6), got num(6)
+
+Demo 6: Three-level meta-meta (install at L2, observe at L1)
+  OK  (em (* 2 3)) via L2-multn: expected num(6), got num(6)
+  OK  (em (3 4)) via L2-multn: expected num(12), got num(12)
+  OK  (3 4) at L0 unchanged: expected <none>, got <none>
+
+Demo 7: Constant wrapper
+  OK  (+ 1 2) ⇒ 42: expected num(42), got num(42)
+  OK  (* 100 200) ⇒ 42: expected num(42), got num(42)
+```
+
+**Scene 3** is the headline new capability: `multn` is installed at level 2
+(via `(em (em ...))` from level 0), making level 1's `applyVia` route through
+the wrapper. The cross-level cascade — a level-2 `set!` reshaping how level 1
+dispatches — is what lean-green's stage-1 `metaEnv-of-meta-is-self`
 simplification couldn't express.
+
+**Demo 4 vs Demo 5** illustrates that multiple installs **compose**: each new
+install's `orig` captures the prior `base-apply`, so the order of installs
+determines the dispatch chain.
+
+**Demo 6** does three-level reflection: a level-2 install changes level 1's
+behavior, observable from level 0 only via `(em ...)` to reach level 1.
 
 ## Architecture (one paragraph)
 
@@ -82,53 +112,65 @@ dispatched from level N without translating its captured env idxes — those
 idxes refer to the same backing store regardless of dispatch level. This is
 consistent with lean-green (one heap, level-uniform allocation discipline).
 
+## Files
+
+| File | LOC | Notes |
+|---|---|---|
+| `Black.lean` | 452 | Val/Expr/Env, Heap ops, primitives, MutationCtx, BlackPolicy. Includes `val_beq_eq`, `expr_beq_eq`, `env_beq_eq`, `valToList_listToVal`. |
+| `Tower.lean` | 839 | LevelState, TowerState, materialization, accessors, `RunState := TowerState` shim. `primPairs` is `@[irreducible]`. All Tower lemmas proved: `setPolicyAt`/`updateHeap`/`alloc`/`materialize` preservation; `materialize_envAt?_preserves`; `materialize_heap_grows`; `materialize_heap_extends`; `materialize_cross_side_*`; `freshLevelEnv_*`; `buildBindings_*` foldl helpers. |
+| `Eval.lean` | 226 | Tower-indexed `eval`/`evalList`/`applyVia`/`applyDirect`. |
+| `Bisim.lean` | 4505 | Depth-indexed `ValVis`/`EnvVis` + weak variants, `ValValid`/`EnvValid`/`HeapValid`, heap-extension/in-place-update preservation, `HeapEvolution`, `ListValVis`/`ListValValid`, `bool_false_iff` characterizations, `applyPrim` bisim, alloc-chain bisim, `bisim_imp_eq`, `ValVis_trans`, `AllBelow`/`Deep` predicates. **Shift apparatus**: `shift_idx`/`shift_val`/`shift_env`/`shift_listVal`/`shift_heap`/`shift_state` (tower-aware), injectivity, identity-on-AllBelow, lookup/getElem? commutativity, `shift_heap_update`/`shift_heap_append`/`shift_heap_id_of_deep`, `valVis_weak_self_shift`, `PolicyRespectsShift`/`PolicyTableRespectsShift`, `shift_applyPrim`, `Tower-shift commutativity` (`shift_state_envAt?`/`policyAt?`/`setPolicyAt`/`updateHeap`/`alloc`), `allocStep_foldl_shift`, `buildBindings_foldl_shift`, `freshLevelEnv_heap_shift`/`env_shift`, `materializeStep_shift_commutes`/`iter_shift_commutes`/`materialize_shift_commutes`. |
+| `Frame.lean` | 4948 | `PolicyRespectsBisimT`, `PolicyTableRespectsBisimT`. Single-side materialize preservation lemmas. Tower-aware `WFCtxT` (13 fields), `TowerCross` (12 fields), `FrameStmtT`, `frame_tower` (the framing theorem, all 4 mutual clauses, all 13 expression cases proved). `all_preserves_envAt` (mutual conjunction). `heap_mono` (4-way mutual induction over fuel). `policy_shift_preserved` (4-way mutual). `shift_respect` (the 4-way commutativity proof). `applyDirect_heap_extend_weak` (prefix-extension, derived via `shift_respect` + `frame_tower` self-bisim). |
+| `Soundness.lean` | 1990 | `TowerCE`, `SafeEvolution`. `TowerCE` helpers (`refl`/`trans`/`of_heap_eq`/`of_heap_extends`/`lift_source`/`weaken_h_ref`). `Expr.IsAtomic` and `eval_atomic_T_unchanged`. `HeapValid_alloc_one`, `EnvValid_cons_alloc`, self-invariant preservation lemmas. `safeEvolution_necessary` (concrete counterexample). `all_tower_safe` (the 4-way mutual safety theorem). `eval_tower_safe` (wrapper). |
+| `Policies.lean` | 611 | Tower-aware `callAsBaseApply`, per-level `CE`/`CE_weak`, `BlackPolicy.SoundForCE`/`_weak`, `numGuardPolicy`/`multnExactPolicy` definitions + shape lemmas, `verifiedTable`. `OrigBoundIn`/`NumQBoundIn`/`InstallFacts`/`RuntimeWF` (tower-aware install-protocol structures). `multnExactPolicy_implies_InstallFacts` (bridge lemma). `multn_closure_body_unfolds` (closure-body trace). `multnExact_CE_num_case_vacuous` (vacuous numerical case). `multnExact_CE_nonnum_case` (substantive non-numerical case via `applyDirect_heap_extend_weak`). `multnExact_soundForCE_first_install_tower` (the headline). |
+| `Smoke.lean` | 159 | 4 scenes, 8 tests. |
+| `Demos.lean` | 282 | 7 demos, 14 tests. Doubling, identity, tripler, install-composition (multn-then-double, double-then-multn), three-level meta-meta, constant wrapper. |
+| `DESIGN.md` | — | Architectural rationale, decisions, scope. |
+
 ## Build
 
 ```bash
-lake build       # library
-lake build smoke # executable
-lake exe smoke   # run the 8 demos
+lake build           # library + smoke + demos
+lake exe smoke       # run the 8 demos
+lake exe demos       # run the 14 demos
 ```
 
 Pinned to `leanprover/lean4:v4.20.0` via `lean-toolchain` (matches lean-green).
 
-## What's next
+```bash
+$ grep -c "sorry$" LeanBlack/*.lean
+LeanBlack/Bisim.lean:0
+LeanBlack/Black.lean:0
+LeanBlack/Eval.lean:0
+LeanBlack/Frame.lean:0
+LeanBlack/Policies.lean:0
+LeanBlack/Soundness.lean:0
+LeanBlack/Tower.lean:0
+```
 
-Roughly ordered by load-bearingness, closing the 8 remaining sorries:
+## What you can do with it
 
-1. **Crack the `.set` meta-mutation Lean syntax** (~30 LOC). The joint
-   `match T_e.heap[i]?, gate? with` in `all_preserves_envAt` resists
-   `cases-rw`. Likely fixable via `obtain` on `Option.eq_some_iff` or a
-   different destructuring tactic. Closes the inner `all_preserves_envAt`
-   sorry, making `eval_preserves_envAt` fully proved.
+The reflective rewiring of `base-apply` lets you:
 
-2. **Add a 14th invariant to `WFCtxT`** (`heap_content_bisim_at_levels`)
-   and propagate through 7 construction sites (~200 LOC cascade). Unlocks
-   both `h_env_mat` in `.em` and the `applyVia` clause in `frame_tower` —
-   they share this architectural blocker. After this cascade, only `.set`
-   remains in `frame_tower`.
+- **Redefine function application** at any level, with the redefinition
+  taking effect at all lower levels (or specific levels via `(em ...)` chains).
+  See `multn` (Smoke Scene 2), `doublingWrapper` (Demos 1), `triplerWrapper`
+  (Demos 3).
+- **Compose modifications**: each new install captures the prior `base-apply`
+  as `orig`. Demos 4-5 show that order matters; the dispatch chain reflects
+  the install order.
+- **Reach across multiple levels**: an `(em (em ...))` from level 0 affects
+  level 1's apply rule via level 2's `base-apply`. Smoke Scene 3 and
+  Demos 6.
+- **Govern the modifications**: `BlackPolicy` gates `set!` on meta-env cells.
+  `multnExactPolicy` admits exactly the multn shape with the correct install
+  protocol; `rejectAllPolicy` (the safe default for newly-materialized levels)
+  refuses everything. Smoke Scene 4 demonstrates the contrast.
+- **Prove your modifications safe**: the `multnExact_soundForCE_first_install_tower`
+  headline certifies that any `multnExactPolicy`-admitted modification at
+  first install conservatively extends `builtinBaseApply` for CE_weak
+  (non-num operators behave identically; num operators get the multn fold).
 
-3. **`.set` case in `frame_tower`** (~300 LOC). The heaviest single case:
-   uses `ValVis_aux_update` machinery from `Bisim.lean` + the policy gate
-   semantics. This is the operational governance case.
-
-4. **`safeEvolution_necessary`** (Soundness, ~100 LOC). Concrete
-   counterexample matching Smoke Scene 4. Doesn't depend on `frame_tower`
-   — independent of items 1-3.
-
-5. **`multnExact_soundForCE_first_install_tower`** (Policies). Needs
-   `frame_tower` complete (or at least `.set` + `applyVia`). Then this
-   ports lean-green's headline.
-
-6. **`eval_tower_safe`** (Soundness headline, ~500 LOC). Once Policies is
-   done, this is the cross-level induction.
-
-7. **`TowerCE.refl`** (Soundness, small). Needs an
-   `applyDirect_preserves_HeapValid`-style helper.
-
-8. **Optional: LLM cascade** (`Bedrock.lean` / `Elab.lean` / `Runner.lean`).
-   Ports unchanged from lean-green for single-level demos; the interesting
-   tower extension is a meta-meta proposer, but that's a separate research
-   thread.
-
-See [`DESIGN.md`](DESIGN.md) for the full architectural rationale.
+See [`DESIGN.md`](DESIGN.md) for the full architectural rationale and
+[`DUMP.md`](DUMP.md) / [`DUMP2.md`](DUMP2.md) for the proof-development log
+(Sessions A through D).
