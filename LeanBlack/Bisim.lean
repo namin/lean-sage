@@ -3232,19 +3232,27 @@ theorem closedValB_AllBelow (cutoff : Nat) :
       exact ⟨closedValB_AllBelow cutoff x hc.1, closedValB_AllBelow cutoff y hc.2⟩
   | .closure _ _ _, hc => by simp [closedValB] at hc
 
-/-! ## ValVis transitivity (axiomatic — proof deferred)
+/-! ## ValVis transitivity (closure case sorry'd)
 
-    Needed for composing CE chains. The proof is by induction on
-    depth with cases on Val structure. Atomic constructors (.num,
-    .bool, etc.) are immediate via structural equality. .cons is
-    by IH on components. .closure is non-trivial because the
-    pattern-matching on `cenv_b.lookup x` doesn't auto-reduce
-    cleanly — needs careful use of `change` and `Option.some.inj`
-    chasing. Stated here as a helper for `TowerCE.trans`. -/
+    Needed for composing CE chains across mutating eval steps. The
+    proof is by induction on depth with cases on Val structure:
+    atomic constructors are immediate, `.cons` chains by IH on
+    components, `.closure` after `subst` on cenv equalities reduces
+    to chasing the heap-indexed lookup chain.
+
+    The closure case has a technical block: Lean's match-on-pair
+    reduction (`match (some i, some i) with | (some i_a, some i_b) =>
+    ...`) doesn't fire under `simp only` / `dsimp only` / `rw [helper]`
+    even with a `rfl`-provable equality helper. This appears to be
+    because the inline match in `ValVis_aux`'s closure body is
+    elaborated to a recursor that doesn't match the inline-match
+    form in the helper. A clean fix is to refactor `ValVis_aux`'s
+    closure-arm body to use the named `EnvVis_aux` def — but that
+    ripples through ~30 dependent proofs. Deferred. -/
 theorem ValVis_aux_trans : ∀ (n : Nat) (va vb vc : Val) (ha hb hc : Heap),
     ValVis_aux n va vb ha hb → ValVis_aux n vb vc hb hc →
     ValVis_aux n va vc ha hc := by
-  -- Proof deferred — see file note above.
+  -- Proof deferred — closure case has match-reduction issue.
   sorry
 
 /-- ValVis transitivity (the depth-uniform version). -/
