@@ -515,7 +515,7 @@ theorem TowerState.materialize_heap_grows
 /-- Foldl helper: each iteration appends exactly one cell to the heap.
     Stated using `.fst`/`.snd` projections (matching what `simp` produces
     when reducing the destructuring `let`s in `freshLevelEnv`). -/
-private theorem buildBindings_foldl_length (pairs : List (String × Val)) (h : Heap) (env : Env) :
+theorem buildBindings_foldl_length (pairs : List (String × Val)) (h : Heap) (env : Env) :
     (pairs.foldl
       (fun (acc : Heap × Env) (kv : String × Val) =>
         (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
@@ -531,7 +531,7 @@ private theorem buildBindings_foldl_length (pairs : List (String × Val)) (h : H
 /-- The buildBindings foldl produces the same env from accumulators
     with equal heap-length (the env's idxes are heap-length-derived only).
     Stated using projection form to match simp-reduced freshLevelEnv. -/
-private theorem buildBindings_foldl_env_eq_of_len_eq (pairs : List (String × Val))
+theorem buildBindings_foldl_env_eq_of_len_eq (pairs : List (String × Val))
     (h_a h_b : Heap) (env : Env) (h_len : h_a.length = h_b.length) :
     (pairs.foldl
       (fun (acc : Heap × Env) (kv : String × Val) =>

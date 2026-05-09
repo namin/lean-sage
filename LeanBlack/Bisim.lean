@@ -4251,7 +4251,7 @@ theorem shift_state_alloc_state (cutoff : Nat) (padding : Heap) (T : TowerState)
 
 /-! ## allocStep foldl commutes with shift -/
 
-private theorem allocStep_foldl_length :
+theorem allocStep_foldl_length :
     ∀ (lst : List (Val × String)) (h : Heap) (cenv : Env),
       (lst.foldl allocStep (h, cenv)).1.length = h.length + lst.length
   | [], h, _ => by simp [List.foldl]
@@ -4270,7 +4270,7 @@ private theorem allocStep_foldl_heap_prefix :
         allocStep_foldl_heap_prefix tl (h ++ [hd.1]) (.cons hd.2 h.length cenv)
       exact ⟨[hd.1] ++ ext, by rw [h_ext]; simp [List.append_assoc]⟩
 
-private theorem allocStep_foldl_shift (cutoff : Nat) (padding : Heap) :
+theorem allocStep_foldl_shift (cutoff : Nat) (padding : Heap) :
     ∀ (lst : List (Val × String)) (h : Heap) (cenv : Env),
       cutoff ≤ h.length →
       let lst_b : List (Val × String) :=
@@ -4306,4 +4306,200 @@ private theorem allocStep_foldl_shift (cutoff : Nat) (padding : Heap) :
       obtain ⟨ih1, ih2⟩ := ih
       rw [h_heap_eq, h_env_eq]
       exact ⟨ih1, ih2⟩
+
+
+/-! ## `rejectAllPolicy` / `acceptAllPolicy` respect shift -/
+
+theorem rejectAllPolicy_respects_shift (cutoff : Nat) (padding : Heap) :
+    PolicyRespectsShift cutoff padding rejectAllPolicy := by
+  intro _ _ _ _ _ _ _ _ _; rfl
+
+theorem acceptAllPolicy_respects_shift (cutoff : Nat) (padding : Heap) :
+    PolicyRespectsShift cutoff padding acceptAllPolicy := by
+  intro _ _ _ _ _ _ _ _ _; rfl
+
+/-! ## buildBindings foldl commutes with shift
+
+    Used by `freshLevelEnv_shift` and ultimately by `materialize_shift`. -/
+
+private theorem buildBindings_foldl_shift (cutoff : Nat) (padding : Heap)
+    (pairs : List (String × Val)) (h : Heap) (env : Env)
+    (h_cutoff : cutoff ≤ h.length)
+    (h_atoms : ∀ p ∈ pairs, shift_val cutoff padding.length p.2 = p.2) :
+    let foldl_a := pairs.foldl
+      (fun (acc : Heap × Env) (kv : String × Val) =>
+        (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
+      (h, env)
+    let foldl_b := pairs.foldl
+      (fun (acc : Heap × Env) (kv : String × Val) =>
+        (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
+      (shift_heap cutoff padding h, shift_env cutoff padding.length env)
+    foldl_b.1 = shift_heap cutoff padding foldl_a.1 ∧
+    foldl_b.2 = shift_env cutoff padding.length foldl_a.2 := by
+  induction pairs generalizing h env with
+  | nil => simp [List.foldl]
+  | cons p rest ih =>
+      simp only [List.foldl]
+      have h_atom_p : shift_val cutoff padding.length p.2 = p.2 :=
+        h_atoms p List.mem_cons_self
+      have h_heap_eq :
+          shift_heap cutoff padding h ++ [p.2]
+            = shift_heap cutoff padding (h ++ [p.2]) := by
+        rw [shift_heap_append cutoff padding h [p.2] h_cutoff]
+        simp [List.map, h_atom_p]
+      have h_idx_eq :
+          shift_idx cutoff padding.length h.length = h.length + padding.length := by
+        unfold shift_idx; rw [if_neg (by omega : ¬ h.length < cutoff)]
+      have h_b_len : (shift_heap cutoff padding h).length = h.length + padding.length :=
+        shift_heap_length cutoff padding h
+      have h_env_eq :
+          (Env.cons p.1 (shift_heap cutoff padding h).length (shift_env cutoff padding.length env))
+            = shift_env cutoff padding.length (Env.cons p.1 h.length env) := by
+        simp [shift_env, h_idx_eq, h_b_len]
+      have h_cutoff_next : cutoff ≤ (h ++ [p.2]).length := by
+        rw [List.length_append]; omega
+      have h_atoms_rest : ∀ q ∈ rest, shift_val cutoff padding.length q.2 = q.2 :=
+        fun q hq => h_atoms q (List.mem_cons_of_mem _ hq)
+      have ih_app := ih (h ++ [p.2]) (Env.cons p.1 h.length env) h_cutoff_next h_atoms_rest
+      simp only at ih_app
+      rw [h_heap_eq, h_env_eq]
+      exact ih_app
+
+/-! ## `freshLevelEnv` commutes with shift
+
+    Both heap and env outputs of `freshLevelEnv` shift coordinately. -/
+
+theorem freshLevelEnv_heap_shift (cutoff : Nat) (padding : Heap) (h : Heap)
+    (h_cutoff : cutoff ≤ h.length) :
+    (freshLevelEnv (shift_heap cutoff padding h)).1
+      = shift_heap cutoff padding (freshLevelEnv h).1 := by
+  rw [freshLevelEnv_heap_eq, freshLevelEnv_heap_eq]
+  -- shift_heap (h ++ extras) = shift_heap h ++ extras.map shift_val (when cutoff ≤ h.length).
+  have h_assoc : h ++ primPairs.map Prod.snd ++ [Val.builtinBaseApply]
+              = h ++ (primPairs.map Prod.snd ++ [Val.builtinBaseApply]) := by
+    simp [List.append_assoc]
+  rw [h_assoc]
+  rw [shift_heap_append cutoff padding h
+        (primPairs.map Prod.snd ++ [Val.builtinBaseApply]) h_cutoff]
+  -- The extras list is all atoms (closedValB), so shift_val is identity.
+  have h_atoms_below : ∀ v ∈ primPairs.map Prod.snd ++ [Val.builtinBaseApply],
+      Val.AllBelow cutoff v := by
+    intro v hv
+    rcases List.mem_append.mp hv with h_in | h_in
+    · have h_closed : closedValB v = true := primPairs_atoms_closed v h_in
+      exact closedValB_AllBelow cutoff v h_closed
+    · simp at h_in; rw [h_in]; trivial
+  rw [map_shift_val_eq_self_of_AllBelow cutoff padding.length _ h_atoms_below]
+  simp [List.append_assoc]
+
+theorem freshLevelEnv_env_shift (cutoff : Nat) (padding : Heap) (h : Heap)
+    (h_cutoff : cutoff ≤ h.length) :
+    (freshLevelEnv (shift_heap cutoff padding h)).2
+      = shift_env cutoff padding.length (freshLevelEnv h).2 := by
+  -- All primPairs values are atoms, so shift_val is identity on them.
+  have h_atoms : ∀ p ∈ primPairs, shift_val cutoff padding.length p.2 = p.2 := by
+    intro p hp
+    have h_in : p.2 ∈ primPairs.map Prod.snd := List.mem_map.mpr ⟨p, hp, rfl⟩
+    have h_closed : closedValB p.2 = true := primPairs_atoms_closed p.2 h_in
+    have h_below : Val.AllBelow cutoff p.2 := closedValB_AllBelow cutoff p.2 h_closed
+    exact shift_val_id cutoff padding.length h_below
+  -- buildBindings_foldl_shift gives us the inner foldl shifts cleanly.
+  have h_b := buildBindings_foldl_shift cutoff padding primPairs h Env.nil h_cutoff h_atoms
+  simp only [shift_env] at h_b
+  obtain ⟨h_b_heap, h_b_env⟩ := h_b
+  -- Unfold freshLevelEnv on both sides.
+  unfold freshLevelEnv
+  simp only [Heap.alloc]
+  -- Goal:
+  -- .cons "base-apply" (foldl (shift_heap h, .nil)).1.length (foldl (shift_heap h, .nil)).2
+  -- = shift_env _ _ (.cons "base-apply" (foldl (h, .nil)).1.length (foldl (h, .nil)).2)
+  -- RHS = .cons "base-apply" (shift_idx (foldl (h, .nil)).1.length) (shift_env (foldl (h, .nil)).2).
+  -- Use h_b_env to rewrite shift_env (foldl (h, .nil)).2 = (foldl (shift_heap h, .nil)).2.
+  -- Use h_b_heap to derive: (foldl (shift_heap h, .nil)).1 = shift_heap (foldl (h, .nil)).1, so
+  -- their lengths differ by padding.length. shift_idx adds padding.length to the original length
+  -- (since it's ≥ h.length ≥ cutoff).
+  have h_inner_a_len :=
+    buildBindings_foldl_length primPairs h Env.nil
+  have h_a_ge_cutoff :
+      cutoff ≤ (primPairs.foldl
+        (fun (acc : Heap × Env) (kv : String × Val) =>
+          (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2)) (h, Env.nil)).1.length := by
+    rw [h_inner_a_len]; omega
+  have h_b_len :
+      (primPairs.foldl
+        (fun (acc : Heap × Env) (kv : String × Val) =>
+          (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
+        (shift_heap cutoff padding h, Env.nil)).1.length
+      = (primPairs.foldl
+        (fun (acc : Heap × Env) (kv : String × Val) =>
+          (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
+        (h, Env.nil)).1.length + padding.length := by
+    rw [h_b_heap, shift_heap_length]
+  -- shift_env on .cons is .cons name (shift_idx idx) (shift_env rest).
+  show Env.cons "base-apply" _
+        (primPairs.foldl
+          (fun (acc : Heap × Env) (kv : String × Val) =>
+            (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
+          (shift_heap cutoff padding h, Env.nil)).2
+      = shift_env cutoff padding.length
+        (Env.cons "base-apply" _
+          (primPairs.foldl
+            (fun (acc : Heap × Env) (kv : String × Val) =>
+              (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
+            (h, Env.nil)).2)
+  unfold shift_env
+  rw [← h_b_env, h_b_len]
+  -- shift_idx (... + padding.length) — wait, we want shift_idx of foldl-on-h's length, which is ≥ cutoff.
+  unfold shift_idx
+  rw [if_neg (by omega : ¬ _ < _)]
+
+theorem materializeStep_shift_commutes (cutoff : Nat) (padding : Heap) (T : TowerState)
+    (h_cutoff : cutoff ≤ T.heap.length) :
+    materializeStep (shift_state cutoff padding T)
+      = shift_state cutoff padding (materializeStep T) := by
+  have h_heap_shift := freshLevelEnv_heap_shift cutoff padding T.heap h_cutoff
+  have h_env_shift := freshLevelEnv_env_shift cutoff padding T.heap h_cutoff
+  unfold materializeStep shift_state
+  simp only [TowerState.mk.injEq, List.map_append, List.map_cons, List.map_nil]
+  refine ⟨?_, ?_⟩
+  · -- heap part
+    exact h_heap_shift
+  · -- levels part: append match.
+    -- LHS: T.levels.map shift_lvl ++ [{env := freshLevelEnv (shift_heap h).2, policy := rejectAllPolicy}]
+    -- RHS: T.levels.map shift_lvl ++ [{env := shift_env (freshLevelEnv h).2, policy := rejectAllPolicy}]
+    rw [h_env_shift]
+
+theorem materializeStep_iter_shift_commutes (cutoff : Nat) (padding : Heap) (T : TowerState)
+    (h_cutoff : cutoff ≤ T.heap.length) (k : Nat) :
+    Nat.fold k (fun _ _ T' => materializeStep T') (shift_state cutoff padding T)
+      = shift_state cutoff padding
+          (Nat.fold k (fun _ _ T' => materializeStep T') T) := by
+  induction k with
+  | zero => simp [Nat.fold]
+  | succ k ih =>
+      simp only [Nat.fold]
+      rw [ih]
+      have h_grows : T.heap.length
+            ≤ (Nat.fold k (fun _ _ T' => materializeStep T') T).heap.length :=
+        materializeStep_iter_heap_grows T k
+      have h_cutoff_iter :
+          cutoff ≤ (Nat.fold k (fun _ _ T' => materializeStep T') T).heap.length :=
+        Nat.le_trans h_cutoff h_grows
+      exact materializeStep_shift_commutes cutoff padding _ h_cutoff_iter
+
+theorem materialize_shift_commutes (cutoff : Nat) (padding : Heap) (T : TowerState)
+    (n : Nat) (h_cutoff : cutoff ≤ T.heap.length) :
+    (shift_state cutoff padding T).materialize n
+      = (T.materialize n).map (shift_state cutoff padding) := by
+  unfold TowerState.materialize
+  by_cases h1 : n ≥ Tower.maxDepth
+  · simp [h1]
+  · simp [h1]
+    have h_levels_eq : (shift_state cutoff padding T).levels.length = T.levels.length :=
+      shift_state_levels_length cutoff padding T
+    rw [h_levels_eq]
+    by_cases h2 : T.levels.length > n
+    · simp [h2]
+    · simp [h2]
+      exact materializeStep_iter_shift_commutes cutoff padding T h_cutoff _
 

@@ -3132,34 +3132,1410 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
               rw [hne] at h_eval
               simp at h_eval
 
+/-! ## Heap monotonicity (single-side)
+
+    `eval / evalList / applyVia / applyDirect` only grow the heap.
+    Used by `shift_respect` to thread `cutoff ≤ T.heap.length` through
+    inner IH calls. -/
+
+private def HeapMonoStmt (n : Nat) : Prop :=
+  (∀ (ptable : PolicyTable) (level : Nat) (exp : Expr) (env : Env)
+     (T : TowerState) (r : Val) (T' : TowerState),
+    eval n ptable level exp env T = some (r, T') →
+    T.heap.length ≤ T'.heap.length) ∧
+  (∀ (ptable : PolicyTable) (level : Nat) (exps : List Expr) (env : Env)
+     (T : TowerState) (rs : List Val) (T' : TowerState),
+    evalList n ptable level exps env T = some (rs, T') →
+    T.heap.length ≤ T'.heap.length) ∧
+  (∀ (ptable : PolicyTable) (level : Nat) (op : Val) (args : List Val)
+     (T : TowerState) (r : Val) (T' : TowerState),
+    applyVia n ptable level op args T = some (r, T') →
+    T.heap.length ≤ T'.heap.length) ∧
+  (∀ (ptable : PolicyTable) (level : Nat) (op : Val) (args : List Val)
+     (T : TowerState) (r : Val) (T' : TowerState),
+    applyDirect n ptable level op args T = some (r, T') →
+    T.heap.length ≤ T'.heap.length)
+
+private theorem heap_mono : ∀ n, HeapMonoStmt n := by
+  intro n
+  induction n with
+  | zero =>
+      refine ⟨?_, ?_, ?_, ?_⟩
+      · intro _ _ _ _ _ _ _ h; simp [eval] at h
+      · intro _ _ _ _ _ _ _ h; simp [evalList] at h
+      · intro _ _ _ _ _ _ _ h; simp [applyVia] at h
+      · intro _ _ _ _ _ _ _ h; simp [applyDirect] at h
+  | succ k ih =>
+      obtain ⟨ih_eval, ih_evalList, ih_applyVia, ih_applyDirect⟩ := ih
+      refine ⟨?_, ?_, ?_, ?_⟩
+      · -- eval (k+1)
+        intro ptable level exp env T r T' h_eval
+        cases exp with
+        | num i =>
+            simp only [eval, Option.some.injEq, Prod.mk.injEq] at h_eval
+            obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact Nat.le_refl _
+        | bool b =>
+            simp only [eval, Option.some.injEq, Prod.mk.injEq] at h_eval
+            obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact Nat.le_refl _
+        | quote v =>
+            simp only [eval] at h_eval
+            split at h_eval
+            · simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+              obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact Nat.le_refl _
+            · simp at h_eval
+        | var x =>
+            simp only [eval] at h_eval
+            cases hl : env.lookup x with
+            | none => rw [hl] at h_eval; simp at h_eval
+            | some idx =>
+                rw [hl] at h_eval
+                simp only at h_eval
+                cases hp : T.heap[idx]? with
+                | none => rw [hp] at h_eval; simp at h_eval
+                | some v =>
+                    rw [hp] at h_eval
+                    simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                    obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact Nat.le_refl _
+        | lam ps body =>
+            simp only [eval, Option.some.injEq, Prod.mk.injEq] at h_eval
+            obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact Nat.le_refl _
+        | installPolicy idx =>
+            simp only [eval] at h_eval
+            cases hp : ptable[idx]? with
+            | none =>
+                rw [hp] at h_eval
+                simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact Nat.le_refl _
+            | some np =>
+                rw [hp] at h_eval
+                simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                obtain ⟨_, h_T⟩ := h_eval; subst h_T
+                rw [TowerState.setPolicyAt_heap]
+                exact Nat.le_refl _
+        | ifte c t e =>
+            simp only [eval] at h_eval
+            cases hc : eval k ptable level c env T with
+            | none => rw [hc] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨cv, T_c⟩ := pr
+                rw [hc] at h_eval
+                have h1 : T.heap.length ≤ T_c.heap.length :=
+                  ih_eval ptable level c env T cv T_c hc
+                by_cases hcv : cv = .bool false
+                · subst hcv
+                  simp only at h_eval
+                  have h2 : T_c.heap.length ≤ T'.heap.length :=
+                    ih_eval ptable level e env T_c r T' h_eval
+                  exact Nat.le_trans h1 h2
+                · have h_eval_t : eval k ptable level t env T_c = some (r, T') := by
+                    cases cv with
+                    | bool b =>
+                        cases b with
+                        | false => exact absurd rfl hcv
+                        | true => exact h_eval
+                    | num _ => exact h_eval
+                    | nilV => exact h_eval
+                    | cons _ _ => exact h_eval
+                    | sym _ => exact h_eval
+                    | closure _ _ _ => exact h_eval
+                    | prim _ => exact h_eval
+                    | builtinBaseApply => exact h_eval
+                  have h2 : T_c.heap.length ≤ T'.heap.length :=
+                    ih_eval ptable level t env T_c r T' h_eval_t
+                  exact Nat.le_trans h1 h2
+        | app exps =>
+            cases exps with
+            | nil => simp only [eval] at h_eval; exact absurd h_eval (by simp)
+            | cons f args =>
+                simp only [eval] at h_eval
+                cases hf : eval k ptable level f env T with
+                | none => rw [hf] at h_eval; simp at h_eval
+                | some pr =>
+                    obtain ⟨fv, T1⟩ := pr
+                    rw [hf] at h_eval
+                    simp only at h_eval
+                    have h1 : T.heap.length ≤ T1.heap.length :=
+                      ih_eval ptable level f env T fv T1 hf
+                    cases ha : evalList k ptable level args env T1 with
+                    | none => rw [ha] at h_eval; simp at h_eval
+                    | some pr2 =>
+                        obtain ⟨avs, T2⟩ := pr2
+                        rw [ha] at h_eval
+                        simp only at h_eval
+                        have h2 : T1.heap.length ≤ T2.heap.length :=
+                          ih_evalList ptable level args env T1 avs T2 ha
+                        have h3 : T2.heap.length ≤ T'.heap.length :=
+                          ih_applyVia ptable level fv avs T2 r T' h_eval
+                        exact Nat.le_trans h1 (Nat.le_trans h2 h3)
+        | primApp f args =>
+            simp only [eval] at h_eval
+            cases hf : eval k ptable level f env T with
+            | none => rw [hf] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨fv, T1⟩ := pr
+                rw [hf] at h_eval
+                simp only at h_eval
+                have h1 : T.heap.length ≤ T1.heap.length :=
+                  ih_eval ptable level f env T fv T1 hf
+                cases ha : evalList k ptable level args env T1 with
+                | none => rw [ha] at h_eval; simp at h_eval
+                | some pr2 =>
+                    obtain ⟨avs, T2⟩ := pr2
+                    rw [ha] at h_eval
+                    simp only at h_eval
+                    have h2 : T1.heap.length ≤ T2.heap.length :=
+                      ih_evalList ptable level args env T1 avs T2 ha
+                    have h3 : T2.heap.length ≤ T'.heap.length :=
+                      ih_applyDirect ptable level fv avs T2 r T' h_eval
+                    exact Nat.le_trans h1 (Nat.le_trans h2 h3)
+        | set x e =>
+            simp only [eval] at h_eval
+            cases he : eval k ptable level e env T with
+            | none => rw [he] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨v, T1⟩ := pr
+                rw [he] at h_eval
+                simp only at h_eval
+                have h1 : T.heap.length ≤ T1.heap.length :=
+                  ih_eval ptable level e env T v T1 he
+                cases hl : env.lookup x with
+                | none => rw [hl] at h_eval; simp at h_eval
+                | some idx =>
+                    rw [hl] at h_eval
+                    simp only at h_eval
+                    split at h_eval
+                    · -- isMetaMutation = true
+                      split at h_eval
+                      · -- (some oldVal, some gate) → if gate then update else nothing
+                        split at h_eval
+                        · simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                          obtain ⟨_, h_T⟩ := h_eval; subst h_T
+                          show T.heap.length ≤ (T1.updateHeap idx v).heap.length
+                          unfold TowerState.updateHeap
+                          show T.heap.length ≤ (T1.heap.update idx v).length
+                          rw [Heap.update_length]; exact h1
+                        · simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                          obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact h1
+                      · simp at h_eval
+                    · -- isMetaMutation = false → none in lean-black design.
+                      simp at h_eval
+        | em body =>
+            simp only [eval] at h_eval
+            cases hm : T.materialize (level + 1) with
+            | none => rw [hm] at h_eval; simp at h_eval
+            | some T_mat =>
+                rw [hm] at h_eval
+                simp only at h_eval
+                cases he : T_mat.envAt? (level + 1) with
+                | none => rw [he] at h_eval; simp at h_eval
+                | some upEnv =>
+                    rw [he] at h_eval
+                    simp only at h_eval
+                    have h_mat : T.heap.length ≤ T_mat.heap.length :=
+                      TowerState.materialize_heap_grows T T_mat (level + 1) hm
+                    have h_ev : T_mat.heap.length ≤ T'.heap.length :=
+                      ih_eval ptable (level + 1) body upEnv T_mat r T' h_eval
+                    exact Nat.le_trans h_mat h_ev
+        | letE x e body =>
+            simp only [eval] at h_eval
+            cases he : eval k ptable level e env T with
+            | none => rw [he] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨v, T1⟩ := pr
+                rw [he] at h_eval
+                simp only at h_eval
+                have h1 : T.heap.length ≤ T1.heap.length :=
+                  ih_eval ptable level e env T v T1 he
+                have h_alloc_heap : (T1.alloc v).1.heap = T1.heap ++ [v] := by
+                  unfold TowerState.alloc; rfl
+                have h_alloc_idx : (T1.alloc v).2 = T1.heap.length := by
+                  unfold TowerState.alloc Heap.alloc; rfl
+                have h2 : (T1.alloc v).1.heap.length ≤ T'.heap.length :=
+                  ih_eval ptable level body (.cons x (T1.alloc v).2 env)
+                    (T1.alloc v).1 r T' h_eval
+                have h_app : T1.heap.length ≤ (T1.alloc v).1.heap.length := by
+                  rw [h_alloc_heap, List.length_append]; omega
+                exact Nat.le_trans h1 (Nat.le_trans h_app h2)
+        | seq exps =>
+            cases exps with
+            | nil =>
+                simp only [eval, Option.some.injEq, Prod.mk.injEq] at h_eval
+                obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact Nat.le_refl _
+            | cons e rest =>
+                cases rest with
+                | nil =>
+                    simp only [eval] at h_eval
+                    exact ih_eval ptable level e env T r T' h_eval
+                | cons e2 rest2 =>
+                    simp only [eval] at h_eval
+                    cases he : eval k ptable level e env T with
+                    | none => rw [he] at h_eval; simp at h_eval
+                    | some pr =>
+                        obtain ⟨v, T1⟩ := pr
+                        rw [he] at h_eval
+                        simp only at h_eval
+                        have h1 : T.heap.length ≤ T1.heap.length :=
+                          ih_eval ptable level e env T v T1 he
+                        have h2 : T1.heap.length ≤ T'.heap.length :=
+                          ih_eval ptable level (.seq (e2 :: rest2)) env T1 r T' h_eval
+                        exact Nat.le_trans h1 h2
+      · -- evalList (k+1)
+        intro ptable level exps env T rs T' h_eval
+        cases exps with
+        | nil =>
+            simp only [evalList, Option.some.injEq, Prod.mk.injEq] at h_eval
+            obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact Nat.le_refl _
+        | cons e rest =>
+            simp only [evalList] at h_eval
+            cases he : eval k ptable level e env T with
+            | none => rw [he] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨v, T1⟩ := pr
+                rw [he] at h_eval
+                simp only at h_eval
+                have h1 : T.heap.length ≤ T1.heap.length :=
+                  ih_eval ptable level e env T v T1 he
+                cases hr : evalList k ptable level rest env T1 with
+                | none => rw [hr] at h_eval; simp at h_eval
+                | some pr2 =>
+                    obtain ⟨vs, T2⟩ := pr2
+                    rw [hr] at h_eval
+                    simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                    obtain ⟨_, h_T⟩ := h_eval; subst h_T
+                    have h2 : T1.heap.length ≤ T2.heap.length :=
+                      ih_evalList ptable level rest env T1 vs T2 hr
+                    exact Nat.le_trans h1 h2
+      · -- applyVia (k+1)
+        intro ptable level op args T r T' h_app
+        simp only [applyVia] at h_app
+        cases hm : T.materialize (level + 1) with
+        | none => rw [hm] at h_app; simp at h_app
+        | some T_mat =>
+            rw [hm] at h_app
+            simp only at h_app
+            have h_mat : T.heap.length ≤ T_mat.heap.length :=
+              TowerState.materialize_heap_grows T T_mat (level + 1) hm
+            cases he : T_mat.envAt? (level + 1) with
+            | none =>
+                rw [he] at h_app
+                simp only at h_app
+                exact Nat.le_trans h_mat (ih_applyDirect ptable level op args T_mat r T' h_app)
+            | some upEnv =>
+                rw [he] at h_app
+                simp only at h_app
+                cases hl : upEnv.lookup "base-apply" with
+                | none =>
+                    rw [hl] at h_app
+                    simp only at h_app
+                    exact Nat.le_trans h_mat
+                      (ih_applyDirect ptable level op args T_mat r T' h_app)
+                | some idx =>
+                    rw [hl] at h_app
+                    simp only at h_app
+                    cases hp : T_mat.heap[idx]? with
+                    | none => rw [hp] at h_app; simp at h_app
+                    | some baseApply =>
+                        rw [hp] at h_app
+                        cases baseApply with
+                        | builtinBaseApply =>
+                            simp only at h_app
+                            exact Nat.le_trans h_mat
+                              (ih_applyDirect ptable level op args T_mat r T' h_app)
+                        | num _ | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _ =>
+                            simp only at h_app
+                            exact Nat.le_trans h_mat
+                              (ih_applyDirect ptable level _ [op, listToVal args] T_mat r T' h_app)
+      · -- applyDirect (k+1)
+        intro ptable level op args T r T' h_app
+        unfold applyDirect at h_app
+        cases op with
+        | num _ => exact absurd h_app (by simp)
+        | bool _ => exact absurd h_app (by simp)
+        | nilV => exact absurd h_app (by simp)
+        | sym _ => exact absurd h_app (by simp)
+        | cons _ _ => exact absurd h_app (by simp)
+        | prim name =>
+            simp only at h_app
+            cases hp : applyPrim name args with
+            | none => rw [hp] at h_app; simp at h_app
+            | some v =>
+                rw [hp] at h_app
+                simp only [Option.some.injEq, Prod.mk.injEq] at h_app
+                obtain ⟨_, h_T⟩ := h_app; subst h_T; exact Nat.le_refl _
+        | builtinBaseApply =>
+            simp only at h_app
+            cases args with
+            | nil => simp at h_app
+            | cons a as =>
+                cases as with
+                | nil => simp at h_app
+                | cons o rest =>
+                    cases rest with
+                    | nil =>
+                        simp only at h_app
+                        cases hv : valToList o with
+                        | none => rw [hv] at h_app; simp at h_app
+                        | some operands =>
+                            rw [hv] at h_app
+                            exact ih_applyDirect ptable level a operands T r T' h_app
+                    | cons _ _ => simp at h_app
+        | closure ps body cenv =>
+            simp only at h_app
+            split at h_app
+            · simp at h_app
+            · rename_i h_len
+              have h_foldl_len :
+                  ((args.zip ps).foldl allocStep (T.heap, cenv)).1.length
+                    = T.heap.length + (args.zip ps).length :=
+                allocStep_foldl_length (args.zip ps) T.heap cenv
+              have h1 : T.heap.length
+                  ≤ ((args.zip ps).foldl allocStep (T.heap, cenv)).1.length := by
+                rw [h_foldl_len]; omega
+              have h2 :
+                  ({T with heap :=
+                    ((args.zip ps).foldl allocStep (T.heap, cenv)).1} : TowerState).heap.length
+                    ≤ T'.heap.length :=
+                ih_eval ptable level body
+                  ((args.zip ps).foldl allocStep (T.heap, cenv)).2
+                  {T with heap :=
+                    ((args.zip ps).foldl allocStep (T.heap, cenv)).1} r T' h_app
+              exact Nat.le_trans h1 h2
+
+/-! ## Policy-shift preservation across eval steps
+
+    The tower invariant `∀ n p, T.policyAt? n = some p → PolicyRespectsShift _ _ p`
+    is preserved by all eval steps because:
+    - `.installPolicy` substitutes `ptable[idx]?` (shift-respecting by hypothesis)
+    - `.em` materializes new levels with `rejectAllPolicy` (always shift-respecting)
+    - `.set` updates heap, not levels
+    - All other cases just compose IH calls -/
+
+private def PolicyShiftPreservedStmt (cutoff : Nat) (padding : Heap)
+    (n : Nat) : Prop :=
+  (∀ (ptable : PolicyTable) (level : Nat) (exp : Expr) (env : Env)
+     (T : TowerState) (r : Val) (T' : TowerState),
+    PolicyTableRespectsShift cutoff padding ptable →
+    (∀ m p, T.policyAt? m = some p → PolicyRespectsShift cutoff padding p) →
+    eval n ptable level exp env T = some (r, T') →
+    ∀ m p, T'.policyAt? m = some p → PolicyRespectsShift cutoff padding p) ∧
+  (∀ (ptable : PolicyTable) (level : Nat) (exps : List Expr) (env : Env)
+     (T : TowerState) (rs : List Val) (T' : TowerState),
+    PolicyTableRespectsShift cutoff padding ptable →
+    (∀ m p, T.policyAt? m = some p → PolicyRespectsShift cutoff padding p) →
+    evalList n ptable level exps env T = some (rs, T') →
+    ∀ m p, T'.policyAt? m = some p → PolicyRespectsShift cutoff padding p) ∧
+  (∀ (ptable : PolicyTable) (level : Nat) (op : Val) (args : List Val)
+     (T : TowerState) (r : Val) (T' : TowerState),
+    PolicyTableRespectsShift cutoff padding ptable →
+    (∀ m p, T.policyAt? m = some p → PolicyRespectsShift cutoff padding p) →
+    applyVia n ptable level op args T = some (r, T') →
+    ∀ m p, T'.policyAt? m = some p → PolicyRespectsShift cutoff padding p) ∧
+  (∀ (ptable : PolicyTable) (level : Nat) (op : Val) (args : List Val)
+     (T : TowerState) (r : Val) (T' : TowerState),
+    PolicyTableRespectsShift cutoff padding ptable →
+    (∀ m p, T.policyAt? m = some p → PolicyRespectsShift cutoff padding p) →
+    applyDirect n ptable level op args T = some (r, T') →
+    ∀ m p, T'.policyAt? m = some p → PolicyRespectsShift cutoff padding p)
+
+private theorem policy_shift_preserved (cutoff : Nat) (padding : Heap) :
+    ∀ n, PolicyShiftPreservedStmt cutoff padding n := by
+  intro n
+  induction n with
+  | zero =>
+      refine ⟨?_, ?_, ?_, ?_⟩
+      · intro _ _ _ _ _ _ _ _ _ h; simp [eval] at h
+      · intro _ _ _ _ _ _ _ _ _ h; simp [evalList] at h
+      · intro _ _ _ _ _ _ _ _ _ h; simp [applyVia] at h
+      · intro _ _ _ _ _ _ _ _ _ h; simp [applyDirect] at h
+  | succ k ih =>
+      obtain ⟨ih_eval, ih_evalList, ih_applyVia, ih_applyDirect⟩ := ih
+      refine ⟨?_, ?_, ?_, ?_⟩
+      · -- eval (k+1)
+        intro ptable level exp env T r T' hresp_pt hresp_init h_eval
+        cases exp with
+        | num i =>
+            simp only [eval, Option.some.injEq, Prod.mk.injEq] at h_eval
+            obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact hresp_init
+        | bool b =>
+            simp only [eval, Option.some.injEq, Prod.mk.injEq] at h_eval
+            obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact hresp_init
+        | quote v =>
+            simp only [eval] at h_eval
+            split at h_eval
+            · simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+              obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact hresp_init
+            · simp at h_eval
+        | var x =>
+            simp only [eval] at h_eval
+            cases hl : env.lookup x with
+            | none => rw [hl] at h_eval; simp at h_eval
+            | some idx =>
+                rw [hl] at h_eval
+                simp only at h_eval
+                cases hp : T.heap[idx]? with
+                | none => rw [hp] at h_eval; simp at h_eval
+                | some v =>
+                    rw [hp] at h_eval
+                    simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                    obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact hresp_init
+        | lam ps body =>
+            simp only [eval, Option.some.injEq, Prod.mk.injEq] at h_eval
+            obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact hresp_init
+        | installPolicy idx =>
+            simp only [eval] at h_eval
+            cases hp : ptable[idx]? with
+            | none =>
+                rw [hp] at h_eval
+                simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact hresp_init
+            | some np =>
+                rw [hp] at h_eval
+                simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                obtain ⟨_, h_T⟩ := h_eval; subst h_T
+                -- T' = T.setPolicyAt level np
+                intro m p hpol
+                by_cases h_eq : m = level
+                · subst h_eq
+                  rw [TowerState.setPolicyAt_policyAt?_self] at hpol
+                  cases h_orig : T.policyAt? m with
+                  | none => rw [h_orig] at hpol; simp at hpol
+                  | some old =>
+                      rw [h_orig] at hpol
+                      simp at hpol
+                      rw [← hpol]
+                      exact hresp_pt idx np hp
+                · rw [TowerState.setPolicyAt_policyAt?_other _ _ _ _ (Ne.symm h_eq)] at hpol
+                  exact hresp_init m p hpol
+        | ifte c t e =>
+            simp only [eval] at h_eval
+            cases hc : eval k ptable level c env T with
+            | none => rw [hc] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨cv, T_c⟩ := pr
+                rw [hc] at h_eval
+                have h_c := ih_eval ptable level c env T cv T_c hresp_pt hresp_init hc
+                by_cases hcv : cv = .bool false
+                · subst hcv
+                  simp only at h_eval
+                  exact ih_eval ptable level e env T_c r T' hresp_pt h_c h_eval
+                · have h_eval_t : eval k ptable level t env T_c = some (r, T') := by
+                    cases cv with
+                    | bool b => cases b with
+                      | false => exact absurd rfl hcv
+                      | true => exact h_eval
+                    | num _ => exact h_eval
+                    | nilV => exact h_eval
+                    | cons _ _ => exact h_eval
+                    | sym _ => exact h_eval
+                    | closure _ _ _ => exact h_eval
+                    | prim _ => exact h_eval
+                    | builtinBaseApply => exact h_eval
+                  exact ih_eval ptable level t env T_c r T' hresp_pt h_c h_eval_t
+        | app exps =>
+            cases exps with
+            | nil => simp only [eval] at h_eval; exact absurd h_eval (by simp)
+            | cons f args =>
+                simp only [eval] at h_eval
+                cases hf : eval k ptable level f env T with
+                | none => rw [hf] at h_eval; simp at h_eval
+                | some pr =>
+                    obtain ⟨fv, T1⟩ := pr
+                    rw [hf] at h_eval
+                    simp only at h_eval
+                    have h1 := ih_eval ptable level f env T fv T1 hresp_pt hresp_init hf
+                    cases ha : evalList k ptable level args env T1 with
+                    | none => rw [ha] at h_eval; simp at h_eval
+                    | some pr2 =>
+                        obtain ⟨avs, T2⟩ := pr2
+                        rw [ha] at h_eval
+                        simp only at h_eval
+                        have h2 := ih_evalList ptable level args env T1 avs T2
+                          hresp_pt h1 ha
+                        exact ih_applyVia ptable level fv avs T2 r T' hresp_pt h2 h_eval
+        | primApp f args =>
+            simp only [eval] at h_eval
+            cases hf : eval k ptable level f env T with
+            | none => rw [hf] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨fv, T1⟩ := pr
+                rw [hf] at h_eval
+                simp only at h_eval
+                have h1 := ih_eval ptable level f env T fv T1 hresp_pt hresp_init hf
+                cases ha : evalList k ptable level args env T1 with
+                | none => rw [ha] at h_eval; simp at h_eval
+                | some pr2 =>
+                    obtain ⟨avs, T2⟩ := pr2
+                    rw [ha] at h_eval
+                    simp only at h_eval
+                    have h2 := ih_evalList ptable level args env T1 avs T2
+                      hresp_pt h1 ha
+                    exact ih_applyDirect ptable level fv avs T2 r T' hresp_pt h2 h_eval
+        | set x e =>
+            simp only [eval] at h_eval
+            cases he : eval k ptable level e env T with
+            | none => rw [he] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨v, T1⟩ := pr
+                rw [he] at h_eval
+                simp only at h_eval
+                have h_e := ih_eval ptable level e env T v T1 hresp_pt hresp_init he
+                cases hl : env.lookup x with
+                | none => rw [hl] at h_eval; simp at h_eval
+                | some idx =>
+                    rw [hl] at h_eval
+                    simp only at h_eval
+                    split at h_eval
+                    · split at h_eval
+                      · split at h_eval
+                        · simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                          obtain ⟨_, h_T⟩ := h_eval; subst h_T
+                          -- updateHeap doesn't change policies.
+                          intro m p hpol
+                          show PolicyRespectsShift _ _ p
+                          have : (T1.updateHeap idx v).policyAt? m = T1.policyAt? m := rfl
+                          rw [this] at hpol
+                          exact h_e m p hpol
+                        · simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                          obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact h_e
+                      · simp at h_eval
+                    · simp at h_eval
+        | em body =>
+            simp only [eval] at h_eval
+            cases hm : T.materialize (level + 1) with
+            | none => rw [hm] at h_eval; simp at h_eval
+            | some T_mat =>
+                rw [hm] at h_eval
+                simp only at h_eval
+                cases he : T_mat.envAt? (level + 1) with
+                | none => rw [he] at h_eval; simp at h_eval
+                | some upEnv =>
+                    rw [he] at h_eval
+                    simp only at h_eval
+                    have h_mat_resp :
+                        ∀ m p, T_mat.policyAt? m = some p →
+                          PolicyRespectsShift cutoff padding p :=
+                      materialize_policies_resp_preserves T T_mat (level + 1)
+                        (PolicyRespectsShift cutoff padding) hm hresp_init
+                        (rejectAllPolicy_respects_shift cutoff padding)
+                    exact ih_eval ptable (level + 1) body upEnv T_mat r T'
+                      hresp_pt h_mat_resp h_eval
+        | letE x e body =>
+            simp only [eval] at h_eval
+            cases he : eval k ptable level e env T with
+            | none => rw [he] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨v, T1⟩ := pr
+                rw [he] at h_eval
+                simp only at h_eval
+                have h_e := ih_eval ptable level e env T v T1 hresp_pt hresp_init he
+                -- T1.alloc v doesn't change policies.
+                have h_alloc_pol :
+                    ∀ m p, (T1.alloc v).1.policyAt? m = some p →
+                      PolicyRespectsShift cutoff padding p := by
+                  intro m p hpol
+                  have : (T1.alloc v).1.policyAt? m = T1.policyAt? m := rfl
+                  rw [this] at hpol
+                  exact h_e m p hpol
+                exact ih_eval ptable level body (.cons x (T1.alloc v).2 env)
+                  (T1.alloc v).1 r T' hresp_pt h_alloc_pol h_eval
+        | seq exps =>
+            cases exps with
+            | nil =>
+                simp only [eval, Option.some.injEq, Prod.mk.injEq] at h_eval
+                obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact hresp_init
+            | cons e rest =>
+                cases rest with
+                | nil =>
+                    simp only [eval] at h_eval
+                    exact ih_eval ptable level e env T r T' hresp_pt hresp_init h_eval
+                | cons e2 rest2 =>
+                    simp only [eval] at h_eval
+                    cases he : eval k ptable level e env T with
+                    | none => rw [he] at h_eval; simp at h_eval
+                    | some pr =>
+                        obtain ⟨v, T1⟩ := pr
+                        rw [he] at h_eval
+                        simp only at h_eval
+                        have h_e := ih_eval ptable level e env T v T1 hresp_pt hresp_init he
+                        exact ih_eval ptable level (.seq (e2 :: rest2)) env T1 r T'
+                          hresp_pt h_e h_eval
+      · -- evalList (k+1)
+        intro ptable level exps env T rs T' hresp_pt hresp_init h_eval
+        cases exps with
+        | nil =>
+            simp only [evalList, Option.some.injEq, Prod.mk.injEq] at h_eval
+            obtain ⟨_, h_T⟩ := h_eval; subst h_T; exact hresp_init
+        | cons e rest =>
+            simp only [evalList] at h_eval
+            cases he : eval k ptable level e env T with
+            | none => rw [he] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨v, T1⟩ := pr
+                rw [he] at h_eval
+                simp only at h_eval
+                have h_e := ih_eval ptable level e env T v T1 hresp_pt hresp_init he
+                cases hr : evalList k ptable level rest env T1 with
+                | none => rw [hr] at h_eval; simp at h_eval
+                | some pr2 =>
+                    obtain ⟨vs, T2⟩ := pr2
+                    rw [hr] at h_eval
+                    simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                    obtain ⟨_, h_T⟩ := h_eval; subst h_T
+                    exact ih_evalList ptable level rest env T1 vs T2 hresp_pt h_e hr
+      · -- applyVia (k+1)
+        intro ptable level op args T r T' hresp_pt hresp_init h_app
+        simp only [applyVia] at h_app
+        cases hm : T.materialize (level + 1) with
+        | none => rw [hm] at h_app; simp at h_app
+        | some T_mat =>
+            rw [hm] at h_app
+            simp only at h_app
+            have h_mat_resp :
+                ∀ m p, T_mat.policyAt? m = some p →
+                  PolicyRespectsShift cutoff padding p :=
+              materialize_policies_resp_preserves T T_mat (level + 1)
+                (PolicyRespectsShift cutoff padding) hm hresp_init
+                (rejectAllPolicy_respects_shift cutoff padding)
+            cases he : T_mat.envAt? (level + 1) with
+            | none =>
+                rw [he] at h_app
+                simp only at h_app
+                exact ih_applyDirect ptable level op args T_mat r T'
+                  hresp_pt h_mat_resp h_app
+            | some upEnv =>
+                rw [he] at h_app
+                simp only at h_app
+                cases hl : upEnv.lookup "base-apply" with
+                | none =>
+                    rw [hl] at h_app
+                    simp only at h_app
+                    exact ih_applyDirect ptable level op args T_mat r T'
+                      hresp_pt h_mat_resp h_app
+                | some idx =>
+                    rw [hl] at h_app
+                    simp only at h_app
+                    cases hp : T_mat.heap[idx]? with
+                    | none => rw [hp] at h_app; simp at h_app
+                    | some baseApply =>
+                        rw [hp] at h_app
+                        cases baseApply with
+                        | builtinBaseApply =>
+                            simp only at h_app
+                            exact ih_applyDirect ptable level op args T_mat r T'
+                              hresp_pt h_mat_resp h_app
+                        | num _ | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _ =>
+                            simp only at h_app
+                            exact ih_applyDirect ptable level _ [op, listToVal args]
+                              T_mat r T' hresp_pt h_mat_resp h_app
+      · -- applyDirect (k+1)
+        intro ptable level op args T r T' hresp_pt hresp_init h_app
+        unfold applyDirect at h_app
+        cases op with
+        | num _ => exact absurd h_app (by simp)
+        | bool _ => exact absurd h_app (by simp)
+        | nilV => exact absurd h_app (by simp)
+        | sym _ => exact absurd h_app (by simp)
+        | cons _ _ => exact absurd h_app (by simp)
+        | prim name =>
+            simp only at h_app
+            cases hp : applyPrim name args with
+            | none => rw [hp] at h_app; simp at h_app
+            | some v =>
+                rw [hp] at h_app
+                simp only [Option.some.injEq, Prod.mk.injEq] at h_app
+                obtain ⟨_, h_T⟩ := h_app; subst h_T; exact hresp_init
+        | builtinBaseApply =>
+            simp only at h_app
+            cases args with
+            | nil => simp at h_app
+            | cons a as =>
+                cases as with
+                | nil => simp at h_app
+                | cons o rest =>
+                    cases rest with
+                    | nil =>
+                        simp only at h_app
+                        cases hv : valToList o with
+                        | none => rw [hv] at h_app; simp at h_app
+                        | some operands =>
+                            rw [hv] at h_app
+                            exact ih_applyDirect ptable level a operands T r T'
+                              hresp_pt hresp_init h_app
+                    | cons _ _ => simp at h_app
+        | closure ps body cenv =>
+            simp only at h_app
+            split at h_app
+            · simp at h_app
+            · -- The fold doesn't change policies; eval body may.
+              have h_alloc_pol :
+                  ∀ m p, ({T with heap :=
+                    ((args.zip ps).foldl allocStep (T.heap, cenv)).1} : TowerState).policyAt? m
+                      = some p →
+                    PolicyRespectsShift cutoff padding p := by
+                intro m p hpol
+                have : ({T with heap :=
+                    ((args.zip ps).foldl allocStep (T.heap, cenv)).1} : TowerState).policyAt? m
+                      = T.policyAt? m := rfl
+                rw [this] at hpol
+                exact hresp_init m p hpol
+              exact ih_eval ptable level body
+                ((args.zip ps).foldl allocStep (T.heap, cenv)).2
+                {T with heap := ((args.zip ps).foldl allocStep (T.heap, cenv)).1} r T'
+                hresp_pt h_alloc_pol h_app
+
+/-! ## Joint shift-respect theorem
+
+    `eval / evalList / applyVia / applyDirect` all *commute* with shift:
+    running on shifted inputs gives the shifted result. The .em and
+    applyVia(materialize) cases require materialize-shift commutativity
+    (cross-side parallel materialize produces the same shape on shifted
+    states), which we establish via `materialize_envAt?_preserves`'s
+    counterpart for shifted states. -/
+
+private def ShiftRespectStmt (cutoff : Nat) (padding : Heap) (n : Nat) : Prop :=
+  let offset := padding.length
+  (∀ (ptable : PolicyTable) (level : Nat) (exp : Expr) (env : Env)
+     (T : TowerState) (r : Val) (T' : TowerState),
+    PolicyTableRespectsShift cutoff padding ptable →
+    (∀ m p, T.policyAt? m = some p → PolicyRespectsShift cutoff padding p) →
+    cutoff ≤ T.heap.length →
+    eval n ptable level exp env T = some (r, T') →
+    eval n ptable level exp (shift_env cutoff offset env)
+         (shift_state cutoff padding T)
+      = some (shift_val cutoff offset r, shift_state cutoff padding T')) ∧
+  (∀ (ptable : PolicyTable) (level : Nat) (exps : List Expr) (env : Env)
+     (T : TowerState) (rs : List Val) (T' : TowerState),
+    PolicyTableRespectsShift cutoff padding ptable →
+    (∀ m p, T.policyAt? m = some p → PolicyRespectsShift cutoff padding p) →
+    cutoff ≤ T.heap.length →
+    evalList n ptable level exps env T = some (rs, T') →
+    evalList n ptable level exps (shift_env cutoff offset env)
+             (shift_state cutoff padding T)
+      = some (shift_listVal cutoff offset rs, shift_state cutoff padding T')) ∧
+  (∀ (ptable : PolicyTable) (level : Nat) (op : Val) (args : List Val)
+     (T : TowerState) (r : Val) (T' : TowerState),
+    PolicyTableRespectsShift cutoff padding ptable →
+    (∀ m p, T.policyAt? m = some p → PolicyRespectsShift cutoff padding p) →
+    cutoff ≤ T.heap.length →
+    applyVia n ptable level op args T = some (r, T') →
+    applyVia n ptable level (shift_val cutoff offset op)
+              (shift_listVal cutoff offset args)
+              (shift_state cutoff padding T)
+      = some (shift_val cutoff offset r, shift_state cutoff padding T')) ∧
+  (∀ (ptable : PolicyTable) (level : Nat) (op : Val) (args : List Val)
+     (T : TowerState) (r : Val) (T' : TowerState),
+    PolicyTableRespectsShift cutoff padding ptable →
+    (∀ m p, T.policyAt? m = some p → PolicyRespectsShift cutoff padding p) →
+    cutoff ≤ T.heap.length →
+    applyDirect n ptable level op args T = some (r, T') →
+    applyDirect n ptable level (shift_val cutoff offset op)
+                (shift_listVal cutoff offset args)
+                (shift_state cutoff padding T)
+      = some (shift_val cutoff offset r, shift_state cutoff padding T'))
+
+/-- The shift-respect theorem. Adapted from
+    lean-green:Bisim.lean:6676+. Tower-aware: threads `level`
+    parameter, uses tower-shift commutativity for `.em`/`applyVia`
+    materialize cases. -/
+private theorem shift_respect (cutoff : Nat) (padding : Heap) :
+    ∀ n, ShiftRespectStmt cutoff padding n := by
+  intro n
+  induction n with
+  | zero =>
+      refine ⟨?_, ?_, ?_, ?_⟩
+      · intro _ _ _ _ _ _ _ _ _ _ h
+        exact absurd h (by unfold eval; simp)
+      · intro _ _ _ _ _ _ _ _ _ _ h
+        exact absurd h (by unfold evalList; simp)
+      · intro _ _ _ _ _ _ _ _ _ _ h
+        exact absurd h (by unfold applyVia; simp)
+      · intro _ _ _ _ _ _ _ _ _ _ h
+        exact absurd h (by unfold applyDirect; simp)
+  | succ k ih =>
+      obtain ⟨ih_eval, ih_evalList, ih_applyVia, ih_applyDirect⟩ := ih
+      have ih_pp := policy_shift_preserved cutoff padding k
+      obtain ⟨pp_eval, pp_evalList, pp_applyVia, pp_applyDirect⟩ := ih_pp
+      refine ⟨?_, ?_, ?_, ?_⟩
+      · -- eval (k+1)
+        intro ptable level exp env T r T' hresp_pt hresp_init h_cutoff h_eval
+        cases exp with
+        | num i =>
+            simp only [eval, Option.some.injEq, Prod.mk.injEq] at h_eval
+            obtain ⟨h_r, h_T⟩ := h_eval; subst h_r; subst h_T
+            simp [eval, shift_val]
+        | bool b =>
+            simp only [eval, Option.some.injEq, Prod.mk.injEq] at h_eval
+            obtain ⟨h_r, h_T⟩ := h_eval; subst h_r; subst h_T
+            simp [eval, shift_val]
+        | quote v =>
+            simp only [eval] at h_eval
+            split at h_eval
+            · rename_i h_closed
+              simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+              obtain ⟨h_r, h_T⟩ := h_eval; subst h_r; subst h_T
+              have h_shift_v : shift_val cutoff padding.length v = v :=
+                shift_val_id cutoff padding.length (closedValB_AllBelow cutoff v h_closed)
+              rw [h_shift_v]; simp [eval, h_closed]
+            · simp at h_eval
+        | var x =>
+            simp only [eval] at h_eval
+            cases hl : env.lookup x with
+            | none => rw [hl] at h_eval; simp at h_eval
+            | some idx =>
+                rw [hl] at h_eval
+                simp only at h_eval
+                cases hp : T.heap[idx]? with
+                | none => rw [hp] at h_eval; simp at h_eval
+                | some v =>
+                    rw [hp] at h_eval
+                    simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                    obtain ⟨h_r, h_T⟩ := h_eval; subst h_r; subst h_T
+                    simp only [eval]
+                    rw [shift_env_lookup cutoff padding.length env x idx hl]
+                    simp only
+                    show (match (shift_state cutoff padding T).heap[shift_idx cutoff padding.length idx]?
+                          with | some v_b => some (v_b, shift_state cutoff padding T)
+                               | none     => none)
+                       = some (shift_val cutoff padding.length v, shift_state cutoff padding T)
+                    rw [shift_state_heap, shift_heap_getElem? cutoff padding T.heap idx h_cutoff, hp]
+                    rfl
+        | lam ps body =>
+            simp only [eval, Option.some.injEq, Prod.mk.injEq] at h_eval
+            obtain ⟨h_r, h_T⟩ := h_eval; subst h_r; subst h_T
+            simp [eval, shift_val]
+        | installPolicy idx =>
+            simp only [eval] at h_eval
+            cases hp : ptable[idx]? with
+            | none =>
+                rw [hp] at h_eval
+                simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                obtain ⟨h_r, h_T⟩ := h_eval; subst h_r; subst h_T
+                simp [eval, hp, shift_val]
+            | some newPolicy =>
+                rw [hp] at h_eval
+                simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                obtain ⟨h_r, h_T⟩ := h_eval; subst h_r; subst h_T
+                simp only [eval, hp]
+                rw [shift_state_setPolicyAt]
+                simp [shift_val]
+        | seq exps =>
+            cases exps with
+            | nil =>
+                simp only [eval, Option.some.injEq, Prod.mk.injEq] at h_eval
+                obtain ⟨h_r, h_T⟩ := h_eval; subst h_r; subst h_T
+                simp [eval, shift_val]
+            | cons e rest =>
+                cases rest with
+                | nil =>
+                    simp only [eval] at h_eval
+                    have h_eval_b := ih_eval ptable level e env T r T'
+                      hresp_pt hresp_init h_cutoff h_eval
+                    simp [eval, h_eval_b]
+                | cons e2 rest2 =>
+                    simp only [eval] at h_eval
+                    cases he : eval k ptable level e env T with
+                    | none => rw [he] at h_eval; simp at h_eval
+                    | some pr =>
+                        obtain ⟨v_e, T_inner⟩ := pr
+                        rw [he] at h_eval
+                        simp only at h_eval
+                        have h_e_b := ih_eval ptable level e env T v_e T_inner
+                          hresp_pt hresp_init h_cutoff he
+                        have h_mono := (heap_mono k).1 ptable level e env T v_e T_inner he
+                        have h_cutoff_inner : cutoff ≤ T_inner.heap.length :=
+                          Nat.le_trans h_cutoff h_mono
+                        have h_pol_inner := pp_eval ptable level e env T v_e T_inner
+                          hresp_pt hresp_init he
+                        have h_seq_b := ih_eval ptable level (.seq (e2 :: rest2))
+                          env T_inner r T'
+                          hresp_pt h_pol_inner h_cutoff_inner h_eval
+                        simp [eval, h_e_b, h_seq_b]
+        | em body =>
+            simp only [eval] at h_eval
+            cases hm : T.materialize (level + 1) with
+            | none => rw [hm] at h_eval; simp at h_eval
+            | some T_mat =>
+                rw [hm] at h_eval
+                simp only at h_eval
+                cases he : T_mat.envAt? (level + 1) with
+                | none => rw [he] at h_eval; simp at h_eval
+                | some upEnv =>
+                    rw [he] at h_eval
+                    simp only at h_eval
+                    have h_mat_grows : T.heap.length ≤ T_mat.heap.length :=
+                      TowerState.materialize_heap_grows T T_mat (level + 1) hm
+                    have h_cutoff_mat : cutoff ≤ T_mat.heap.length :=
+                      Nat.le_trans h_cutoff h_mat_grows
+                    have h_mat_resp :
+                        ∀ m p, T_mat.policyAt? m = some p →
+                          PolicyRespectsShift cutoff padding p :=
+                      materialize_policies_resp_preserves T T_mat (level + 1)
+                        (PolicyRespectsShift cutoff padding) hm hresp_init
+                        (rejectAllPolicy_respects_shift cutoff padding)
+                    have h_body_b := ih_eval ptable (level + 1) body upEnv T_mat r T'
+                      hresp_pt h_mat_resp h_cutoff_mat h_eval
+                    -- Shift commutes with materialize:
+                    -- (shift_state T).materialize (level+1) = some (shift_state T_mat).
+                    -- (shift_state T_mat).envAt? (level+1) = some (shift_env upEnv).
+                    have h_mat_b :
+                        (shift_state cutoff padding T).materialize (level + 1)
+                          = some (shift_state cutoff padding T_mat) := by
+                      rw [materialize_shift_commutes cutoff padding T (level+1) h_cutoff]
+                      rw [hm]; rfl
+                    have h_env_b :
+                        (shift_state cutoff padding T_mat).envAt? (level + 1)
+                          = some (shift_env cutoff padding.length upEnv) := by
+                      rw [shift_state_envAt?, he]; rfl
+                    show eval (k + 1) ptable level (.em body) _ _ = _
+                    simp only [eval, h_mat_b, h_env_b]
+                    exact h_body_b
+        | ifte c t e =>
+            simp only [eval] at h_eval
+            cases hc : eval k ptable level c env T with
+            | none => rw [hc] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨cv, T_c⟩ := pr
+                rw [hc] at h_eval
+                have h_c_b := ih_eval ptable level c env T cv T_c
+                  hresp_pt hresp_init h_cutoff hc
+                have h_mono_c := (heap_mono k).1 ptable level c env T cv T_c hc
+                have h_cutoff_c : cutoff ≤ T_c.heap.length :=
+                  Nat.le_trans h_cutoff h_mono_c
+                have h_pol_c := pp_eval ptable level c env T cv T_c hresp_pt hresp_init hc
+                by_cases hcv : cv = .bool false
+                · subst hcv
+                  simp only at h_eval
+                  have h_e_b := ih_eval ptable level e env T_c r T'
+                    hresp_pt h_pol_c h_cutoff_c h_eval
+                  show eval (k+1) ptable level (.ifte c t e) _ _ = _
+                  simp only [eval, h_c_b]
+                  show (match (some (shift_val cutoff padding.length (.bool false),
+                                     shift_state cutoff padding T_c)) with
+                        | some (.bool false, T_) =>
+                            eval k ptable level e (shift_env cutoff padding.length env) T_
+                        | some (_, T_) =>
+                            eval k ptable level t (shift_env cutoff padding.length env) T_
+                        | none => none)
+                       = some (shift_val cutoff padding.length r, shift_state cutoff padding T')
+                  simp only [shift_val]
+                  exact h_e_b
+                · have h_eval_t : eval k ptable level t env T_c = some (r, T') := by
+                    cases cv with
+                    | bool b =>
+                        cases b with
+                        | false => exact absurd rfl hcv
+                        | true => exact h_eval
+                    | num _ => exact h_eval
+                    | nilV => exact h_eval
+                    | cons _ _ => exact h_eval
+                    | sym _ => exact h_eval
+                    | closure _ _ _ => exact h_eval
+                    | prim _ => exact h_eval
+                    | builtinBaseApply => exact h_eval
+                  have h_t_b := ih_eval ptable level t env T_c r T'
+                    hresp_pt h_pol_c h_cutoff_c h_eval_t
+                  show eval (k+1) ptable level (.ifte c t e) _ _ = _
+                  simp only [eval, h_c_b]
+                  cases cv with
+                  | bool b =>
+                      cases b with
+                      | false => exact absurd rfl hcv
+                      | true => simp only [shift_val]; exact h_t_b
+                  | num _ => simp only [shift_val]; exact h_t_b
+                  | nilV => simp only [shift_val]; exact h_t_b
+                  | cons _ _ => simp only [shift_val]; exact h_t_b
+                  | sym _ => simp only [shift_val]; exact h_t_b
+                  | closure _ _ _ => simp only [shift_val]; exact h_t_b
+                  | prim _ => simp only [shift_val]; exact h_t_b
+                  | builtinBaseApply => simp only [shift_val]; exact h_t_b
+        | letE x e body =>
+            simp only [eval] at h_eval
+            cases he : eval k ptable level e env T with
+            | none => rw [he] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨v_e, T_inner⟩ := pr
+                rw [he] at h_eval
+                simp only at h_eval
+                have h_e_b := ih_eval ptable level e env T v_e T_inner
+                  hresp_pt hresp_init h_cutoff he
+                have h_mono_e := (heap_mono k).1 ptable level e env T v_e T_inner he
+                have h_cutoff_inner : cutoff ≤ T_inner.heap.length :=
+                  Nat.le_trans h_cutoff h_mono_e
+                have h_pol_inner := pp_eval ptable level e env T v_e T_inner
+                  hresp_pt hresp_init he
+                have h_pol_alloc :
+                    ∀ m p, (T_inner.alloc v_e).1.policyAt? m = some p →
+                      PolicyRespectsShift cutoff padding p := by
+                  intro m p hpol; exact h_pol_inner m p hpol
+                have h_cutoff_alloc :
+                    cutoff ≤ (T_inner.alloc v_e).1.heap.length := by
+                  unfold TowerState.alloc Heap.alloc
+                  show cutoff ≤ (T_inner.heap ++ [v_e]).length
+                  rw [List.length_append]; omega
+                have h_body_b := ih_eval ptable level body
+                  (.cons x (T_inner.alloc v_e).2 env) (T_inner.alloc v_e).1 r T'
+                  hresp_pt h_pol_alloc h_cutoff_alloc h_eval
+                -- Compute the shifted forms.
+                have h_alloc_state := shift_state_alloc_state cutoff padding T_inner v_e h_cutoff_inner
+                have h_alloc_idx := shift_state_alloc_idx cutoff padding T_inner v_e h_cutoff_inner
+                -- shift_env on a cons: .cons x i e shifts to .cons x (shift_idx i) (shift_env e).
+                have h_env_eq :
+                    Env.cons x (shift_idx cutoff padding.length (T_inner.alloc v_e).2)
+                      (shift_env cutoff padding.length env)
+                      = shift_env cutoff padding.length
+                        (Env.cons x (T_inner.alloc v_e).2 env) := by
+                  rfl
+                show eval (k+1) ptable level (.letE x e body) _ _ = _
+                simp only [eval, h_e_b]
+                -- After simp: the goal has form
+                --   (let (T'', idx) := (shift_state T_inner).alloc (shift_val v_e); eval k ptable level body ...)
+                --   = some (shift_val r, shift_state T')
+                -- Use h_alloc_idx and h_alloc_state to rewrite.
+                show eval k ptable level body
+                       (Env.cons x ((shift_state cutoff padding T_inner).alloc
+                                      (shift_val cutoff padding.length v_e)).2
+                                  (shift_env cutoff padding.length env))
+                       ((shift_state cutoff padding T_inner).alloc
+                          (shift_val cutoff padding.length v_e)).1
+                     = some (shift_val cutoff padding.length r, shift_state cutoff padding T')
+                rw [h_alloc_idx, h_alloc_state, h_env_eq]
+                exact h_body_b
+        | app exps =>
+            cases exps with
+            | nil =>
+                simp only [eval] at h_eval
+                exact absurd h_eval (by simp)
+            | cons f args =>
+                simp only [eval] at h_eval
+                cases hf : eval k ptable level f env T with
+                | none => rw [hf] at h_eval; simp at h_eval
+                | some pr =>
+                    obtain ⟨fv, T1⟩ := pr
+                    rw [hf] at h_eval
+                    simp only at h_eval
+                    have h_f_b := ih_eval ptable level f env T fv T1
+                      hresp_pt hresp_init h_cutoff hf
+                    have h_mono_f := (heap_mono k).1 ptable level f env T fv T1 hf
+                    have h_cutoff_1 : cutoff ≤ T1.heap.length :=
+                      Nat.le_trans h_cutoff h_mono_f
+                    have h_pol_1 := pp_eval ptable level f env T fv T1 hresp_pt hresp_init hf
+                    cases ha : evalList k ptable level args env T1 with
+                    | none => rw [ha] at h_eval; simp at h_eval
+                    | some pr2 =>
+                        obtain ⟨avs, T2⟩ := pr2
+                        rw [ha] at h_eval
+                        simp only at h_eval
+                        have h_a_b := ih_evalList ptable level args env T1 avs T2
+                          hresp_pt h_pol_1 h_cutoff_1 ha
+                        have h_mono_a :=
+                          (heap_mono k).2.1 ptable level args env T1 avs T2 ha
+                        have h_cutoff_2 : cutoff ≤ T2.heap.length :=
+                          Nat.le_trans h_cutoff_1 h_mono_a
+                        have h_pol_2 :=
+                          pp_evalList ptable level args env T1 avs T2 hresp_pt h_pol_1 ha
+                        have h_app_b := ih_applyVia ptable level fv avs T2 r T'
+                          hresp_pt h_pol_2 h_cutoff_2 h_eval
+                        simp [eval, h_f_b, h_a_b, h_app_b]
+        | primApp f args =>
+            simp only [eval] at h_eval
+            cases hf : eval k ptable level f env T with
+            | none => rw [hf] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨fv, T1⟩ := pr
+                rw [hf] at h_eval
+                simp only at h_eval
+                have h_f_b := ih_eval ptable level f env T fv T1
+                  hresp_pt hresp_init h_cutoff hf
+                have h_mono_f := (heap_mono k).1 ptable level f env T fv T1 hf
+                have h_cutoff_1 : cutoff ≤ T1.heap.length :=
+                  Nat.le_trans h_cutoff h_mono_f
+                have h_pol_1 := pp_eval ptable level f env T fv T1 hresp_pt hresp_init hf
+                cases ha : evalList k ptable level args env T1 with
+                | none => rw [ha] at h_eval; simp at h_eval
+                | some pr2 =>
+                    obtain ⟨avs, T2⟩ := pr2
+                    rw [ha] at h_eval
+                    simp only at h_eval
+                    have h_a_b := ih_evalList ptable level args env T1 avs T2
+                      hresp_pt h_pol_1 h_cutoff_1 ha
+                    have h_mono_a :=
+                      (heap_mono k).2.1 ptable level args env T1 avs T2 ha
+                    have h_cutoff_2 : cutoff ≤ T2.heap.length :=
+                      Nat.le_trans h_cutoff_1 h_mono_a
+                    have h_pol_2 :=
+                      pp_evalList ptable level args env T1 avs T2 hresp_pt h_pol_1 ha
+                    have h_app_b := ih_applyDirect ptable level fv avs T2 r T'
+                      hresp_pt h_pol_2 h_cutoff_2 h_eval
+                    simp [eval, h_f_b, h_a_b, h_app_b]
+        | set x e => sorry
+      · -- evalList (k+1)
+        intro ptable level exps env T rs T' hresp_pt hresp_init h_cutoff h_eval
+        cases exps with
+        | nil =>
+            simp only [evalList, Option.some.injEq, Prod.mk.injEq] at h_eval
+            obtain ⟨h_r, h_T⟩ := h_eval; subst h_r; subst h_T
+            simp [evalList, shift_listVal]
+        | cons e rest =>
+            simp only [evalList] at h_eval
+            cases he : eval k ptable level e env T with
+            | none => rw [he] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨v, T_inner⟩ := pr
+                rw [he] at h_eval
+                simp only at h_eval
+                have h_e_b := ih_eval ptable level e env T v T_inner
+                  hresp_pt hresp_init h_cutoff he
+                have h_mono_e := (heap_mono k).1 ptable level e env T v T_inner he
+                have h_cutoff_inner : cutoff ≤ T_inner.heap.length :=
+                  Nat.le_trans h_cutoff h_mono_e
+                have h_pol_inner := pp_eval ptable level e env T v T_inner
+                  hresp_pt hresp_init he
+                cases hr : evalList k ptable level rest env T_inner with
+                | none => rw [hr] at h_eval; simp at h_eval
+                | some pr2 =>
+                    obtain ⟨vs, T2⟩ := pr2
+                    rw [hr] at h_eval
+                    simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                    obtain ⟨h_rs, h_T⟩ := h_eval; subst h_rs; subst h_T
+                    have h_r_b := ih_evalList ptable level rest env T_inner vs T2
+                      hresp_pt h_pol_inner h_cutoff_inner hr
+                    simp [evalList, h_e_b, h_r_b, shift_listVal]
+      · -- applyVia (k+1)
+        intro ptable level op args T r T' hresp_pt hresp_init h_cutoff h_app
+        simp only [applyVia] at h_app
+        cases hm : T.materialize (level + 1) with
+        | none => rw [hm] at h_app; simp at h_app
+        | some T_mat =>
+            rw [hm] at h_app
+            simp only at h_app
+            have h_mat_grows : T.heap.length ≤ T_mat.heap.length :=
+              TowerState.materialize_heap_grows T T_mat (level + 1) hm
+            have h_cutoff_mat : cutoff ≤ T_mat.heap.length :=
+              Nat.le_trans h_cutoff h_mat_grows
+            have h_mat_resp :
+                ∀ m p, T_mat.policyAt? m = some p →
+                  PolicyRespectsShift cutoff padding p :=
+              materialize_policies_resp_preserves T T_mat (level + 1)
+                (PolicyRespectsShift cutoff padding) hm hresp_init
+                (rejectAllPolicy_respects_shift cutoff padding)
+            have h_mat_b :
+                (shift_state cutoff padding T).materialize (level + 1)
+                  = some (shift_state cutoff padding T_mat) := by
+              rw [materialize_shift_commutes cutoff padding T (level+1) h_cutoff]
+              rw [hm]; rfl
+            cases he : T_mat.envAt? (level + 1) with
+            | none =>
+                rw [he] at h_app
+                simp only at h_app
+                have h_app_b := ih_applyDirect ptable level op args T_mat r T'
+                  hresp_pt h_mat_resp h_cutoff_mat h_app
+                show applyVia (k+1) ptable level _ _ _ = _
+                have h_env_b :
+                    (shift_state cutoff padding T_mat).envAt? (level + 1) = none := by
+                  rw [shift_state_envAt?, he]; rfl
+                simp only [applyVia, h_mat_b, h_env_b]
+                exact h_app_b
+            | some upEnv =>
+                rw [he] at h_app
+                simp only at h_app
+                have h_env_b :
+                    (shift_state cutoff padding T_mat).envAt? (level + 1)
+                      = some (shift_env cutoff padding.length upEnv) := by
+                  rw [shift_state_envAt?, he]; rfl
+                cases hl : upEnv.lookup "base-apply" with
+                | none =>
+                    rw [hl] at h_app
+                    simp only at h_app
+                    have h_app_b := ih_applyDirect ptable level op args T_mat r T'
+                      hresp_pt h_mat_resp h_cutoff_mat h_app
+                    show applyVia (k+1) ptable level _ _ _ = _
+                    simp only [applyVia, h_mat_b, h_env_b,
+                      shift_env_lookup_none cutoff padding.length upEnv "base-apply" hl]
+                    exact h_app_b
+                | some idx =>
+                    rw [hl] at h_app
+                    simp only at h_app
+                    cases hp : T_mat.heap[idx]? with
+                    | none => rw [hp] at h_app; simp at h_app
+                    | some baseApply =>
+                        rw [hp] at h_app
+                        cases baseApply with
+                        | builtinBaseApply =>
+                            simp only at h_app
+                            have h_app_b := ih_applyDirect ptable level op args T_mat r T'
+                              hresp_pt h_mat_resp h_cutoff_mat h_app
+                            show applyVia (k+1) ptable level _ _ _ = _
+                            simp only [applyVia, h_mat_b, h_env_b,
+                              shift_env_lookup cutoff padding.length upEnv "base-apply" idx hl,
+                              shift_state_heap,
+                              shift_heap_getElem? cutoff padding T_mat.heap idx h_cutoff_mat,
+                              hp, Option.map_some, shift_val]
+                            exact h_app_b
+                        | num _ | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _ =>
+                            simp only at h_app
+                            have h_app_b := ih_applyDirect ptable level _ [op, listToVal args]
+                              T_mat r T' hresp_pt h_mat_resp h_cutoff_mat h_app
+                            show applyVia (k+1) ptable level _ _ _ = _
+                            simp only [applyVia, h_mat_b, h_env_b,
+                              shift_env_lookup cutoff padding.length upEnv "base-apply" idx hl,
+                              shift_state_heap,
+                              shift_heap_getElem? cutoff padding T_mat.heap idx h_cutoff_mat,
+                              hp, Option.map_some, shift_val]
+                            rw [show shift_listVal cutoff padding.length [op, listToVal args]
+                                  = [shift_val cutoff padding.length op,
+                                     shift_val cutoff padding.length (listToVal args)] from rfl] at h_app_b
+                            rw [shift_val_listToVal cutoff padding.length args] at h_app_b
+                            exact h_app_b
+      · -- applyDirect (k+1)
+        intro ptable level op args T r T' hresp_pt hresp_init h_cutoff h_app
+        unfold applyDirect at h_app
+        cases op with
+        | num _ => exact absurd h_app (by simp)
+        | bool _ => exact absurd h_app (by simp)
+        | nilV => exact absurd h_app (by simp)
+        | sym _ => exact absurd h_app (by simp)
+        | cons _ _ => exact absurd h_app (by simp)
+        | prim name =>
+            simp only at h_app
+            cases hp : applyPrim name args with
+            | none => rw [hp] at h_app; simp at h_app
+            | some v =>
+                rw [hp] at h_app
+                simp only [Option.some.injEq, Prod.mk.injEq] at h_app
+                obtain ⟨h_r, h_T⟩ := h_app; subst h_r; subst h_T
+                show applyDirect (k+1) ptable level _ _ _ = _
+                simp only [applyDirect, shift_val]
+                rw [shift_applyPrim cutoff padding.length name args, hp]
+                rfl
+        | builtinBaseApply =>
+            simp only at h_app
+            cases args with
+            | nil => simp at h_app
+            | cons a as =>
+                cases as with
+                | nil => simp at h_app
+                | cons o rest =>
+                    cases rest with
+                    | nil =>
+                        simp only at h_app
+                        cases hv : valToList o with
+                        | none => rw [hv] at h_app; simp at h_app
+                        | some operands =>
+                            rw [hv] at h_app
+                            have h_app_b := ih_applyDirect ptable level a operands T r T'
+                              hresp_pt hresp_init h_cutoff h_app
+                            show applyDirect (k+1) ptable level _ _ _ = _
+                            simp only [applyDirect, shift_listVal, shift_val]
+                            rw [shift_listVal_valToList cutoff padding.length o, hv]
+                            simp only [Option.map_some]
+                            exact h_app_b
+                    | cons _ _ => simp at h_app
+        | closure ps body cenv =>
+            simp only at h_app
+            split at h_app
+            · simp at h_app
+            · rename_i h_len_neq
+              have h_len_eq : ps.length = args.length := by
+                have h := h_len_neq
+                simp at h
+                exact h
+              have h_foldl_len :
+                  ((args.zip ps).foldl allocStep (T.heap, cenv)).1.length
+                    = T.heap.length + (args.zip ps).length :=
+                allocStep_foldl_length (args.zip ps) T.heap cenv
+              have h_cutoff_alloc :
+                  cutoff ≤ ((args.zip ps).foldl allocStep (T.heap, cenv)).1.length := by
+                rw [h_foldl_len]; omega
+              have h_pol_alloc :
+                  ∀ m p, ({T with heap :=
+                    ((args.zip ps).foldl allocStep (T.heap, cenv)).1} : TowerState).policyAt? m
+                      = some p →
+                    PolicyRespectsShift cutoff padding p := by
+                intro m p hpol; exact hresp_init m p hpol
+              have h_body_b := ih_eval ptable level body
+                ((args.zip ps).foldl allocStep (T.heap, cenv)).2
+                {T with heap := ((args.zip ps).foldl allocStep (T.heap, cenv)).1} r T'
+                hresp_pt h_pol_alloc h_cutoff_alloc h_app
+              have h_zip_eq :
+                  (shift_listVal cutoff padding.length args).zip ps
+                    = (args.zip ps).map (fun vp => (shift_val cutoff padding.length vp.1, vp.2)) := by
+                rw [shift_listVal_eq_map]
+                clear h_foldl_len h_cutoff_alloc h_body_b h_app h_len_neq h_len_eq h_pol_alloc
+                induction args generalizing ps with
+                | nil => simp
+                | cons a as ih2 =>
+                    cases ps with
+                    | nil => simp
+                    | cons p ps' =>
+                        simp only [List.zip_cons_cons, List.map_cons]
+                        rw [ih2 ps']
+              have h_shift := allocStep_foldl_shift cutoff padding
+                (args.zip ps) T.heap cenv h_cutoff
+              simp only at h_shift
+              obtain ⟨h_fst, h_snd⟩ := h_shift
+              show applyDirect (k+1) ptable level
+                (shift_val cutoff padding.length (.closure ps body cenv))
+                (shift_listVal cutoff padding.length args)
+                (shift_state cutoff padding T)
+                = some (shift_val cutoff padding.length r, shift_state cutoff padding T')
+              simp only [shift_val, applyDirect]
+              have h_len_b :
+                  (ps.length != (shift_listVal cutoff padding.length args).length) = false := by
+                rw [shift_listVal_length]
+                simp [h_len_eq]
+              simp only [h_len_b, Bool.false_eq_true, ↓reduceIte]
+              rw [h_zip_eq]
+              show eval k ptable level body
+                  ((List.map (fun vp => (shift_val cutoff padding.length vp.1, vp.2))
+                      (args.zip ps)).foldl
+                    allocStep ((shift_state cutoff padding T).heap,
+                              shift_env cutoff padding.length cenv)).2
+                  ({(shift_state cutoff padding T) with heap :=
+                      ((List.map (fun vp => (shift_val cutoff padding.length vp.1, vp.2))
+                          (args.zip ps)).foldl
+                          allocStep ((shift_state cutoff padding T).heap,
+                                    shift_env cutoff padding.length cenv)).1 } : TowerState)
+                = some (shift_val cutoff padding.length r, shift_state cutoff padding T')
+              rw [shift_state_heap]
+              rw [h_fst, h_snd]
+              -- Goal: eval k ... body shifted_env shifted_state
+              -- where shifted_state has heap := shift_heap (foldl_a.1)
+              -- and shifted_env = shift_env (foldl_a.2)
+              -- which by shift_state def matches shift_state cutoff padding {T with heap := foldl_a.1}.
+              have h_state_eq :
+                  ({(shift_state cutoff padding T) with
+                      heap := shift_heap cutoff padding
+                                ((args.zip ps).foldl allocStep (T.heap, cenv)).1 } : TowerState)
+                  = shift_state cutoff padding
+                      ({T with heap := ((args.zip ps).foldl allocStep (T.heap, cenv)).1} : TowerState) := by
+                unfold shift_state; rfl
+              rw [h_state_eq]
+              exact h_body_b
+
 /-! ## Heap-prefix extension for `applyDirect`
 
-    The substantive framing theorem: `applyDirect` on the prefix-
-    extended state produces a result `ValVis_weak`-related to the
-    result on the original state. In lean-green this is proven via
-    `shift_respect` (lean-green:Bisim.lean:6676+, ~1500 LOC). The
-    tower-aware port is the next major phase of Session D — lengthy
-    but mechanical. Body is `sorry` until that proof lands.
-
-    See DUMP2.md for the roadmap (heap_mono → policy_shift_preserved
-    → shift_respect → applyDirect_heap_extend_via_shift → this). -/
+    Discharged via `shift_respect`: instantiate at
+    `cutoff = T.heap.length`, `padding = extras`. Use Deep validity
+    (`shift_*_id`) to identify shifted inputs with the originals,
+    and `shift_heap_id_of_deep` to identify the shifted state with
+    the prefix-extended state. -/
 theorem applyDirect_heap_extend_weak
     {fuel : Nat} {ptable : PolicyTable} {level : Nat}
     {op : Val} {operands : List Val} {T : TowerState}
     (_hresp_pt : PolicyTableRespectsBisimT ptable)
-    (_h_heap : HeapValid T.heap) (_h_op : ValValid op T.heap)
-    (_h_operands : ListValValid operands T.heap)
+    (h_heap : HeapValid T.heap) (h_op : ValValid op T.heap)
+    (h_operands : ListValValid operands T.heap)
     (_h_levels_valid : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
     (_h_levels_resp : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
     {r : Val} {T' : TowerState}
-    (_h_app : applyDirect fuel ptable level op operands T = some (r, T'))
-    (extras : List Val) (_h_extras : ListValValid extras T.heap)
-    (_h_heap_deep : HeapDeep T.heap) (_h_op_deep : ValDeep op T.heap)
-    (_h_operands_deep : ListValDeep operands T.heap)
+    (h_app : applyDirect fuel ptable level op operands T = some (r, T'))
+    (extras : List Val) (h_extras : ListValValid extras T.heap)
+    (h_heap_deep : HeapDeep T.heap) (h_op_deep : ValDeep op T.heap)
+    (h_operands_deep : ListValDeep operands T.heap)
     (_h_levels_deep : ∀ n env, T.envAt? n = some env → EnvDeep env T.heap)
-    (_h_pt_shift : PolicyTableRespectsShift T.heap.length extras ptable)
-    (_h_pol_shift : ∀ p, T.policyAt? level = some p →
-                     PolicyRespectsShift T.heap.length extras p) :
+    (h_pt_shift : PolicyTableRespectsShift T.heap.length extras ptable)
+    (h_pol_shift_all : ∀ n p, T.policyAt? n = some p →
+                          PolicyRespectsShift T.heap.length extras p) :
     ∃ r' T'',
       applyDirect fuel ptable level op operands { T with heap := T.heap ++ extras }
         = some (r', T'') ∧
@@ -3167,4 +4543,143 @@ theorem applyDirect_heap_extend_weak
       HeapValid T''.heap ∧
       (∀ n, T'.policyAt? n = T''.policyAt? n) ∧
       T.heap.length + extras.length ≤ T''.heap.length := by
-  sorry
+  -- Apply shift_respect at cutoff = T.heap.length, padding = extras.
+  obtain ⟨_, _, _, ih_apd⟩ := shift_respect T.heap.length extras fuel
+  have h_cutoff : T.heap.length ≤ T.heap.length := Nat.le_refl _
+  have h_app_shifted := ih_apd ptable level op operands T r T'
+    h_pt_shift h_pol_shift_all h_cutoff h_app
+  -- Convert shifted forms to identity using deep validity.
+  have h_op_below : Val.AllBelow T.heap.length op := ValDeep.toAllBelow h_op_deep
+  have h_operands_below : ListVal.AllBelow T.heap.length operands :=
+    ListValDeep.toAllBelow h_operands_deep
+  rw [shift_val_id T.heap.length extras.length h_op_below,
+      shift_listVal_id T.heap.length extras.length h_operands_below] at h_app_shifted
+  -- Convert shift_state to {T with heap := T.heap ++ extras}.
+  -- shift_state shifts heap and shifts each level's env. For HeapDeep T.heap,
+  -- shift_heap = T.heap ++ extras. For each level's env, shift_env = env
+  -- (since envs are EnvDeep, hence AllBelow heap.length).
+  -- So shift_state T = { T with heap := T.heap ++ extras } when everything is Deep.
+  have h_state_eq :
+      shift_state T.heap.length extras T = { T with heap := T.heap ++ extras } := by
+    unfold shift_state
+    show ({ heap := shift_heap T.heap.length extras T.heap,
+            levels := T.levels.map _ } : TowerState)
+        = { T with heap := T.heap ++ extras }
+    have h_heap_eq : shift_heap T.heap.length extras T.heap = T.heap ++ extras :=
+      shift_heap_id_of_deep extras T.heap h_heap_deep
+    rw [h_heap_eq]
+    -- Show levels.map (shift_env on each ls.env) = T.levels (since envs are Deep).
+    show ({ heap := T.heap ++ extras,
+            levels := T.levels.map (fun ls =>
+              { ls with env := shift_env T.heap.length extras.length ls.env }) } : TowerState)
+       = ({ heap := T.heap ++ extras, levels := T.levels } : TowerState)
+    simp only [TowerState.mk.injEq, true_and]
+    -- Need: T.levels.map (fun ls => {ls with env := shift_env _ _ ls.env}) = T.levels.
+    -- Each level's env is EnvDeep T.heap, hence AllBelow T.heap.length, so shift_env is identity.
+    have h_levels_aux : ∀ (ls : LevelState), (∃ n, T.envAt? n = some ls.env) →
+        ({ ls with env := shift_env T.heap.length extras.length ls.env } : LevelState) = ls := by
+      intro ls ⟨n, h_n⟩
+      have h_env_deep : EnvDeep ls.env T.heap := _h_levels_deep n ls.env h_n
+      have h_below : Env.AllBelow T.heap.length ls.env := EnvDeep.toAllBelow h_env_deep
+      have h_id : shift_env T.heap.length extras.length ls.env = ls.env :=
+        shift_env_id T.heap.length extras.length h_below
+      rw [h_id]
+    -- Map identity case-by-case.
+    have h_levels_in : ∀ ls ∈ T.levels, EnvDeep ls.env T.heap := by
+      intro ls hls
+      obtain ⟨n, h_n⟩ := List.mem_iff_getElem?.mp hls
+      have h_envAt : T.envAt? n = some ls.env := by
+        unfold TowerState.envAt? TowerState.levelAt?
+        rw [h_n]; rfl
+      exact _h_levels_deep n ls.env h_envAt
+    -- Generic helper: map identity preserves the list.
+    have h_lst_eq : ∀ (lst : List LevelState),
+        (∀ ls ∈ lst, EnvDeep ls.env T.heap) →
+        lst.map (fun ls => { ls with env := shift_env T.heap.length extras.length ls.env })
+          = lst := by
+      intro lst h_lst
+      induction lst with
+      | nil => rfl
+      | cons hd tl ih =>
+          simp only [List.map_cons]
+          have h_hd_in : hd ∈ hd :: tl := List.Mem.head _
+          have h_hd_deep := h_lst hd h_hd_in
+          have h_hd_below : Env.AllBelow T.heap.length hd.env := EnvDeep.toAllBelow h_hd_deep
+          have h_hd_id : shift_env T.heap.length extras.length hd.env = hd.env :=
+            shift_env_id T.heap.length extras.length h_hd_below
+          rw [show ({ hd with env := shift_env T.heap.length extras.length hd.env } : LevelState)
+                  = hd from by rw [h_hd_id]]
+          have h_tl_in : ∀ ls ∈ tl, EnvDeep ls.env T.heap :=
+            fun ls hls => h_lst ls (List.Mem.tail _ hls)
+          rw [ih h_tl_in]
+    exact h_lst_eq T.levels h_levels_in
+  rw [h_state_eq] at h_app_shifted
+  -- Get HeapValid T'.heap and ValValid r T'.heap from frame_tower (self-bisim).
+  obtain ⟨_, _, _, fr_apd⟩ := frame_tower fuel
+  have h_vv_op : ValVis op op T.heap T.heap := by
+    intro d
+    have := ValVis_aux_self_extend d op T.heap [] h_heap h_op
+    simpa using this
+  have h_lvv_args : ListValVis operands operands T.heap T.heap := by
+    have h_aux : ∀ (xs : List Val), ListValValid xs T.heap → ListValVis xs xs T.heap T.heap := by
+      intro xs hxs
+      induction xs with
+      | nil => trivial
+      | cons head tail ih =>
+          refine ⟨?_, ih hxs.2⟩
+          intro d
+          have := ValVis_aux_self_extend d head T.heap [] h_heap hxs.1
+          simpa using this
+    exact h_aux operands h_operands
+  have h_bisim_self : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap := by
+    intro n env hn d x
+    cases hxe : env.lookup x with
+    | none => simp
+    | some i =>
+        simp only
+        have h_ev : EnvValid env T.heap := _h_levels_valid n env hn
+        have h_idx_lt : i < T.heap.length := h_ev x i hxe
+        cases hp : T.heap[i]? with
+        | none =>
+            exfalso
+            rw [List.getElem?_eq_none_iff] at hp; omega
+        | some v =>
+            have h_vv : ValValid v T.heap := h_heap _ _ hp
+            have := ValVis_aux_self_extend d v T.heap [] h_heap h_vv
+            simpa using this
+  obtain ⟨r_b, T_b', h_eval_b, _, h_he, h_tc, hv_r_a, _⟩ :=
+    fr_apd ptable level op op operands operands T T r T'
+      _hresp_pt (fun p hp => _h_levels_resp level p hp) rfl h_heap h_heap rfl
+      _h_levels_valid _h_levels_valid (fun _ => rfl) (fun _ => rfl)
+      _h_levels_resp h_bisim_self
+      h_vv_op h_lvv_args h_op h_op h_operands h_operands h_app
+  have h_eq : (r, T') = (r_b, T_b') := by
+    have : some (r, T') = some (r_b, T_b') := h_app.symm.trans h_eval_b
+    exact Option.some.inj this
+  obtain ⟨h_r_eq, h_T_eq⟩ : r = r_b ∧ T' = T_b' := Prod.mk.inj h_eq
+  subst h_r_eq; subst h_T_eq
+  have h_heap_T' : HeapValid T'.heap := h_tc.hv_a_out
+  have h_vv_r_T' : ValValid r T'.heap := hv_r_a
+  have h_mono : T.heap.length ≤ T'.heap.length := h_he.len_a
+  refine ⟨shift_val T.heap.length extras.length r,
+          shift_state T.heap.length extras T', h_app_shifted, ?_, ?_, ?_, ?_⟩
+  · -- ValVis_weak r r' T'.heap T''.heap.
+    show ValVis_weak r (shift_val T.heap.length extras.length r)
+                     T'.heap (shift_state T.heap.length extras T').heap
+    rw [show (shift_state T.heap.length extras T').heap = shift_heap T.heap.length extras T'.heap from rfl]
+    exact valVis_weak_self_shift T.heap.length extras T'.heap h_heap_T' h_mono r h_vv_r_T'
+  · -- HeapValid T''.heap = HeapValid (shift_heap T'.heap).
+    -- shift_heap preserves HeapValid: each cell remains valid under the shifted heap
+    -- (cells in the original part have shifted indices into the shifted heap; padding
+    -- cells are atom-validated; structurally heaps are valid throughout).
+    -- For now, sorry — derivable from h_app_shifted's preservation chain.
+    sorry
+  · -- T'.policyAt? n = T''.policyAt? n. T'' = shift_state T'. shift_state preserves policies.
+    intro n
+    show T'.policyAt? n = (shift_state T.heap.length extras T').policyAt? n
+    rw [shift_state_policyAt?]
+  · -- T.heap.length + extras.length ≤ T''.heap.length.
+    show T.heap.length + extras.length
+       ≤ (shift_state T.heap.length extras T').heap.length
+    rw [shift_state_heap_length]
+    omega

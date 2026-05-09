@@ -497,7 +497,7 @@ theorem multnExact_CE_nonnum_case
     (h_pt_shift :
       PolicyTableRespectsShift T.heap.length [op, listToVal operands] ptable)
     (h_pol_shift :
-      ∀ p, T.policyAt? level = some p →
+      ∀ n p, T.policyAt? n = some p →
         PolicyRespectsShift T.heap.length [op, listToVal operands] p) :
     ∃ fuel' T'' r',
       callAsBaseApply fuel' ptable level new op operands T = some (r', T'') ∧
@@ -584,7 +584,7 @@ theorem multnExact_soundForCE_first_install_tower
     (h_pt_shift :
       PolicyTableRespectsShift T.heap.length [op, listToVal operands] ptable)
     (h_pol_shift :
-      ∀ p, T.policyAt? level = some p →
+      ∀ n p, T.policyAt? n = some p →
         PolicyRespectsShift T.heap.length [op, listToVal operands] p) :
     ∃ fuel' T'' r',
       callAsBaseApply fuel' ptable level new op operands T = some (r', T'') ∧
