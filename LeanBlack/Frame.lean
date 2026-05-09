@@ -251,7 +251,7 @@ private theorem freshLevelEnv_env_valid (h : Heap) :
 /-- One materializeStep preserves "level envs valid in heap". -/
 private theorem materializeStep_level_envs_valid_preserves
     (T : TowerState)
-    (h_hv : HeapValid T.heap)
+    (_h_hv : HeapValid T.heap)
     (h_levs : ∀ m env, T.envAt? m = some env → EnvValid env T.heap) :
     ∀ m env, (materializeStep T).envAt? m = some env →
     EnvValid env (materializeStep T).heap := by
