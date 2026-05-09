@@ -970,20 +970,12 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                           h_levs_a h_levs_b h_resp_at,
                         hv_ra, hv_rb⟩
                 simp only [applyDirect, hp_b]
-        | closure _ _ _ =>
-            -- Structural proof transcribed from lean-green; blocked on a
-            -- *representational* mismatch: my `eval`'s closure-arm uses a
-            -- `(TowerState, Env)` foldl, while `alloc_chain_bisim` is
-            -- stated over `(Heap, Env)` foldl with `allocStep`. The two
-            -- are behaviorally equivalent (both append cells and extend
-            -- env), but bridging requires a lemma:
-            --   foldl_my_step (T, cenv) = ({T with heap := h'}, env')
-            --   where (h', env') = foldl allocStep (T.heap, cenv).
-            -- Tractable but not done. Sorry'd; the structural proof is
-            -- preserved in git history below this comment for the next
-            -- session to revive.
-            sorry
-        /- Structural proof (deferred, blocked on heap/tower foldl bridge):
+        | closure ps body cenv =>
+            -- Adapted port from lean-green. The cross-side closure
+            -- (ValVis on closures) forces ps_b = ps, body_b = body,
+            -- cenv_b is bisim-related to cenv. The arg-alloc step
+            -- (allocStep chain) produces parallel alloc'd envs and
+            -- cross-side bisim-related allocated heaps.
             have h_opb : ∃ cenv_b, op_b = .closure ps body cenv_b ∧
                 cenv = cenv_b ∧
                 EnvVis cenv cenv_b T_a.heap T_b.heap := by
@@ -1073,10 +1065,14 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
               have h_he_chain : HeapEvolution T_a T_b T_a' T_b' :=
                 HeapEvolution.trans h_he_alloc h_he_body
               -- TowerCross output bundles WFCtxT-level facts at output.
+              -- The two `levels_mono_*` slots need a "frame eval preserves
+              -- level envs" lemma (eval doesn't remove materialized
+              -- levels — only adds via .em). That lemma isn't in
+              -- FrameStmtT's eval clause output yet; deferred.
               have h_tc_out : TowerCross level T_a T_b T_a' T_b' :=
                 ⟨h_ctx_body.heap_len_eq, h_ctx_body.policy_eq_at,
-                 fun n env hen => h_ctx_body.level_envs_valid_a n env (by sorry),
-                 fun n env hen => h_ctx_body.level_envs_valid_b n env (by sorry),
+                 (sorry : ∀ n env, T_a.envAt? n = some env → T_a'.envAt? n = some env),
+                 (sorry : ∀ n env, T_b.envAt? n = some env → T_b'.envAt? n = some env),
                  h_ctx_body.hv_a, h_ctx_body.hv_b,
                  h_ctx_body.level_envs_valid_a, h_ctx_body.level_envs_valid_b,
                  h_ctx_body.policy_resp⟩
@@ -1092,4 +1088,3 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
               have hne : (ps.length != args_a.length) = true := by simp [hlen]
               rw [hne] at h_eval
               simp at h_eval
-        -/

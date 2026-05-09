@@ -194,13 +194,8 @@ def applyDirect (fuel : Nat) (ptable : PolicyTable) (level : Nat)
     match op with
     | .closure ps body cenv =>
         if ps.length != args.length then none else
-          let (T', env') := args.zip ps |>.foldl
-            (fun (acc : TowerState × Env) (vp : Val × String) =>
-              let (TT, ee) := acc
-              let (TT', idx) := TT.alloc vp.1
-              (TT', .cons vp.2 idx ee))
-            (T, cenv)
-          eval n ptable level body env' T'
+          let (h', env') := args.zip ps |>.foldl allocStep (T.heap, cenv)
+          eval n ptable level body env' { T with heap := h' }
     | .prim name =>
         match applyPrim name args with
         | some v => some (v, T)

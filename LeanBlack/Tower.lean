@@ -157,6 +157,18 @@ def TowerState.alloc (T : TowerState) (v : Val) : TowerState × Nat :=
   let (h', idx) := T.heap.alloc v
   ({ T with heap := h' }, idx)
 
+/-! ## Allocation step (closure-call foldl body)
+
+    Pure `(Heap, Env)`-level helper used by both the runtime's
+    `applyDirect` closure case (in `Eval.lean`) and the framing
+    proof's alloc-chain reasoning (in `Bisim.lean` /
+    `Frame.lean`). Putting it here keeps `Eval` and `Bisim`
+    aligned on the same definition. -/
+def allocStep (acc : Heap × Env) (vp : Val × String) : Heap × Env :=
+  let (hh, ee) := acc
+  let (hh', idx) := hh.alloc vp.1
+  (hh', .cons vp.2 idx ee)
+
 /-! ## Foundational lemmas about Tower mutations
 
     Used by Frame.lean to discharge cross-side WFCtxT preservation

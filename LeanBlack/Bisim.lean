@@ -2723,13 +2723,10 @@ theorem EnvVis_cons (x : String) (idx_a idx_b : Nat)
   exact EnvVis_aux_cons d x idx_a idx_b env_a env_b h_a h_b v_a v_b
     h_lookup_a h_lookup_b (h_vv d) (h_env d)
 
-/-! ## Closure-call alloc-chain invariant -/
-
-/-- The body of the closure-call foldl in `applyDirect`. -/
-def allocStep (acc : Heap × Env) (vp : Val × String) : Heap × Env :=
-  let (hh, ee) := acc
-  let (hh', idx) := hh.alloc vp.1
-  (hh', .cons vp.2 idx ee)
+/-! ## Closure-call alloc-chain invariant
+    (`allocStep` itself moved to `Tower.lean` so that `Eval.lean` can
+    use it directly in the `applyDirect` closure case, removing the
+    representational mismatch that blocked the framing proof.) -/
 
 /-- Cross-side alignment of `allocStep` chains: starting from
     accumulators with equal env and equal-length heap, after `foldl`-
