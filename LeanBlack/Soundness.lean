@@ -469,11 +469,54 @@ theorem eval_tower_safe
                   simp only [eval] at h_eval
                   -- closure is not .bool false, so falls to t-branch.
                   apply ih <;> assumption
+          | var x =>
+              cases k with
+              | zero => simp [eval] at h_eval
+              | succ j =>
+                  simp only [eval] at h_eval
+                  cases hx : env.lookup x with
+                  | none =>
+                      rw [hx] at h_eval; simp at h_eval
+                  | some idx =>
+                      rw [hx] at h_eval
+                      simp only at h_eval
+                      cases hp : T.heap[idx]? with
+                      | none =>
+                          rw [hp] at h_eval; simp at h_eval
+                      | some w =>
+                          rw [hp] at h_eval
+                          simp only at h_eval
+                          -- h_eval now matches on w: .bool false → e branch, else → t.
+                          -- For all cases, the branch eval is at T (no mutation).
+                          cases w with
+                          | bool b =>
+                              cases b with
+                              | true => apply ih <;> assumption
+                              | false => apply ih <;> assumption
+                          | num _ | nilV | sym _ | cons _ _ | closure _ _ _
+                          | prim _ | builtinBaseApply =>
+                              apply ih <;> assumption
+          | quote w =>
+              cases k with
+              | zero => simp [eval] at h_eval
+              | succ j =>
+                  simp only [eval] at h_eval
+                  by_cases hc : closedValB w = true
+                  · simp only [hc, if_true] at h_eval
+                    cases w with
+                    | bool b =>
+                        cases b with
+                        | true => apply ih <;> assumption
+                        | false => apply ih <;> assumption
+                    | num _ | nilV | sym _ | cons _ _ | closure _ _ _
+                    | prim _ | builtinBaseApply =>
+                        apply ih <;> assumption
+                  · simp only [hc, if_false] at h_eval
+                    simp at h_eval
           | _ =>
-              -- Other conditions (.var/.quote/+ all the recursive ones):
+              -- Recursive c (.ifte/.app/.primApp/.letE/.seq/.set/.em/.installPolicy):
               -- composition required (deferred — see DUMP.md
-              -- "Architectural blocker"). Subset of cases handled above
-              -- to validate the IH-based approach for atomic c.
+              -- "Architectural blocker").
               sorry
       | _ =>
           -- Remaining cases: app/primApp/letE (heap extended
