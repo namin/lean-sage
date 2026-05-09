@@ -4267,7 +4267,172 @@ private theorem shift_respect (cutoff : Nat) (padding : Heap) :
                     have h_app_b := ih_applyDirect ptable level fv avs T2 r T'
                       hresp_pt h_pol_2 h_cutoff_2 h_eval
                     simp [eval, h_f_b, h_a_b, h_app_b]
-        | set x e => sorry
+        | set x e =>
+            simp only [eval] at h_eval
+            cases he : eval k ptable level e env T with
+            | none => rw [he] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨v, T1⟩ := pr
+                rw [he] at h_eval
+                simp only at h_eval
+                have h_e_b := ih_eval ptable level e env T v T1
+                  hresp_pt hresp_init h_cutoff he
+                have h_mono_e := (heap_mono k).1 ptable level e env T v T1 he
+                have h_cutoff_1 : cutoff ≤ T1.heap.length :=
+                  Nat.le_trans h_cutoff h_mono_e
+                have h_pol_1 := pp_eval ptable level e env T v T1 hresp_pt hresp_init he
+                cases hl : env.lookup x with
+                | none => rw [hl] at h_eval; simp at h_eval
+                | some idx =>
+                    rw [hl] at h_eval
+                    simp only at h_eval
+                    -- isMetaMutation invariance under shift_env.
+                    have h_meta_mut_eq :
+                        isMetaMutation x (shift_env cutoff padding.length env)
+                          (shift_state cutoff padding T1) level
+                        = isMetaMutation x env T1 level := by
+                      unfold isMetaMutation
+                      rw [shift_env_lookup cutoff padding.length env x idx hl, hl]
+                      have h_st_env := shift_state_envAt? cutoff padding T1 level
+                      cases hxlv : T1.envAt? level with
+                      | none =>
+                          rw [hxlv] at h_st_env
+                          simp at h_st_env
+                          rw [h_st_env]
+                          simp
+                      | some lv_env =>
+                          rw [hxlv] at h_st_env
+                          simp only [Option.map_some] at h_st_env
+                          rw [h_st_env]
+                          simp only [Option.some_bind]
+                          cases hxlv_lookup : lv_env.lookup x with
+                          | none =>
+                              rw [shift_env_lookup_none cutoff padding.length lv_env x hxlv_lookup]
+                          | some i_l =>
+                              rw [shift_env_lookup cutoff padding.length lv_env x i_l hxlv_lookup]
+                              show (shift_idx cutoff padding.length idx
+                                    == shift_idx cutoff padding.length i_l) = (idx == i_l)
+                              by_cases hi : idx = i_l
+                              · subst hi; simp
+                              · have h_neq :
+                                    shift_idx cutoff padding.length idx
+                                    ≠ shift_idx cutoff padding.length i_l := by
+                                  intro h_eq
+                                  exact hi (shift_idx_injective cutoff padding.length _ _ h_eq)
+                                have h1 :
+                                    (shift_idx cutoff padding.length idx ==
+                                     shift_idx cutoff padding.length i_l) = false := by
+                                  simp [h_neq]
+                                have h2 : (idx == i_l) = false := by simp [hi]
+                                rw [h1, h2]
+                    show eval (k+1) ptable level (.set x e) _ _ = _
+                    simp only [eval, h_e_b]
+                    rw [shift_env_lookup cutoff padding.length env x idx hl]
+                    simp only [h_meta_mut_eq]
+                    -- isMetaMutation = true (else case is non-meta = none, contradicts h_eval).
+                    by_cases h_meta : isMetaMutation x env T1 level = true
+                    · -- isMetaMutation = true: prove via case analysis on heap[idx]? + policyAt? level.
+                      simp only [h_meta, ↓reduceIte]
+                      simp only [h_meta, ↓reduceIte] at h_eval
+                      -- Note: gate? = T.policyAt? level (FROZEN at .set entry, not T1).
+                      cases h_inner : T1.heap[idx]? with
+                      | none =>
+                          simp only [h_inner] at h_eval
+                          exact absurd h_eval (by simp)
+                      | some oldVal =>
+                          cases hgate : T.policyAt? level with
+                          | none =>
+                              simp only [h_inner, hgate] at h_eval
+                              exact absurd h_eval (by simp)
+                          | some gate =>
+                              simp only [h_inner, hgate] at h_eval
+                              -- B-side lookups.
+                              rw [shift_state_heap,
+                                  shift_heap_getElem? cutoff padding T1.heap idx h_cutoff_1,
+                                  h_inner]
+                              simp only [Option.map_some]
+                              rw [shift_state_policyAt?, hgate]
+                              simp only
+                              -- Gate verdict equality via PolicyRespectsShift.
+                              -- gate is from T (frozen), so use hresp_init not h_pol_1.
+                              have h_pol_gate := hresp_init level gate hgate
+                              have h_metaEnv_eq :
+                                  ((shift_state cutoff padding T1).envAt? level).getD .nil
+                                    = shift_env cutoff padding.length
+                                        ((T1.envAt? level).getD .nil) := by
+                                rw [shift_state_envAt?]
+                                cases T1.envAt? level with
+                                | none => rfl
+                                | some env' => rfl
+                              rw [h_metaEnv_eq]
+                              have h_gate_eq :
+                                  gate { target := x,
+                                         heap := shift_heap cutoff padding T1.heap,
+                                         env := shift_env cutoff padding.length env,
+                                         metaEnv := shift_env cutoff padding.length
+                                                      ((T1.envAt? level).getD .nil),
+                                         index := shift_idx cutoff padding.length idx,
+                                         level := level }
+                                       (shift_val cutoff padding.length oldVal)
+                                       (shift_val cutoff padding.length v)
+                                  = gate { target := x, heap := T1.heap, env := env,
+                                           metaEnv := (T1.envAt? level).getD .nil,
+                                           index := idx, level := level } oldVal v :=
+                                (h_pol_gate x idx env _ T1.heap level oldVal v h_cutoff_1).symm
+                              -- Split on gate verdict.
+                              by_cases h_admit : gate { target := x, heap := T1.heap, env := env,
+                                                        metaEnv := (T1.envAt? level).getD .nil,
+                                                        index := idx, level := level } oldVal v = true
+                              · simp only [h_admit, ↓reduceIte] at h_eval
+                                obtain ⟨h_r, h_T⟩ : r = .bool true ∧ T' = T1.updateHeap idx v := by
+                                  simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                                  exact ⟨h_eval.1.symm, h_eval.2.symm⟩
+                                subst h_r; subst h_T
+                                rw [show gate { target := x,
+                                                heap := shift_heap cutoff padding T1.heap,
+                                                env := shift_env cutoff padding.length env,
+                                                metaEnv := shift_env cutoff padding.length
+                                                              ((T1.envAt? level).getD .nil),
+                                                index := shift_idx cutoff padding.length idx,
+                                                level := level }
+                                              (shift_val cutoff padding.length oldVal)
+                                              (shift_val cutoff padding.length v) = true from by
+                                      rw [h_gate_eq]; exact h_admit]
+                                simp only [↓reduceIte, shift_val]
+                                rw [shift_state_updateHeap cutoff padding T1 idx v h_cutoff_1]
+                              · have h_reject : gate { target := x, heap := T1.heap, env := env,
+                                                       metaEnv := (T1.envAt? level).getD .nil,
+                                                       index := idx, level := level } oldVal v = false := by
+                                  cases h_b : gate { target := x, heap := T1.heap, env := env,
+                                                     metaEnv := (T1.envAt? level).getD .nil,
+                                                     index := idx, level := level } oldVal v with
+                                  | true => exact absurd h_b h_admit
+                                  | false => rfl
+                                rw [h_reject] at h_eval
+                                simp only [Bool.false_eq_true, ↓reduceIte] at h_eval
+                                obtain ⟨h_r, h_T⟩ : r = .bool false ∧ T' = T1 := by
+                                  simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                                  exact ⟨h_eval.1.symm, h_eval.2.symm⟩
+                                subst h_r
+                                have h_reject_b : gate { target := x,
+                                                          heap := shift_heap cutoff padding T1.heap,
+                                                          env := shift_env cutoff padding.length env,
+                                                          metaEnv := shift_env cutoff padding.length
+                                                                       ((T1.envAt? level).getD .nil),
+                                                          index := shift_idx cutoff padding.length idx,
+                                                          level := level }
+                                                        (shift_val cutoff padding.length oldVal)
+                                                        (shift_val cutoff padding.length v) = false := by
+                                  rw [h_gate_eq]; exact h_reject
+                                rw [h_reject_b]
+                                simp [shift_val, h_T]
+                    · -- isMetaMutation = false: returns none, contradicts h_eval = some.
+                      have h_meta_false : isMetaMutation x env T1 level = false := by
+                        cases h_b : isMetaMutation x env T1 level with
+                        | true => exact absurd h_b h_meta
+                        | false => rfl
+                      rw [h_meta_false] at h_eval
+                      simp at h_eval
       · -- evalList (k+1)
         intro ptable level exps env T rs T' hresp_pt hresp_init h_cutoff h_eval
         cases exps with
@@ -4668,12 +4833,110 @@ theorem applyDirect_heap_extend_weak
                      T'.heap (shift_state T.heap.length extras T').heap
     rw [show (shift_state T.heap.length extras T').heap = shift_heap T.heap.length extras T'.heap from rfl]
     exact valVis_weak_self_shift T.heap.length extras T'.heap h_heap_T' h_mono r h_vv_r_T'
-  · -- HeapValid T''.heap = HeapValid (shift_heap T'.heap).
-    -- shift_heap preserves HeapValid: each cell remains valid under the shifted heap
-    -- (cells in the original part have shifted indices into the shifted heap; padding
-    -- cells are atom-validated; structurally heaps are valid throughout).
-    -- For now, sorry — derivable from h_app_shifted's preservation chain.
-    sorry
+  · -- HeapValid T''.heap = HeapValid (shift_state T').heap.
+    -- Apply frame_tower to {T with heap := T.heap ++ extras} input. Since
+    -- h_state_eq says shift_state T = {T with heap := T.heap ++ extras},
+    -- the result of applyDirect on shift_state T is shift_state T'. Frame
+    -- preservation gives HeapValid on the output state.
+    have h_heap_b : HeapValid (T.heap ++ extras) := by
+      intro i v hi
+      by_cases h_lt : i < T.heap.length
+      · have h_eq' : (T.heap ++ extras)[i]? = T.heap[i]? :=
+          getElem?_prefix T.heap extras i h_lt
+        rw [h_eq'] at hi
+        exact ValValid.heap_extends v (h_heap i v hi) ⟨extras, rfl⟩
+      · have h_le : T.heap.length ≤ i := Nat.le_of_not_lt h_lt
+        have h_eq' : (T.heap ++ extras)[i]? = extras[i - T.heap.length]? :=
+          List.getElem?_append_right h_le
+        rw [h_eq'] at hi
+        have h_extras_v : ValValid v T.heap := by
+          have h_get_aux : ∀ (xs : List Val) (j : Nat) (vv : Val),
+              ListValValid xs T.heap → xs[j]? = some vv → ValValid vv T.heap := by
+            intro xs
+            induction xs with
+            | nil => intro j vv _ hj; simp at hj
+            | cons head tail ih =>
+                intro j vv hxs hj
+                cases h_j : j with
+                | zero =>
+                    rw [h_j] at hj
+                    simp at hj; subst hj; exact hxs.1
+                | succ j' =>
+                    rw [h_j] at hj
+                    simp at hj
+                    exact ih j' vv hxs.2 hj
+          exact h_get_aux extras (i - T.heap.length) v h_extras hi
+        exact ValValid.heap_extends v h_extras_v ⟨extras, rfl⟩
+    have h_op_b : ValValid op (T.heap ++ extras) := ValValid.heap_extends op h_op ⟨extras, rfl⟩
+    have h_operands_b : ListValValid operands (T.heap ++ extras) :=
+      ListValValid.heap_extends h_operands ⟨extras, rfl⟩
+    have h_levels_valid_b : ∀ n env,
+        ({T with heap := T.heap ++ extras} : TowerState).envAt? n = some env →
+        EnvValid env (T.heap ++ extras) := by
+      intro n env hn
+      have h_orig : T.envAt? n = some env := hn
+      exact EnvValid.heap_extends (_h_levels_valid n env h_orig) ⟨extras, rfl⟩
+    have h_levels_resp_b :
+        ∀ n p, ({T with heap := T.heap ++ extras} : TowerState).policyAt? n = some p →
+          PolicyRespectsBisimT p := _h_levels_resp
+    have h_vv_op_b : ValVis op op (T.heap ++ extras) (T.heap ++ extras) := by
+      intro d
+      have := ValVis_aux_self_extend d op (T.heap ++ extras) [] h_heap_b h_op_b
+      simpa using this
+    have h_lvv_args_b : ListValVis operands operands (T.heap ++ extras) (T.heap ++ extras) := by
+      have h_aux : ∀ (xs : List Val), ListValValid xs (T.heap ++ extras) →
+          ListValVis xs xs (T.heap ++ extras) (T.heap ++ extras) := by
+        intro xs hxs
+        induction xs with
+        | nil => trivial
+        | cons head tail ih =>
+            refine ⟨?_, ih hxs.2⟩
+            intro d
+            have := ValVis_aux_self_extend d head (T.heap ++ extras) [] h_heap_b hxs.1
+            simpa using this
+      exact h_aux operands h_operands_b
+    have h_bisim_b :
+        ∀ n env, ({T with heap := T.heap ++ extras} : TowerState).envAt? n = some env →
+          EnvVis env env (T.heap ++ extras) (T.heap ++ extras) := by
+      intro n env hn d x
+      cases hxe : env.lookup x with
+      | none => simp
+      | some i =>
+          simp only
+          have h_orig : T.envAt? n = some env := hn
+          have h_ev_b : EnvValid env (T.heap ++ extras) := h_levels_valid_b n env hn
+          have h_idx_lt : i < (T.heap ++ extras).length := h_ev_b x i hxe
+          cases hp : (T.heap ++ extras)[i]? with
+          | none =>
+              exfalso
+              rw [List.getElem?_eq_none_iff] at hp; omega
+          | some v =>
+              have h_vv : ValValid v (T.heap ++ extras) := h_heap_b _ _ hp
+              have := ValVis_aux_self_extend d v (T.heap ++ extras) [] h_heap_b h_vv
+              simpa using this
+    obtain ⟨_, _, _, fr_apd_b⟩ := frame_tower fuel
+    obtain ⟨r_b2, T_b'2, h_eval_b2, _, _, h_tc_b, _, _⟩ :=
+      fr_apd_b ptable level op op operands operands
+        ({T with heap := T.heap ++ extras} : TowerState)
+        ({T with heap := T.heap ++ extras} : TowerState)
+        (shift_val T.heap.length extras.length r)
+        (shift_state T.heap.length extras T')
+        _hresp_pt (fun p hp => _h_levels_resp level p hp)
+        rfl h_heap_b h_heap_b rfl
+        h_levels_valid_b h_levels_valid_b (fun _ => rfl) (fun _ => rfl)
+        h_levels_resp_b h_bisim_b
+        h_vv_op_b h_lvv_args_b h_op_b h_op_b h_operands_b h_operands_b
+        h_app_shifted
+    -- We need HeapValid (shift_state T').heap. The frame_tower output is
+    -- T_b'2 = shift_state T' (by the calls being symmetric and h_app_shifted
+    -- giving shift_state T' as output). h_tc_b.hv_b_out gives HeapValid T_b'2.heap.
+    have h_eq_T : T_b'2 = shift_state T.heap.length extras T' := by
+      have h_eval_match := h_app_shifted.symm.trans h_eval_b2
+      have : (shift_val T.heap.length extras.length r, shift_state T.heap.length extras T')
+           = (r_b2, T_b'2) := Option.some.inj h_eval_match
+      exact (Prod.mk.inj this).2.symm
+    rw [← h_eq_T]
+    exact h_tc_b.hv_b_out
   · -- T'.policyAt? n = T''.policyAt? n. T'' = shift_state T'. shift_state preserves policies.
     intro n
     show T'.policyAt? n = (shift_state T.heap.length extras T').policyAt? n
