@@ -240,6 +240,201 @@ def demo_constant_times : Option Val :=
     .seq [acceptAtLevel1, installConstantOneUp, .app [.var "*", .num 100, .num 200]]
 -- Expected: num(42)
 
+/-! ## Demo 8: Inspection wrappers (return op or args, not result)
+
+    A wrapper can return ANY Val, not just compute the op-on-args result.
+    This makes apply itself reflectable: instead of `(+ 1 2)` ⇒ 3, we can
+    have `(+ 1 2)` ⇒ `+` (the operator) or `(+ 1 2)` ⇒ `(1 2)` (the args).
+    Useful as a "first-class apply" for meta-programming. -/
+
+/-- A wrapper that just returns the operator. `(+ 1 2)` ⇒ prim "+". -/
+def returnOpWrapper : Expr :=
+  .lam ["op", "args"] (.var "op")
+
+def installReturnOpOneUp : Expr :=
+  .em <| .set "base-apply" returnOpWrapper
+
+def demo_return_op_plus : Option Val :=
+  evalProgram fuel demoTable <|
+    .seq [acceptAtLevel1, installReturnOpOneUp, .app [.var "+", .num 1, .num 2]]
+-- Expected: prim(+)
+
+def demo_return_op_num : Option Val :=
+  evalProgram fuel demoTable <|
+    .seq [acceptAtLevel1, installReturnOpOneUp, .app [.num 5, .num 7]]
+-- Expected: num(5)  -- since op is .num 5
+
+/-- A wrapper that returns the args list. `(+ 1 2)` ⇒ cons(1, cons(2, nilV)). -/
+def returnArgsWrapper : Expr :=
+  .lam ["op", "args"] (.var "args")
+
+def installReturnArgsOneUp : Expr :=
+  .em <| .set "base-apply" returnArgsWrapper
+
+def demo_return_args : Option Val :=
+  evalProgram fuel demoTable <|
+    .seq [acceptAtLevel1, installReturnArgsOneUp,
+          .primApp (.var "car") [.app [.var "+", .num 7, .num 11, .num 13]]]
+-- Expected: num(7)  -- args = (7 11 13); car returns 7
+
+def demo_return_args_cdr : Option Val :=
+  evalProgram fuel demoTable <|
+    .seq [acceptAtLevel1, installReturnArgsOneUp,
+          .primApp (.var "car")
+            [.primApp (.var "cdr") [.app [.var "+", .num 7, .num 11, .num 13]]]]
+-- Expected: num(11)  -- (cdr (7 11 13)) = (11 13); car of that = 11
+
+/-! ## Demo 9: Self-modifying wrapper
+
+    The wrapper, when called, modifies level 1's `base-apply` to a
+    different wrapper. So the FIRST call uses the original (= orig),
+    SUBSEQUENT calls use the new one. This is genuine self-modifying
+    code at the apply-rule level — only possible because closures'
+    bodies can do `(em (set! base-apply ...))`. -/
+
+/-- After 1st call, level 1's base-apply becomes "constant 999".
+    1st call: orig (= builtinBaseApply); subsequent: 999. -/
+def selfModWrapper : Expr :=
+  .lam ["op", "args"] <|
+    .seq [
+      -- Install a new wrapper at level 1.
+      .em (.set "base-apply" (.lam ["op", "args"] (.num 999))),
+      -- This call: still uses orig (captured at install time).
+      .primApp (.var "orig") [.var "op", .var "args"]
+    ]
+
+def installSelfModOneUp : Expr :=
+  .em <|
+    .letE "orig" (.var "base-apply") <|
+      .set "base-apply" selfModWrapper
+
+def demo_selfmod_first_call : Option Val :=
+  evalProgram fuel demoTable <|
+    .seq [acceptAtLevel1, installSelfModOneUp,
+          .app [.var "+", .num 1, .num 2]]
+-- Expected: num(3) — first call uses orig (= builtinBaseApply)
+
+def demo_selfmod_second_call : Option Val :=
+  evalProgram fuel demoTable <|
+    .seq [acceptAtLevel1, installSelfModOneUp,
+          .app [.var "+", .num 1, .num 2],   -- 1st call: 3 (discarded by seq)
+          .app [.var "+", .num 1, .num 2]]   -- 2nd call: 999
+-- Expected: num(999) — second call uses the swapped wrapper
+
+def demo_selfmod_third_call : Option Val :=
+  evalProgram fuel demoTable <|
+    .seq [acceptAtLevel1, installSelfModOneUp,
+          .app [.var "*", .num 100, .num 200], -- 1st call: 20000 (discarded)
+          .app [.var "+", .num 1, .num 2],    -- 2nd: 999
+          .app [.var "*", .num 7, .num 8]]    -- 3rd: 999 (still using new wrapper)
+-- Expected: num(999)
+
+/-! ## Demo 10: Conditional self-install ("lazy multn")
+
+    A wrapper that detects numeric ops and, on first encounter, installs
+    multn for future calls. Demonstrates *adaptive* meta-programming:
+    behavior changes based on the program's runtime usage pattern. -/
+
+/-- Lazy multn: handles num-op directly via multn fold AND installs a
+    proper multn wrapper at level 1 for future calls. -/
+def lazyMultnWrapper : Expr :=
+  .lam ["op", "args"] <|
+    .ifte (.primApp (.var "num?") [.var "op"])
+      (.seq [
+        -- Install proper multn at level 1 for future calls.
+        .em (.set "base-apply" multnWrapper),
+        -- Compute this call's result via multn fold.
+        .primApp (.var "mul-list")
+          [.primApp (.var "cons") [.var "op", .var "args"]]
+      ])
+      (.primApp (.var "orig") [.var "op", .var "args"])
+
+def installLazyMultnOneUp : Expr :=
+  .em <|
+    .letE "orig" (.var "base-apply") <|
+      .set "base-apply" lazyMultnWrapper
+
+def demo_lazy_first_num : Option Val :=
+  evalProgram fuel demoTable <|
+    .seq [acceptAtLevel1, installLazyMultnOneUp,
+          .app [.num 2, .num 3, .num 4]]
+-- Expected: num(24) — first num call triggers install; lazy-multn computes
+
+def demo_lazy_first_plus : Option Val :=
+  evalProgram fuel demoTable <|
+    .seq [acceptAtLevel1, installLazyMultnOneUp,
+          .app [.var "+", .num 5, .num 6]]
+-- Expected: num(11) — non-num delegates to orig; multn NOT installed
+
+def demo_lazy_then_num : Option Val :=
+  evalProgram fuel demoTable <|
+    .seq [acceptAtLevel1, installLazyMultnOneUp,
+          .app [.num 2, .num 3, .num 4],         -- triggers install: 24 (discarded)
+          .app [.num 5, .num 7]]                  -- now via proper multn: 35
+-- Expected: num(35)
+
+/-! ## Demo 11: Three-level governance — level-2's reject default protects
+
+    `materializeStep` defaults newly-materialized levels to `rejectAllPolicy`.
+    A user who has admitted level-1 mutations (via `(em (installPolicy 0))`)
+    might still be protected from level-2 mutations because level-2 was just
+    materialized with the safe default.
+
+    `(em (em (set! base-apply X)))` requires level 2's policy to admit.
+    Default-rejected → fails → level 1's apply rule preserved → level 0
+    arithmetic unaffected. -/
+
+/-- Try to install a constant-666 wrapper at level 2 (governs level 1's apply).
+    With default rejectAllPolicy at level 2, this fails. -/
+def installConstantTwoUp : Expr :=
+  .em (.em (.set "base-apply" (.lam ["op", "args"] (.num 666))))
+
+def demo_l2_reject_protects_l1 : Option Val :=
+  -- Permissive at L0 and L1 (so basic ops work + level-1 mutations admitted),
+  -- but L2 keeps its default rejectAllPolicy (no acceptAtLevel2).
+  evalProgram fuel demoTable <|
+    .seq [acceptAtLevel0, acceptAtLevel1,
+          installConstantTwoUp,           -- this fails (L2 reject), returns false
+          .em (.app [.var "+", .num 1, .num 2])]  -- L1 apply unchanged: orig + still works
+-- Expected: num(3) — the level-2 set! was refused, level 1's apply intact
+
+/-- Contrast: with acceptAtLevel2, the install succeeds and breaks level 1.
+    `(em (+ 1 2))` then routes through the constant-666 wrapper. -/
+def demo_l2_accept_breaks_l1 : Option Val :=
+  evalProgram fuel demoTable <|
+    .seq [acceptAtLevel0, acceptAtLevel1, acceptAtLevel2,
+          installConstantTwoUp,
+          .em (.app [.var "+", .num 1, .num 2])]
+-- Expected: num(666) — level 2 admitted; level 1's apply now const-666
+
+/-! ## Demo 12: Selective fail — kill non-num applications
+
+    Wrapper that allows numeric operator applications (multn-style) but
+    fails (returns none) for everything else. Demonstrates that wrappers
+    can REFUSE to dispatch — by evaluating to a non-Val (failure). -/
+
+def numOnlyWrapper : Expr :=
+  .lam ["op", "args"] <|
+    .ifte (.primApp (.var "num?") [.var "op"])
+      (.primApp (.var "mul-list")
+        [.primApp (.var "cons") [.var "op", .var "args"]])
+      -- For non-num: force failure. primApp on .num 0 invokes applyDirect
+      -- on .num 0, which returns none. Bypasses applyVia (no recursion).
+      (.primApp (.num 0) [.num 0])
+
+def installNumOnlyOneUp : Expr :=
+  .em <| .set "base-apply" numOnlyWrapper
+
+def demo_numonly_num : Option Val :=
+  evalProgram fuel demoTable <|
+    .seq [acceptAtLevel1, installNumOnlyOneUp, .app [.num 3, .num 4, .num 5]]
+-- Expected: num(60)
+
+def demo_numonly_plus_fails : Option Val :=
+  evalProgram fuel demoTable <|
+    .seq [acceptAtLevel1, installNumOnlyOneUp, .app [.var "+", .num 1, .num 2]]
+-- Expected: <none> — the wrapper forced a failure for + dispatch
+
 /-! ## Runner -/
 
 def shortRepr : Option Val → String
@@ -287,3 +482,27 @@ def main : IO Unit := do
   IO.println "Demo 7: Constant wrapper (42 for everything — bad-mod variant)"
   runOne "(+ 1 2) ⇒ 42"        "num(42)" demo_constant_plus
   runOne "(* 100 200) ⇒ 42"    "num(42)" demo_constant_times
+  IO.println ""
+  IO.println "Demo 8: Inspection wrappers (return op or args, not result)"
+  runOne "(+ 1 2) ⇒ op"        "prim(+)" demo_return_op_plus
+  runOne "(5 7) ⇒ op"          "num(5)"  demo_return_op_num
+  runOne "(car (+ 7 11 13)) ⇒ first arg" "num(7)"  demo_return_args
+  runOne "(car (cdr (+ 7 11 13))) ⇒ second arg" "num(11)" demo_return_args_cdr
+  IO.println ""
+  IO.println "Demo 9: Self-modifying wrapper (1st call orig; later: const 999)"
+  runOne "1st call: (+ 1 2)"   "num(3)"   demo_selfmod_first_call
+  runOne "2nd call: now 999"   "num(999)" demo_selfmod_second_call
+  runOne "3rd call: still 999" "num(999)" demo_selfmod_third_call
+  IO.println ""
+  IO.println "Demo 10: Lazy multn (auto-installs after first num op)"
+  runOne "first num call (2 3 4)"  "num(24)" demo_lazy_first_num
+  runOne "first non-num (+ 5 6)"   "num(11)" demo_lazy_first_plus
+  runOne "trigger then (5 7)"      "num(35)" demo_lazy_then_num
+  IO.println ""
+  IO.println "Demo 11: Three-level governance (L2 reject protects L1)"
+  runOne "L2 default reject saves L1" "num(3)"   demo_l2_reject_protects_l1
+  runOne "L2 accept breaks L1"        "num(666)" demo_l2_accept_breaks_l1
+  IO.println ""
+  IO.println "Demo 12: Selective fail (num-only wrapper)"
+  runOne "(2 3 4) num: ok"     "num(60)"  demo_numonly_num
+  runOne "(+ 1 2) non-num: fail" "<none>" demo_numonly_plus_fails

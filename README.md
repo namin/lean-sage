@@ -5,7 +5,7 @@ proved governance coherence) and [`lean-green`](../lean-green/) (Black-faithful
 heap+closure+`set!` interpreter with CakeML-style value bisimulation).
 
 **Status: 0 sorries.** ~13,571 LOC across 7 files. Smoke 8/8 passing.
-Demos 14/14 passing. All headline theorems proved.
+Demos 29/29 passing across 12 scenes. All headline theorems proved.
 
 ## What this is
 
@@ -52,34 +52,24 @@ Scene 4: governance
 ```
 $ lake exe demos
 Demo 1: Doubling wrapper (every num result × 2)
-  OK  (+ 1 2) ⇒ doubled: expected num(6), got num(6)
-  OK  (* 5 7) ⇒ doubled: expected num(70), got num(70)
-
-Demo 2: Identity wrapper (transparency)
-  OK  (+ 4 5) unchanged: expected num(9), got num(9)
-
+Demo 2: Identity wrapper (transparency check)
 Demo 3: Tripler (multn variant)
-  OK  (2 3 4) tripler: expected num(24), got num(24)
-  OK  (5 7) tripler: expected num(35), got num(35)
-  OK  (10) tripler: expected num(10), got num(10)
-
-Demo 4: Compose multn THEN doubling
-  OK  (2 3 4) multn→double: expected num(48), got num(48)
-  OK  (+ 1 2) multn→double: expected num(6), got num(6)
-
-Demo 5: Compose doubling THEN multn
-  OK  (2 3 4) double→multn: expected num(24), got num(24)
-  OK  (+ 1 2) double→multn: expected num(6), got num(6)
-
+Demo 4: Compose multn THEN doubling   ⇒ (2 3 4)=48, (+ 1 2)=6
+Demo 5: Compose doubling THEN multn   ⇒ (2 3 4)=24, (+ 1 2)=6
 Demo 6: Three-level meta-meta (install at L2, observe at L1)
-  OK  (em (* 2 3)) via L2-multn: expected num(6), got num(6)
-  OK  (em (3 4)) via L2-multn: expected num(12), got num(12)
-  OK  (3 4) at L0 unchanged: expected <none>, got <none>
-
-Demo 7: Constant wrapper
-  OK  (+ 1 2) ⇒ 42: expected num(42), got num(42)
-  OK  (* 100 200) ⇒ 42: expected num(42), got num(42)
+Demo 7: Constant wrapper (everything ⇒ 42)
+Demo 8: Inspection wrappers (apply returns op, or args, not result)
+        ⇒ `(+ 1 2)` returns prim(+); `(car (+ 7 11 13))` returns num(7).
+Demo 9: Self-modifying wrapper (1st call orig; future calls swap to const 999)
+        Wrapper body does `(em (set! base-apply ...))` to overwrite itself.
+Demo 10: Lazy multn (auto-installs proper multn after first num op)
+        Adaptive meta-programming: behavior shifts based on runtime usage.
+Demo 11: Three-level governance (L2 reject default protects L1)
+        `(em (em (set! base-apply X)))` refused under L2's default rejectAll.
+Demo 12: Selective fail (num-only wrapper kills non-num applications)
 ```
+
+All 29 sub-tests pass. Each demo highlights a different reflective capability:
 
 **Scene 3** is the headline new capability: `multn` is installed at level 2
 (via `(em (em ...))` from level 0), making level 1's `applyVia` route through
@@ -87,12 +77,29 @@ the wrapper. The cross-level cascade — a level-2 `set!` reshaping how level 1
 dispatches — is what lean-green's stage-1 `metaEnv-of-meta-is-self`
 simplification couldn't express.
 
-**Demo 4 vs Demo 5** illustrates that multiple installs **compose**: each new
-install's `orig` captures the prior `base-apply`, so the order of installs
-determines the dispatch chain.
+**Demo 4 vs Demo 5** — multiple installs **compose**: each new install's
+`orig` captures the prior `base-apply`, so the order of installs determines
+the dispatch chain.
 
-**Demo 6** does three-level reflection: a level-2 install changes level 1's
-behavior, observable from level 0 only via `(em ...)` to reach level 1.
+**Demo 8** — apply is **first-class**: a wrapper can return the operator or
+the arg list instead of computing a result. Useful as a `quote`-like
+inspection of dispatched calls.
+
+**Demo 9** — **self-modifying code at the apply-rule level**: the wrapper's
+body does `(em (set! base-apply ...))`, replacing itself. The first call uses
+the captured `orig`; subsequent calls go through the new wrapper. This is
+only expressible because closures' bodies can reach back into meta-mutation.
+
+**Demo 10** — **adaptive meta-programming**: a wrapper that detects a
+condition (here: numeric op) and, on first match, installs a more
+specialized wrapper. Subsequent calls go through the specialized one. Like
+JIT specialization but at the apply-rule level.
+
+**Demo 11** — **defense-in-depth from the safe default**: `materializeStep`
+defaults newly-materialized levels to `rejectAllPolicy`. Even if the user
+admits level-1 mutations, level-2 mutations are still refused unless
+explicitly accepted. Demonstrated by an attempted level-2 install of a
+constant-666 wrapper that's blocked by the default.
 
 ## Architecture (one paragraph)
 
@@ -124,7 +131,7 @@ consistent with lean-green (one heap, level-uniform allocation discipline).
 | `Soundness.lean` | 1990 | `TowerCE`, `SafeEvolution`. `TowerCE` helpers (`refl`/`trans`/`of_heap_eq`/`of_heap_extends`/`lift_source`/`weaken_h_ref`). `Expr.IsAtomic` and `eval_atomic_T_unchanged`. `HeapValid_alloc_one`, `EnvValid_cons_alloc`, self-invariant preservation lemmas. `safeEvolution_necessary` (concrete counterexample). `all_tower_safe` (the 4-way mutual safety theorem). `eval_tower_safe` (wrapper). |
 | `Policies.lean` | 611 | Tower-aware `callAsBaseApply`, per-level `CE`/`CE_weak`, `BlackPolicy.SoundForCE`/`_weak`, `numGuardPolicy`/`multnExactPolicy` definitions + shape lemmas, `verifiedTable`. `OrigBoundIn`/`NumQBoundIn`/`InstallFacts`/`RuntimeWF` (tower-aware install-protocol structures). `multnExactPolicy_implies_InstallFacts` (bridge lemma). `multn_closure_body_unfolds` (closure-body trace). `multnExact_CE_num_case_vacuous` (vacuous numerical case). `multnExact_CE_nonnum_case` (substantive non-numerical case via `applyDirect_heap_extend_weak`). `multnExact_soundForCE_first_install_tower` (the headline). |
 | `Smoke.lean` | 159 | 4 scenes, 8 tests. |
-| `Demos.lean` | 282 | 7 demos, 14 tests. Doubling, identity, tripler, install-composition (multn-then-double, double-then-multn), three-level meta-meta, constant wrapper. |
+| `Demos.lean` | 508 | 12 demos, 29 tests. Doubling, identity, tripler, install-composition (multn-then-double, double-then-multn), three-level meta-meta, constant wrapper, inspection (return op/args), self-modifying wrapper, lazy multn (adaptive), three-level governance, selective fail. |
 | `DESIGN.md` | — | Architectural rationale, decisions, scope. |
 
 ## Build
