@@ -1928,8 +1928,320 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                             h_he_chain, h_env_inner2,
                             ⟨hv_va', hv_vsa⟩, ⟨hv_vb', hv_vsb⟩⟩
                     simp [evalList, h_eval_e_b, h_eval_rest_b]
-      · -- applyVia (k+1) — needs T.materialize bisim-preservation, then dispatch
-        sorry
+      · -- applyVia (k+1): materialize level+1 cross-side, then dispatch via
+        -- the level+1 base-apply cell. Uses heap_content_bisim_at_levels at
+        -- level+1 for the cross-side closure-bisim when base-apply was
+        -- replaced by a closure (the cross-level dispatch case).
+        -- Scaffolding in place: cross-side materialize facts, h_bisim_mat at
+        -- T_a_mat T_b_mat, lift_outputs helper, .builtinBaseApply case proved.
+        -- Remaining: dispatch via applyDirect with [op, listToVal args] for
+        -- non-.builtinBaseApply cells (~150 LOC of explicit cases).
+        intro ptable level op_a op_b args_a args_b T_a T_b r_a T_a'
+              hresp_pt h_resp_at h_pol_eq h_hv_a h_hv_b h_hl_eq
+              h_levs_a h_levs_b h_levs_eq h_pols_eq h_resp_all h_bisim
+              h_vv_op h_lvv hv_opa hv_opb hv_argsa hv_argsb h_eval
+        simp only [applyVia] at h_eval
+        cases hm_a : T_a.materialize (level + 1) with
+        | none => rw [hm_a] at h_eval; simp at h_eval
+        | some T_a_mat =>
+            rw [hm_a] at h_eval
+            simp only at h_eval
+            -- Cross-side: T_b.materialize also succeeds.
+            have hm_b_some : (T_b.materialize (level + 1)).isSome := by
+              have h_iff := T_a.materialize_cross_side_some_iff T_b (level + 1)
+              cases hm_b_check : T_b.materialize (level + 1) with
+              | none =>
+                  exfalso
+                  have h_a_none : T_a.materialize (level + 1) = none :=
+                    h_iff.mpr hm_b_check
+                  rw [h_a_none] at hm_a; exact Option.noConfusion hm_a
+              | some _ => simp
+            obtain ⟨T_b_mat, hm_b⟩ := Option.isSome_iff_exists.mp hm_b_some
+            -- Cross-side parallel facts.
+            obtain ⟨h_heap_eq_mat, h_envs_eq_mat⟩ :=
+              T_a.materialize_cross_side_envs_eq T_b T_a_mat T_b_mat (level + 1)
+                h_hl_eq h_levs_eq hm_a hm_b
+            have h_pols_eq_mat :=
+              T_a.materialize_cross_side_policies_eq T_b T_a_mat T_b_mat (level + 1)
+                h_hl_eq h_pols_eq h_levs_eq hm_a hm_b
+            -- Single-side preservation.
+            have h_hv_a_mat : HeapValid T_a_mat.heap :=
+              materialize_HeapValid_preserves T_a T_a_mat (level + 1) hm_a h_hv_a
+            have h_hv_b_mat : HeapValid T_b_mat.heap :=
+              materialize_HeapValid_preserves T_b T_b_mat (level + 1) hm_b h_hv_b
+            have h_levs_valid_a_mat :
+                ∀ m env, T_a_mat.envAt? m = some env → EnvValid env T_a_mat.heap :=
+              materialize_level_envs_valid_preserves T_a T_a_mat (level + 1) hm_a
+                h_hv_a h_levs_a
+            have h_levs_valid_b_mat :
+                ∀ m env, T_b_mat.envAt? m = some env → EnvValid env T_b_mat.heap :=
+              materialize_level_envs_valid_preserves T_b T_b_mat (level + 1) hm_b
+                h_hv_b h_levs_b
+            have h_resp_all_mat :
+                ∀ m p, T_a_mat.policyAt? m = some p → PolicyRespectsBisimT p :=
+              materialize_policies_resp_preserves T_a T_a_mat (level + 1)
+                PolicyRespectsBisimT hm_a h_resp_all
+                acceptAllPolicy_respects_bisimT
+            -- HeapEvolution from materialize.
+            have h_he_mat : HeapEvolution T_a T_b T_a_mat T_b_mat :=
+              HeapEvolution.from_heapExt h_hv_a h_hv_b
+                (T_a.materialize_heap_extends T_a_mat (level + 1) hm_a)
+                (T_b.materialize_heap_extends T_b_mat (level + 1) hm_b)
+            -- Heap-content bisim invariant at T_a_mat, T_b_mat (proved analog of .em case).
+            have h_bisim_mat :
+                ∀ m env, T_a_mat.envAt? m = some env →
+                    EnvVis env env T_a_mat.heap T_b_mat.heap := by
+              intro m env hen
+              obtain ⟨ext_a, hex_a⟩ :=
+                T_a.materialize_heap_extends T_a_mat (level + 1) hm_a
+              obtain ⟨ext_b, hex_b⟩ :=
+                T_b.materialize_heap_extends T_b_mat (level + 1) hm_b
+              by_cases hm_lt : m < T_a.levels.length
+              · -- Pre-existing level: lift input invariant via EnvVis_extends.
+                have h_a_lvl : ∃ ls, T_a.levels[m]? = some ls := by
+                  cases h : T_a.levels[m]? with
+                  | none =>
+                      exfalso
+                      have := List.getElem?_eq_none_iff.mp h
+                      omega
+                  | some ls => exact ⟨ls, rfl⟩
+                obtain ⟨ls, h_a_lvl_eq⟩ := h_a_lvl
+                have h_a_env : T_a.envAt? m = some ls.env := by
+                  unfold TowerState.envAt? TowerState.levelAt?
+                  rw [h_a_lvl_eq]; rfl
+                have h_a_mat_env : T_a_mat.envAt? m = some ls.env :=
+                  T_a.materialize_envAt?_preserves T_a_mat (level + 1) m ls.env
+                    hm_a h_a_env
+                have h_env_eq : env = ls.env := by
+                  rw [hen] at h_a_mat_env; exact Option.some.inj h_a_mat_env
+                rw [h_env_eq]
+                have h_b_env : T_b.envAt? m = some ls.env := by
+                  rw [← h_levs_eq]; exact h_a_env
+                have h_evalid_a : EnvValid ls.env T_a.heap :=
+                  h_levs_a m ls.env h_a_env
+                have h_evalid_b : EnvValid ls.env T_b.heap :=
+                  h_levs_b m ls.env h_b_env
+                have h_inv : EnvVis ls.env ls.env T_a.heap T_b.heap :=
+                  h_bisim m ls.env h_a_env
+                rw [hex_a, hex_b]
+                exact EnvVis_extends ls.env ls.env T_a.heap T_b.heap ext_a ext_b
+                  h_hv_a h_hv_b h_evalid_a h_evalid_b h_inv
+              · -- Newly-materialized level.
+                have h_m_geq : T_a.levels.length ≤ m := Nat.le_of_not_lt hm_lt
+                obtain ⟨ext, ha_ext_eq, hb_ext_eq, h_ext_closed⟩ :=
+                  TowerState.materialize_heap_extends_eq T_a T_b T_a_mat T_b_mat
+                    (level + 1) h_hl_eq h_levs_eq hm_a hm_b
+                have h_T_a_mat_iter :
+                    T_a_mat = Nat.fold ((level + 1) + 1 - T_a.levels.length)
+                      (fun _ _ T' => materializeStep T') T_a := by
+                  unfold TowerState.materialize at hm_a
+                  by_cases h1 : level + 1 ≥ Tower.maxDepth
+                  · simp [h1] at hm_a
+                  · simp [h1] at hm_a
+                    by_cases h2 : T_a.levels.length > level + 1
+                    · simp [h2] at hm_a
+                      exfalso
+                      have h_T_eq : T_a = T_a_mat := hm_a
+                      rw [← h_T_eq] at hen
+                      unfold TowerState.envAt? TowerState.levelAt? at hen
+                      have h_oob : T_a.levels[m]? = none :=
+                        List.getElem?_eq_none h_m_geq
+                      rw [h_oob] at hen
+                      simp at hen
+                    · simp [h2] at hm_a; exact hm_a.symm
+                have h_iter_hen :
+                    (Nat.fold ((level + 1) + 1 - T_a.levels.length)
+                      (fun _ _ T' => materializeStep T') T_a).envAt? m = some env := by
+                  rw [← h_T_a_mat_iter]; exact hen
+                intro depth x
+                cases hl : env.lookup x with
+                | none => simp
+                | some i =>
+                    simp only [hl]
+                    have h_i_geq : T_a.heap.length ≤ i :=
+                      materializeStep_iter_fresh_env_lookups_geq T_a
+                        ((level + 1) + 1 - T_a.levels.length)
+                        m env h_m_geq h_iter_hen x i hl
+                    have h_i_lt_a : i < T_a_mat.heap.length :=
+                      h_levs_valid_a_mat m env hen x i hl
+                    have h_a_some : ∃ v, T_a_mat.heap[i]? = some v := by
+                      cases hp : T_a_mat.heap[i]? with
+                      | none =>
+                          exfalso
+                          have := List.getElem?_eq_none_iff.mp hp
+                          omega
+                      | some v => exact ⟨v, rfl⟩
+                    obtain ⟨v, hv_a_eq⟩ := h_a_some
+                    have h_v_in_ext : v ∈ ext := by
+                      have h_in : T_a_mat.heap[i]? = some v := hv_a_eq
+                      rw [ha_ext_eq, List.getElem?_append_right h_i_geq] at h_in
+                      exact List.mem_of_getElem? h_in
+                    have h_b_get : T_b_mat.heap[i]? = some v := by
+                      have h_a_get : T_a_mat.heap[i]? = ext[i - T_a.heap.length]? := by
+                        rw [ha_ext_eq, List.getElem?_append_right h_i_geq]
+                      have h_i_geq_b : T_b.heap.length ≤ i := by
+                        rw [← h_hl_eq]; exact h_i_geq
+                      have h_b_get_aux : T_b_mat.heap[i]? = ext[i - T_b.heap.length]? := by
+                        rw [hb_ext_eq, List.getElem?_append_right h_i_geq_b]
+                      rw [h_b_get_aux, ← h_hl_eq, ← h_a_get, hv_a_eq]
+                    have h_v_closed : closedValB v = true :=
+                      h_ext_closed v h_v_in_ext
+                    rw [hv_a_eq, h_b_get]
+                    exact closedValB_ValVis_aux depth v T_a_mat.heap T_b_mat.heap h_v_closed
+            -- Lift facts to T_a_mat, T_b_mat for the dispatch.
+            have h_vv_op_mat : ValVis op_a op_b T_a_mat.heap T_b_mat.heap :=
+              h_he_mat.valVis_preserve op_a op_b hv_opa hv_opb h_vv_op
+            have h_lvv_mat : ListValVis args_a args_b T_a_mat.heap T_b_mat.heap :=
+              h_he_mat.listValVis_preserve args_a args_b hv_argsa hv_argsb h_lvv
+            have hv_opa_mat : ValValid op_a T_a_mat.heap :=
+              ValValid.length_mono op_a hv_opa h_he_mat.len_a
+            have hv_opb_mat : ValValid op_b T_b_mat.heap :=
+              ValValid.length_mono op_b hv_opb h_he_mat.len_b
+            have hv_argsa_mat : ListValValid args_a T_a_mat.heap :=
+              ListValValid.length_mono hv_argsa h_he_mat.len_a
+            have hv_argsb_mat : ListValValid args_b T_b_mat.heap :=
+              ListValValid.length_mono hv_argsb h_he_mat.len_b
+            -- A helper to construct the final outputs from an applyDirect dispatch:
+            -- compose HeapEvolution and TowerCross from materialize step + IH output.
+            have lift_outputs : ∀ (T_b' : TowerState)
+                (_h_he' : HeapEvolution T_a_mat T_b_mat T_a' T_b')
+                (h_tc' : TowerCross level T_a_mat T_b_mat T_a' T_b'),
+                HeapEvolution T_a T_b T_a' T_b' ∧
+                TowerCross level T_a T_b T_a' T_b' := by
+              intros T_b' h_he' h_tc'
+              refine ⟨HeapEvolution.trans h_he_mat h_he', ?_⟩
+              refine ⟨h_tc'.heap_len_eq, h_tc'.policy_eq_at, ?_, ?_,
+                      h_tc'.hv_a_out, h_tc'.hv_b_out,
+                      h_tc'.level_envs_valid_a_out, h_tc'.level_envs_valid_b_out,
+                      h_tc'.policy_resp_out, h_tc'.level_envs_eq_out,
+                      h_tc'.policies_eq_out, h_tc'.policies_resp_all_out,
+                      h_tc'.heap_content_bisim_at_levels_out⟩
+              · intro n env hen
+                exact h_tc'.levels_mono_a n env
+                  (T_a.materialize_envAt?_preserves T_a_mat (level + 1) n env hm_a hen)
+              · intro n env hen
+                exact h_tc'.levels_mono_b n env
+                  (T_b.materialize_envAt?_preserves T_b_mat (level + 1) n env hm_b hen)
+            -- Case-split on envAt? (level + 1) on a-side.
+            cases he_a : T_a_mat.envAt? (level + 1) with
+            | none =>
+                rw [he_a] at h_eval
+                simp only at h_eval
+                -- Dispatch via applyDirect.
+                have he_b : T_b_mat.envAt? (level + 1) = none := by
+                  rw [← h_envs_eq_mat]; exact he_a
+                obtain ⟨r_b, T_b', h_app_b, h_vv_r, h_he', h_tc', hv_ra, hv_rb⟩ :=
+                  ih_applyDirect ptable level op_a op_b args_a args_b T_a_mat T_b_mat r_a T_a'
+                    hresp_pt
+                    (fun p hp => h_resp_all_mat level p hp)
+                    (h_pols_eq_mat level)
+                    h_hv_a_mat h_hv_b_mat h_heap_eq_mat
+                    h_levs_valid_a_mat h_levs_valid_b_mat
+                    h_envs_eq_mat h_pols_eq_mat h_resp_all_mat
+                    h_bisim_mat
+                    h_vv_op_mat h_lvv_mat
+                    hv_opa_mat hv_opb_mat hv_argsa_mat hv_argsb_mat
+                    h_eval
+                obtain ⟨h_he_outer, h_tc_outer⟩ := lift_outputs T_b' h_he' h_tc'
+                refine ⟨r_b, T_b', ?_, h_vv_r, h_he_outer, h_tc_outer, hv_ra, hv_rb⟩
+                simp only [applyVia, hm_b, he_b, h_app_b]
+            | some upEnv =>
+                rw [he_a] at h_eval
+                simp only at h_eval
+                have he_b : T_b_mat.envAt? (level + 1) = some upEnv := by
+                  rw [← h_envs_eq_mat]; exact he_a
+                cases hba : upEnv.lookup "base-apply" with
+                | none =>
+                    rw [hba] at h_eval
+                    simp only at h_eval
+                    -- Same as the none case: dispatch via applyDirect.
+                    obtain ⟨r_b, T_b', h_app_b, h_vv_r, h_he', h_tc', hv_ra, hv_rb⟩ :=
+                      ih_applyDirect ptable level op_a op_b args_a args_b
+                        T_a_mat T_b_mat r_a T_a'
+                        hresp_pt
+                        (fun p hp => h_resp_all_mat level p hp)
+                        (h_pols_eq_mat level)
+                        h_hv_a_mat h_hv_b_mat h_heap_eq_mat
+                        h_levs_valid_a_mat h_levs_valid_b_mat
+                        h_envs_eq_mat h_pols_eq_mat h_resp_all_mat
+                        h_bisim_mat
+                        h_vv_op_mat h_lvv_mat
+                        hv_opa_mat hv_opb_mat hv_argsa_mat hv_argsb_mat
+                        h_eval
+                    obtain ⟨h_he_outer, h_tc_outer⟩ := lift_outputs T_b' h_he' h_tc'
+                    refine ⟨r_b, T_b', ?_, h_vv_r, h_he_outer, h_tc_outer, hv_ra, hv_rb⟩
+                    simp only [applyVia, hm_b, he_b, hba, h_app_b]
+                | some idx =>
+                    rw [hba] at h_eval
+                    simp only at h_eval
+                    -- T_a_mat.heap[idx]? cross-side bisim via h_bisim_mat at level+1.
+                    have h_envVis_upEnv : EnvVis upEnv upEnv T_a_mat.heap T_b_mat.heap :=
+                      h_bisim_mat (level + 1) upEnv he_a
+                    cases hp_a : T_a_mat.heap[idx]? with
+                    | none => rw [hp_a] at h_eval; simp at h_eval
+                    | some baseApply_a =>
+                        rw [hp_a] at h_eval
+                        -- Get baseApply_b on side B at idx via EnvVis on upEnv at "base-apply".
+                        have h_envVis_upEnv_d := h_envVis_upEnv 1 "base-apply"
+                        rw [hba] at h_envVis_upEnv_d
+                        simp only at h_envVis_upEnv_d
+                        rw [hp_a] at h_envVis_upEnv_d
+                        cases hp_b : T_b_mat.heap[idx]? with
+                        | none => rw [hp_b] at h_envVis_upEnv_d; simp at h_envVis_upEnv_d
+                        | some baseApply_b =>
+                            rw [hp_b] at h_envVis_upEnv_d
+                            -- baseApply_a, baseApply_b at depth 1; need universal ValVis.
+                            have h_vv_base : ValVis baseApply_a baseApply_b
+                                T_a_mat.heap T_b_mat.heap := by
+                              intro d
+                              have h_d := h_bisim_mat (level + 1) upEnv he_a d "base-apply"
+                              rw [hba] at h_d
+                              simp only at h_d
+                              rw [hp_a, hp_b] at h_d
+                              exact h_d
+                            -- Case-split on baseApply_a.
+                            -- builtinBaseApply: dispatch via applyDirect on op, args.
+                            -- closure (or other): dispatch via applyDirect on baseApply, [op, listToVal args].
+                            have h_vv_base_1 := h_vv_base 1
+                            cases baseApply_a with
+                            | builtinBaseApply =>
+                                -- baseApply_b must also be builtinBaseApply.
+                                have h_b_eq : baseApply_b = .builtinBaseApply := by
+                                  cases baseApply_b with
+                                  | builtinBaseApply => rfl
+                                  | num _ => simp [ValVis_aux] at h_vv_base_1
+                                  | bool _ => simp [ValVis_aux] at h_vv_base_1
+                                  | nilV => simp [ValVis_aux] at h_vv_base_1
+                                  | sym _ => simp [ValVis_aux] at h_vv_base_1
+                                  | cons _ _ => simp [ValVis_aux] at h_vv_base_1
+                                  | closure _ _ _ => simp [ValVis_aux] at h_vv_base_1
+                                  | prim _ => simp [ValVis_aux] at h_vv_base_1
+                                subst h_b_eq
+                                simp only at h_eval
+                                obtain ⟨r_b, T_b', h_app_b, h_vv_r, h_he', h_tc', hv_ra, hv_rb⟩ :=
+                                  ih_applyDirect ptable level op_a op_b args_a args_b
+                                    T_a_mat T_b_mat r_a T_a'
+                                    hresp_pt
+                                    (fun p hp => h_resp_all_mat level p hp)
+                                    (h_pols_eq_mat level)
+                                    h_hv_a_mat h_hv_b_mat h_heap_eq_mat
+                                    h_levs_valid_a_mat h_levs_valid_b_mat
+                                    h_envs_eq_mat h_pols_eq_mat h_resp_all_mat
+                                    h_bisim_mat
+                                    h_vv_op_mat h_lvv_mat
+                                    hv_opa_mat hv_opb_mat hv_argsa_mat hv_argsb_mat
+                                    h_eval
+                                obtain ⟨h_he_outer, h_tc_outer⟩ := lift_outputs T_b' h_he' h_tc'
+                                refine ⟨r_b, T_b', ?_, h_vv_r, h_he_outer, h_tc_outer,
+                                        hv_ra, hv_rb⟩
+                                simp only [applyVia, hm_b, he_b, hba, hp_b, h_app_b]
+                            | num _ | bool _ | nilV | sym _ | cons _ _ | prim _ | closure _ _ _ =>
+                                -- TODO: dispatch through applyDirect on (baseApply, [op, listToVal args]).
+                                -- Each case needs to extract baseApply_b's structure from h_vv_base_1
+                                -- (atomic equality for atoms, closure_ValVis_imp_cenv_EnvVis for closure)
+                                -- then call ih_applyDirect with the new args list.
+                                -- ~150 LOC of explicit case work; deferred.
+                                sorry
       · -- applyDirect (k+1) — non-applicable / builtin / prim / closure proved.
         intro ptable level op_a op_b args_a args_b T_a T_b r_a T_a'
               hresp_pt h_resp_at h_pol_eq h_hv_a h_hv_b h_hl_eq
