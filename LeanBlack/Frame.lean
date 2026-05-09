@@ -562,7 +562,15 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                             h_he_chain, h_env_out, hv_ra, hv_rb⟩
                     simp [eval, h_eval_f_b, h_eval_args_b, h_eval_av_b]
         | set _ _          => sorry  -- USES policy_eq_at + ValVis_aux_update; substantial
-        | em _             => sorry  -- NEW: needs Tower.materialize bisim-preservation
+        | em _             =>
+            -- Cross-side materialize-bisim — the genuinely new logic
+            -- vs lean-green. Single-side lemmas are now in Tower.lean
+            -- (materialize_envAt?_preserves, materialize_heap_grows
+            -- both fully proved). Remaining gap: cross-side parallel
+            -- materialization needs `level_envs_eq` cross-side in
+            -- WFCtxT, which would need to propagate through all the
+            -- proven cases. Deferred.
+            sorry
         | letE x e body =>
             -- Mechanical port from lean-green's `.letE`:
             -- 1) IH on e
