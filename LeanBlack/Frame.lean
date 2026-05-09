@@ -88,9 +88,35 @@ theorem acceptAllPolicy_respects_bisimT :
     inductions over Nat.fold + appeal to `freshLevelEnv`'s
     deterministic structure. -/
 
-/-- Materialize preserves heap validity (each `freshLevelEnv` step
-    only appends `.prim`/`.builtinBaseApply` cells, all trivially
-    valid since they don't reference any heap idxes). -/
+/-- HeapValid is preserved when appending closed values (atoms have
+    `ValValid v _` = True regardless of heap; pre-existing cells get
+    extended via heap_extends). PROVED. -/
+private theorem HeapValid_append_closed (h : Heap) (extras : Heap)
+    (h_hv : HeapValid h)
+    (h_extras : ∀ v ∈ extras, closedValB v = true) :
+    HeapValid (h ++ extras) := by
+  intro i v hp
+  by_cases hi : i < h.length
+  · have heq : (h ++ extras)[i]? = h[i]? := List.getElem?_append_left hi
+    rw [heq] at hp
+    exact ValValid.heap_extends v (h_hv i v hp) ⟨extras, rfl⟩
+  · have hi' : h.length ≤ i := Nat.not_lt.mp hi
+    have heq : (h ++ extras)[i]? = extras[i - h.length]? :=
+      List.getElem?_append_right hi'
+    rw [heq] at hp
+    have h_in : v ∈ extras := List.getElem?_mem hp
+    exact closedValB_ValValid v (h ++ extras) (h_extras v h_in)
+
+/-- Materialize preserves heap validity. The proof chain (sorry'd
+    as a single top-level claim until the supporting `primPairs_atoms`
+    proof clears Lean's irreducibility-vs-disjunction handling):
+    1. `HeapValid_append_closed` (proved above): appending closed cells
+       preserves HeapValid.
+    2. `primPairs_atoms` (TBD): every primPairs entry is `.prim _` (closed).
+    3. `buildBindings_extras_closed` (TBD): foldl extras inherit closedness.
+    4. `freshLevelEnv_extras_closed` (TBD): + `.builtinBaseApply` is closed.
+    5. `materializeStep_HeapValid_preserves` (TBD): single-step preservation.
+    6. `materialize_HeapValid_preserves`: iterate via Nat.fold induction. -/
 theorem materialize_HeapValid_preserves
     (T T' : TowerState) (n : Nat)
     (_h_mat : T.materialize n = some T')
