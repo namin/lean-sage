@@ -63,27 +63,37 @@ structure TowerState where
     finite prefix. -/
 def Tower.maxDepth : Nat := 16
 
+/-- The standard primitive bindings allocated by `freshLevelEnv`.
+    Marked `@[irreducible]` so Lean's `whnf` doesn't try to normalize
+    the 13-element list during proofs about `freshLevelEnv` (which would
+    otherwise time out). The proofs use the foldl helpers parametrically
+    in `pairs`, so they don't need `primPairs`'s explicit content. -/
+@[irreducible]
+def primPairs : List (String × Val) :=
+  [ ("+",        .prim "+")
+  , ("-",        .prim "-")
+  , ("*",        .prim "*")
+  , ("=",        .prim "=")
+  , ("num?",     .prim "num?")
+  , ("bool?",    .prim "bool?")
+  , ("closure?", .prim "closure?")
+  , ("prim?",    .prim "prim?")
+  , ("cons",     .prim "cons")
+  , ("car",      .prim "car")
+  , ("cdr",      .prim "cdr")
+  , ("null?",    .prim "null?")
+  , ("mul-list", .prim "mul-list")
+  ]
+
+theorem primPairs_length : primPairs.length = 13 := by
+  unfold primPairs; rfl
+
 /-- Allocate a fresh "level" worth of cells in the heap: one cell
     per standard primitive plus a `base-apply` cell. Returns the
     extended heap and the env for the new level. -/
 def freshLevelEnv (h : Heap) : Heap × Env :=
-  let pairs : List (String × Val) :=
-    [ ("+",        .prim "+")
-    , ("-",        .prim "-")
-    , ("*",        .prim "*")
-    , ("=",        .prim "=")
-    , ("num?",     .prim "num?")
-    , ("bool?",    .prim "bool?")
-    , ("closure?", .prim "closure?")
-    , ("prim?",    .prim "prim?")
-    , ("cons",     .prim "cons")
-    , ("car",      .prim "car")
-    , ("cdr",      .prim "cdr")
-    , ("null?",    .prim "null?")
-    , ("mul-list", .prim "mul-list")
-    ]
   let (h', envPrims) :=
-    pairs.foldl
+    primPairs.foldl
       (fun (acc : Heap × Env) (kv : String × Val) =>
         let (hh, ee) := acc
         let (hh', idx) := hh.alloc kv.2
@@ -369,80 +379,67 @@ theorem TowerState.materialize_heap_grows
     env+heap contribution depends only on `h.length` (not on `h`'s
     contents). -/
 
-/-- Foldl helper: each iteration appends exactly one cell to the heap. -/
+/-- Foldl helper: each iteration appends exactly one cell to the heap.
+    Stated using `.fst`/`.snd` projections (matching what `simp` produces
+    when reducing the destructuring `let`s in `freshLevelEnv`). -/
 private theorem buildBindings_foldl_length (pairs : List (String × Val)) (h : Heap) (env : Env) :
     (pairs.foldl
       (fun (acc : Heap × Env) (kv : String × Val) =>
-        let (hh, ee) := acc
-        let (hh', idx) := hh.alloc kv.2
-        (hh', .cons kv.1 idx ee)) (h, env)).1.length = h.length + pairs.length := by
+        (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
+      (h, env)).1.length = h.length + pairs.length := by
   induction pairs generalizing h env with
   | nil => simp [List.foldl]
   | cons p rest ih =>
       simp only [List.foldl, List.length_cons]
-      have step : (h.alloc p.2).1.length = h.length + 1 := by
-        simp [Heap.alloc, List.length_append]
       rw [ih]
-      simp [step]
+      simp [List.length_append]
       omega
 
 /-- The buildBindings foldl produces the same env from accumulators
-    with equal heap-length (the env's idxes are heap-length-derived only). -/
+    with equal heap-length (the env's idxes are heap-length-derived only).
+    Stated using projection form to match simp-reduced freshLevelEnv. -/
 private theorem buildBindings_foldl_env_eq_of_len_eq (pairs : List (String × Val))
     (h_a h_b : Heap) (env : Env) (h_len : h_a.length = h_b.length) :
     (pairs.foldl
       (fun (acc : Heap × Env) (kv : String × Val) =>
-        let (hh, ee) := acc
-        let (hh', idx) := hh.alloc kv.2
-        (hh', .cons kv.1 idx ee)) (h_a, env)).2 =
+        (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
+      (h_a, env)).2 =
     (pairs.foldl
       (fun (acc : Heap × Env) (kv : String × Val) =>
-        let (hh, ee) := acc
-        let (hh', idx) := hh.alloc kv.2
-        (hh', .cons kv.1 idx ee)) (h_b, env)).2 := by
+        (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
+      (h_b, env)).2 := by
   induction pairs generalizing h_a h_b env with
   | nil => simp [List.foldl]
   | cons p rest ih =>
       simp only [List.foldl]
-      have h_step_len : (h_a.alloc p.2).1.length = (h_b.alloc p.2).1.length := by
-        simp [Heap.alloc, List.length_append, h_len]
-      have h_idx_eq : (h_a.alloc p.2).2 = (h_b.alloc p.2).2 := by
-        simp [Heap.alloc, h_len]
+      have h_step_len : (h_a ++ [p.2]).length = (h_b ++ [p.2]).length := by
+        simp [List.length_append, h_len]
+      have h_idx_eq : (Env.cons p.1 h_a.length env : Env)
+                    = Env.cons p.1 h_b.length env := by
+        rw [h_len]
       rw [h_idx_eq]
       exact ih _ _ _ h_step_len
 
 /-- `freshLevelEnv h |>.2` depends only on `h.length`, not on the heap's
-    contents. Cross-side, equal heap-lengths give equal envs.
-    Body sorry'd — the proof uses `buildBindings_foldl_env_eq_of_len_eq`
-    + `buildBindings_foldl_length` (both proved above), but Lean's
-    `whnf` hits a heartbeat timeout when `congr 1` tries to normalize
-    the foldl-on-13-element-pairs into the explicit final env. The
-    structural argument is straightforward; the term-level reduction is
-    what's expensive. Workaround: introduce an `opaque` definition for
-    `pairs`, or use `Decidable.decide` to discharge the equality. -/
-theorem freshLevelEnv_env_eq (h_a h_b : Heap) (_h_len : h_a.length = h_b.length) :
+    contents. Now provable thanks to `primPairs`'s `@[irreducible]`
+    annotation — Lean's `whnf` no longer tries to inline the 13-element
+    list during the proof. -/
+theorem freshLevelEnv_env_eq (h_a h_b : Heap) (h_len : h_a.length = h_b.length) :
     (freshLevelEnv h_a).2 = (freshLevelEnv h_b).2 := by
-  sorry
+  have h_envPrims := buildBindings_foldl_env_eq_of_len_eq primPairs h_a h_b .nil h_len
+  have h_inner_a := buildBindings_foldl_length primPairs h_a (.nil : Env)
+  have h_inner_b := buildBindings_foldl_length primPairs h_b (.nil : Env)
+  unfold freshLevelEnv
+  simp only [Heap.alloc]
+  rw [h_envPrims, h_inner_a, h_inner_b, h_len]
 
 /-- `freshLevelEnv h` produces a heap with exactly 14 more cells than `h`. -/
 theorem freshLevelEnv_heap_length (h : Heap) :
     (freshLevelEnv h).1.length = h.length + 14 := by
+  have h_inner := buildBindings_foldl_length primPairs h (.nil : Env)
+  rw [primPairs_length] at h_inner
   unfold freshLevelEnv
-  -- The fold appends 13 cells, then alloc adds one more (= 14 total).
-  simp only [Heap.alloc]
-  -- Pull out the foldl's intermediate length.
-  have h_inner :
-      (([("+", .prim "+"), ("-", .prim "-"), ("*", .prim "*"),
-        ("=", .prim "="), ("num?", .prim "num?"), ("bool?", .prim "bool?"),
-        ("closure?", .prim "closure?"), ("prim?", .prim "prim?"),
-        ("cons", .prim "cons"), ("car", .prim "car"),
-        ("cdr", .prim "cdr"), ("null?", .prim "null?"),
-        ("mul-list", .prim "mul-list")] : List (String × Val)).foldl
-       (fun (acc : Heap × Env) (kv : String × Val) =>
-        let (hh, ee) := acc
-        let (hh', idx) := hh.alloc kv.2
-        (hh', .cons kv.1 idx ee)) (h, .nil)).1.length = h.length + 13 :=
-    buildBindings_foldl_length _ h _
+  simp only [Heap.alloc] at h_inner ⊢
   simp [List.length_append, h_inner]
 
 /-! ### Cross-side parallelism for `materialize`
