@@ -607,6 +607,31 @@ theorem ValVis_aux_self_extend (n : Nat) :
           intro v' hv_valid
           exact ih v' h_a extras hh hv_valid
 
+/-- Self-bisim within a single heap. Given `EnvValid` and `HeapValid`,
+    every heap-cell value is `ValValid`, so `ValVis_aux_self_extend`
+    (with empty extras) gives self-bisim at every depth. -/
+theorem EnvVis_self_of_valid (env : Env) (h : Heap)
+    (hv : EnvValid env h) (hh : HeapValid h) :
+    EnvVis env env h h := by
+  intro depth x
+  cases hl : env.lookup x with
+  | none => simp
+  | some i =>
+      simp only [hl]
+      have h_lt : i < h.length := hv x i hl
+      have h_some : ∃ v, h[i]? = some v := by
+        cases hp : h[i]? with
+        | none =>
+            exfalso
+            have := List.getElem?_eq_none_iff.mp hp
+            omega
+        | some v => exact ⟨v, rfl⟩
+      obtain ⟨v, hv_eq⟩ := h_some
+      rw [hv_eq]
+      have hv_valid : ValValid v h := hh i v hv_eq
+      have := ValVis_aux_self_extend depth v h [] hh hv_valid
+      simpa using this
+
 /-! ## Closed values: heap-independent self-bisimulation
 
     A `closedValB`-true value contains no closure references, so it

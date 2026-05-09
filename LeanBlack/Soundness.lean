@@ -112,20 +112,80 @@ theorem eval_tower_safe
     TowerCE T T' ∧ SafeEvolution ptable T' :=
   sorry
 
-/-! ## Necessity (statement; body deferred)
+/-! ## Necessity
 
-    The converse: without `SafeEvolution`, there exist programs
-    that break cross-level CE. Concrete counterexample:
-    `acceptAllPolicy` admits a malicious `(set! base-apply
-    (λ _ _. 0))` that overwrites level-1's apply with a constant-
-    returning closure; subsequent level-0 applications return `0`
-    instead of the original primitive results. This breaks CE at
-    level 0.
+    The converse: without `SafeEvolution`, there exist programs that
+    break cross-level CE. Concrete counterexample:
+
+    Setup a minimal tower with level 0 (empty env) and level 1 binding
+    `"base-apply"` to heap cell `0`, which holds `.builtinBaseApply`
+    under `acceptAllPolicy`. Run `(set! base-apply (lam (op args) (app)))`
+    at level 1 — `acceptAllPolicy` admits the mutation, replacing the
+    apply with a *diverging* closure (body is the empty application,
+    which evaluates to `none` at any fuel).
+
+    For `TowerCE T T'` at `n = 0`: `T.heap[0] = .builtinBaseApply` admits
+    `(.prim "+", [.num 1, .num 2])` returning `(.num 3)`; but every call
+    through the new diverging closure returns `none`, so no `CE`
+    witness exists.
 
     Mirrors lean-grey's `safeEvolution_necessary`. -/
+
+private def cex_envL1 : Env := .cons "base-apply" 0 .nil
+
+private def cex_lam : Expr := .lam ["op", "args"] (.app [])
+
+private def cex_T : TowerState :=
+  { heap := [.builtinBaseApply],
+    levels := [
+      { env := .nil, policy := acceptAllPolicy },
+      { env := cex_envL1, policy := acceptAllPolicy }
+    ] }
+
+private def cex_div_closure : Val :=
+  .closure ["op", "args"] (.app []) cex_envL1
+
+private def cex_T' : TowerState := cex_T.updateHeap 0 cex_div_closure
+
 theorem safeEvolution_necessary :
     ∃ (ptable : PolicyTable) (fuel : Nat) (level : Nat) (exp : Expr)
       (env : Env) (T : TowerState) (v : Val) (T' : TowerState),
     eval fuel ptable level exp env T = some (v, T') ∧
-    ¬ TowerCE T T' :=
-  sorry
+    ¬ TowerCE T T' := by
+  refine ⟨[], 100, 1, .set "base-apply" cex_lam, cex_envL1, cex_T, .bool true,
+          cex_T', ?_, ?_⟩
+  · -- eval at level 1 of (set! base-apply <lam>) succeeds via acceptAllPolicy.
+    show eval 100 [] 1 (.set "base-apply" cex_lam) cex_envL1 cex_T
+       = some (.bool true, cex_T')
+    simp [eval, cex_lam, cex_envL1, cex_T, cex_T', cex_div_closure,
+          isMetaMutation, acceptAllPolicy, TowerState.envAt?,
+          TowerState.policyAt?, TowerState.levelAt?, Env.lookup,
+          TowerState.updateHeap, Heap.update]
+  · -- ¬ TowerCE cex_T cex_T'
+    intro h_tce
+    have h_lookup :
+        (cex_T.envAt? 1).bind (·.lookup "base-apply") = some 0 := rfl
+    have h_old : cex_T.heap[0]? = some .builtinBaseApply := rfl
+    have h_new : cex_T'.heap[0]? = some cex_div_closure := rfl
+    have h_ce : CE 0 .builtinBaseApply cex_div_closure :=
+      h_tce 0 0 .builtinBaseApply cex_div_closure h_lookup h_old h_new
+    -- The premise: builtinBaseApply admits (+ 1 2) → (.num 3).
+    have h_witness :
+        callAsBaseApply 10 [] 0 .builtinBaseApply (.prim "+")
+          [.num 1, .num 2] cex_T = some (.num 3, cex_T) := by
+      simp [callAsBaseApply, applyDirect, applyPrim, applyPrim_plus]
+    obtain ⟨fuel', T'', r', h_call, _⟩ :=
+      h_ce 10 [] (.prim "+") [.num 1, .num 2] cex_T (.num 3) cex_T h_witness
+    -- Every call through cex_div_closure diverges (body = (.app [])).
+    have h_div : ∀ f, callAsBaseApply f [] 0 cex_div_closure (.prim "+")
+        [.num 1, .num 2] cex_T = none := by
+      intro f
+      match f with
+      | 0 =>
+          simp [callAsBaseApply, applyDirect, cex_div_closure]
+      | 1 =>
+          simp [callAsBaseApply, applyDirect, cex_div_closure, allocStep, eval]
+      | k + 2 =>
+          simp [callAsBaseApply, applyDirect, cex_div_closure, allocStep, eval]
+    rw [h_div fuel'] at h_call
+    exact Option.noConfusion h_call
