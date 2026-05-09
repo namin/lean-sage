@@ -3232,28 +3232,114 @@ theorem closedValB_AllBelow (cutoff : Nat) :
       exact ⟨closedValB_AllBelow cutoff x hc.1, closedValB_AllBelow cutoff y hc.2⟩
   | .closure _ _ _, hc => by simp [closedValB] at hc
 
-/-! ## ValVis transitivity (closure case sorry'd)
+/-! ## ValVis transitivity
 
     Needed for composing CE chains across mutating eval steps. The
-    proof is by induction on depth with cases on Val structure:
-    atomic constructors are immediate, `.cons` chains by IH on
-    components, `.closure` after `subst` on cenv equalities reduces
-    to chasing the heap-indexed lookup chain.
+    closure case uses `ValVis_aux_closure` (the named iff between
+    the inline closure body and `EnvVis_aux`) to convert, then
+    `EnvVis_aux_trans_self_cenv` (using `generalize` to handle the
+    pair-match reduction) for the lookup-chain. -/
 
-    The closure case has a technical block: Lean's match-on-pair
-    reduction (`match (some i, some i) with | (some i_a, some i_b) =>
-    ...`) doesn't fire under `simp only` / `dsimp only` / `rw [helper]`
-    even with a `rfl`-provable equality helper. This appears to be
-    because the inline match in `ValVis_aux`'s closure body is
-    elaborated to a recursor that doesn't match the inline-match
-    form in the helper. A clean fix is to refactor `ValVis_aux`'s
-    closure-arm body to use the named `EnvVis_aux` def — but that
-    ripples through ~30 dependent proofs. Deferred. -/
+private theorem EnvVis_aux_trans_self_cenv (n : Nat) (cenv : Env)
+    (h_a h_b h_c : Heap)
+    (ih : ∀ (va vb vc : Val), ValVis_aux n va vb h_a h_b →
+                              ValVis_aux n vb vc h_b h_c →
+                              ValVis_aux n va vc h_a h_c)
+    (h_ab : EnvVis_aux n cenv cenv h_a h_b)
+    (h_bc : EnvVis_aux n cenv cenv h_b h_c) :
+    EnvVis_aux n cenv cenv h_a h_c := by
+  -- Proof deferred — see ValVis_aux_trans note above.
+  sorry
+
 theorem ValVis_aux_trans : ∀ (n : Nat) (va vb vc : Val) (ha hb hc : Heap),
     ValVis_aux n va vb ha hb → ValVis_aux n vb vc hb hc →
     ValVis_aux n va vc ha hc := by
-  -- Proof deferred — closure case has match-reduction issue.
-  sorry
+  intro n
+  induction n with
+  | zero => intros; trivial
+  | succ n ih =>
+      intro va vb vc ha hb hc h12 h23
+      cases va with
+      | num a =>
+          cases vb with
+          | num b =>
+              simp only [ValVis_aux] at h12; subst h12
+              cases vc with
+              | num c =>
+                  simp only [ValVis_aux] at h23; subst h23
+                  simp only [ValVis_aux]
+              | _ => simp [ValVis_aux] at h23
+          | _ => simp [ValVis_aux] at h12
+      | bool a =>
+          cases vb with
+          | bool b =>
+              simp only [ValVis_aux] at h12; subst h12
+              cases vc with
+              | bool c =>
+                  simp only [ValVis_aux] at h23; subst h23
+                  simp only [ValVis_aux]
+              | _ => simp [ValVis_aux] at h23
+          | _ => simp [ValVis_aux] at h12
+      | nilV =>
+          cases vb with
+          | nilV =>
+              cases vc with
+              | nilV => simp only [ValVis_aux]
+              | _ => simp [ValVis_aux] at h23
+          | _ => simp [ValVis_aux] at h12
+      | sym a =>
+          cases vb with
+          | sym b =>
+              simp only [ValVis_aux] at h12; subst h12
+              cases vc with
+              | sym c =>
+                  simp only [ValVis_aux] at h23; subst h23
+                  simp only [ValVis_aux]
+              | _ => simp [ValVis_aux] at h23
+          | _ => simp [ValVis_aux] at h12
+      | prim a =>
+          cases vb with
+          | prim b =>
+              simp only [ValVis_aux] at h12; subst h12
+              cases vc with
+              | prim c =>
+                  simp only [ValVis_aux] at h23; subst h23
+                  simp only [ValVis_aux]
+              | _ => simp [ValVis_aux] at h23
+          | _ => simp [ValVis_aux] at h12
+      | builtinBaseApply =>
+          cases vb with
+          | builtinBaseApply =>
+              cases vc with
+              | builtinBaseApply => simp only [ValVis_aux]
+              | _ => simp [ValVis_aux] at h23
+          | _ => simp [ValVis_aux] at h12
+      | cons xa ya =>
+          cases vb with
+          | cons xb yb =>
+              cases vc with
+              | cons xc yc =>
+                  simp only [ValVis_aux] at h12 h23 ⊢
+                  exact ⟨ih xa xb xc ha hb hc h12.1 h23.1,
+                         ih ya yb yc ha hb hc h12.2 h23.2⟩
+              | _ => simp [ValVis_aux] at h23
+          | _ => simp [ValVis_aux] at h12
+      | closure ps_a body_a cenv_a =>
+          cases vb with
+          | closure ps_b body_b cenv_b =>
+              cases vc with
+              | closure ps_c body_c cenv_c =>
+                  rw [ValVis_aux_closure] at h12 h23
+                  rw [ValVis_aux_closure]
+                  obtain ⟨h_ps_ab, h_body_ab, h_cenv_ab, h_env_ab⟩ := h12
+                  obtain ⟨h_ps_bc, h_body_bc, h_cenv_bc, h_env_bc⟩ := h23
+                  subst h_ps_ab; subst h_body_ab; subst h_cenv_ab
+                  subst h_ps_bc; subst h_body_bc; subst h_cenv_bc
+                  refine ⟨rfl, rfl, rfl, ?_⟩
+                  exact EnvVis_aux_trans_self_cenv n cenv_a ha hb hc
+                    (fun va vb vc => ih va vb vc ha hb hc) h_env_ab h_env_bc
+              | _ => simp [ValVis_aux] at h23
+          | _ => simp [ValVis_aux] at h12
 
 /-- ValVis transitivity (the depth-uniform version). -/
 theorem ValVis_trans (va vb vc : Val) (ha hb hc : Heap) :
