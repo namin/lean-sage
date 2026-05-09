@@ -1,4 +1,4 @@
-# lean-black
+# lean-sage
 
 A synthesis of [`lean-grey`](../lean-grey/) (abstract infinite tower with
 proved governance coherence) and [`lean-green`](../lean-green/) (Black-faithful
