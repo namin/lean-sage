@@ -4,6 +4,8 @@ A synthesis of [`lean-grey`](../lean-grey/) (abstract infinite tower with
 proved governance coherence) and [`lean-green`](../lean-green/) (Black-faithful
 heap+closure+`set!` interpreter with CakeML-style value bisimulation).
 
+**Current snapshot:** 6284 LOC, 8 sorries (Tower 0, Frame 4, Policies 1, Soundness 3). Smoke 8/8. The cross-level synthesis is structurally complete: `.em` runs end-to-end through real `materialize_cross_side_*` lemmas and a fully-proved chain of materialize-preservation helpers. Only `h_env_mat` (cross-side env self-bisim at materialized level), `eval_preserves_envAt` body, `.set`, and `applyVia` clause remain in Frame.
+
 ## What's here
 
 This first cut is the **runtime substrate**: a tower-indexed interpreter that
