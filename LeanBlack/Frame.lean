@@ -100,6 +100,41 @@ theorem WFCtxT.refl (env : Env) (T : TowerState) (level : Nat)
     WFCtxT env env T T level :=
   ⟨rfl, hh, hh, hev, hev, hresp, rfl, rfl, h_levels, h_levels⟩
 
+/-! ## Tower-cross invariants
+
+    `HeapEvolution` (from lean-green's Bisim) carries cross-side
+    bisim preservation and per-side heap monotonicity, but doesn't
+    carry the *cross-side* invariants that `WFCtxT` needs at the
+    output state of an applyVia / applyDirect call (specifically:
+    cross-side heap-length equality and cross-side policy-at-level
+    equality, plus single-side level-envs monotonicity).
+
+    `TowerCross` bundles those four facts so that `applyVia` /
+    `applyDirect` can return them as an extra output component, and
+    the `.app` / `.primApp` cases of the framing theorem can
+    reconstruct a full `WFCtxT` for the post-call state. -/
+structure TowerCross (level : Nat) (T_a T_b T_a' T_b' : TowerState) : Prop where
+  heap_len_eq           : T_a'.heap.length = T_b'.heap.length
+  policy_eq_at          : T_a'.policyAt? level = T_b'.policyAt? level
+  levels_mono_a         : ∀ n env, T_a.envAt? n = some env → T_a'.envAt? n = some env
+  levels_mono_b         : ∀ n env, T_b.envAt? n = some env → T_b'.envAt? n = some env
+  hv_a_out              : HeapValid T_a'.heap
+  hv_b_out              : HeapValid T_b'.heap
+  level_envs_valid_a_out : ∀ n env, T_a'.envAt? n = some env → EnvValid env T_a'.heap
+  level_envs_valid_b_out : ∀ n env, T_b'.envAt? n = some env → EnvValid env T_b'.heap
+  policy_resp_out       : ∀ p, T_a'.policyAt? level = some p → PolicyRespectsBisimT p
+
+theorem TowerCross.refl (level : Nat) (T_a T_b : TowerState)
+    (h_len : T_a.heap.length = T_b.heap.length)
+    (h_pol : T_a.policyAt? level = T_b.policyAt? level)
+    (h_hv_a : HeapValid T_a.heap) (h_hv_b : HeapValid T_b.heap)
+    (h_levs_a : ∀ n env, T_a.envAt? n = some env → EnvValid env T_a.heap)
+    (h_levs_b : ∀ n env, T_b.envAt? n = some env → EnvValid env T_b.heap)
+    (h_resp_at : ∀ p, T_a.policyAt? level = some p → PolicyRespectsBisimT p) :
+    TowerCross level T_a T_b T_a T_b :=
+  ⟨h_len, h_pol, fun _ _ h => h, fun _ _ h => h,
+   h_hv_a, h_hv_b, h_levs_a, h_levs_b, h_resp_at⟩
+
 /-! ## The framing statement (joint, mutual) -/
 
 private def FrameStmtT (n : Nat) : Prop :=
@@ -155,6 +190,7 @@ private def FrameStmtT (n : Nat) : Prop :=
       applyVia n ptable level op_b args_b T_b = some (r_b, T_b') ∧
       ValVis r_a r_b T_a'.heap T_b'.heap ∧
       HeapEvolution T_a T_b T_a' T_b' ∧
+      TowerCross level T_a T_b T_a' T_b' ∧
       ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap) ∧
   -- applyDirect
   (∀ (ptable : PolicyTable) (level : Nat) (op_a op_b : Val)
@@ -176,6 +212,7 @@ private def FrameStmtT (n : Nat) : Prop :=
       applyDirect n ptable level op_b args_b T_b = some (r_b, T_b') ∧
       ValVis r_a r_b T_a'.heap T_b'.heap ∧
       HeapEvolution T_a T_b T_a' T_b' ∧
+      TowerCross level T_a T_b T_a' T_b' ∧
       ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap)
 
 /-! ## The headline theorem (zero case + literal cases proved;
@@ -387,7 +424,8 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                         have hv_fvb2 : ValValid fv_b T_b_inner2.heap :=
                           ValValid.length_mono fv_b hv_fvb h_he2.len_b
                         -- Apply ih_applyVia
-                        obtain ⟨r_b, T_b', h_eval_av_b, h_vv, h_he3, hv_ra, hv_rb⟩ :=
+                        obtain ⟨r_b, T_b', h_eval_av_b, h_vv, h_he3, h_tc3,
+                                hv_ra, hv_rb⟩ :=
                           ih_applyVia ptable level fv_a fv_b avs_a avs_b
                             T_a_inner2 T_b_inner2 r_a T_a'
                             hresp_pt h_ctx2.policy_resp h_ctx2.policy_eq_at
@@ -396,15 +434,99 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                             h_vv_f' h_lvv hv_fva2 hv_fvb2 hv_avsa hv_avsb h_eval
                         have h_he_chain : HeapEvolution T_a T_b T_a' T_b' :=
                           HeapEvolution.trans h_he1 (HeapEvolution.trans h_he2 h_he3)
-                        -- Build output WFCtxT: env_a/env_b validity lifted
-                        -- via length_mono; policy and level-envs from h_ctx2
-                        -- threaded through h_he3 (which doesn't change them
-                        -- — applyVia preserves policy at level).
-                        -- Note: HeapEvolution doesn't directly carry policy
-                        -- equality cross-side at the *new* state for applyVia.
-                        -- We reconstruct from h_he3.len_*.
-                        sorry  -- TODO: reconstruct WFCtxT for output state
-        | primApp _ _      => sorry  -- mechanical: ih_eval, ih_evalList, ih_applyDirect
+                        -- Build output WFCtxT using h_tc3 for the cross-side
+                        -- invariants and length_mono lifts for env/heap validity.
+                        have h_he_outer_a : T_a.heap.length ≤ T_a'.heap.length := by
+                          calc T_a.heap.length
+                              ≤ T_a_inner.heap.length := h_he1.len_a
+                            _ ≤ T_a_inner2.heap.length := h_he2.len_a
+                            _ ≤ T_a'.heap.length := h_he3.len_a
+                        have h_he_outer_b : T_b.heap.length ≤ T_b'.heap.length := by
+                          calc T_b.heap.length
+                              ≤ T_b_inner.heap.length := h_he1.len_b
+                            _ ≤ T_b_inner2.heap.length := h_he2.len_b
+                            _ ≤ T_b'.heap.length := h_he3.len_b
+                        -- TowerCross from ih_applyVia carries the missing
+                        -- output facts (HeapValid, level_envs_valid, policy_resp).
+                        have h_ctx_out : WFCtxT env_a env_b T_a' T_b' level :=
+                          ⟨h_tc3.policy_eq_at,
+                           h_tc3.hv_a_out, h_tc3.hv_b_out,
+                           EnvValid.length_mono h_ctx.ev_a h_he_outer_a,
+                           EnvValid.length_mono h_ctx.ev_b h_he_outer_b,
+                           h_tc3.policy_resp_out,
+                           h_ctx.env_eq, h_tc3.heap_len_eq,
+                           h_tc3.level_envs_valid_a_out, h_tc3.level_envs_valid_b_out⟩
+                        have h_env_out : EnvVis env_a env_b T_a'.heap T_b'.heap :=
+                          h_he_chain.envVis_preserve env_a env_b h_ctx.env_eq
+                            h_ctx.ev_a h_ctx.ev_b h_env
+                        refine ⟨r_b, T_b', ?_, h_vv, h_ctx_out,
+                                h_he_chain, h_env_out, hv_ra, hv_rb⟩
+                        simp [eval, h_eval_f_b, h_eval_args_b, h_eval_av_b]
+        | primApp f args =>
+            -- Structurally identical to .app, but uses applyDirect
+            -- (no base-apply lookup, no level dispatch).
+            simp only [eval] at h_eval
+            cases hf : eval k ptable level f env_a T_a with
+            | none => rw [hf] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨fv_a, T_a_inner⟩ := pr
+                rw [hf] at h_eval
+                simp only at h_eval
+                obtain ⟨fv_b, T_b_inner, h_eval_f_b, h_vv_f, h_ctx1, h_he1,
+                        h_env1, hv_fva, hv_fvb⟩ :=
+                  ih_eval ptable level f env_a env_b T_a T_b fv_a T_a_inner
+                    hresp_pt h_ctx h_env hf
+                cases ha : evalList k ptable level args env_a T_a_inner with
+                | none => rw [ha] at h_eval; simp at h_eval
+                | some pr2 =>
+                    obtain ⟨avs_a, T_a_inner2⟩ := pr2
+                    rw [ha] at h_eval
+                    simp only at h_eval
+                    obtain ⟨avs_b, T_b_inner2, h_eval_args_b, h_lvv, h_ctx2,
+                            h_he2, h_env2, hv_avsa, hv_avsb⟩ :=
+                      ih_evalList ptable level args env_a env_b
+                        T_a_inner T_b_inner avs_a T_a_inner2
+                        hresp_pt h_ctx1 h_env1 ha
+                    have h_vv_f' : ValVis fv_a fv_b T_a_inner2.heap T_b_inner2.heap :=
+                      h_he2.valVis_preserve fv_a fv_b hv_fva hv_fvb h_vv_f
+                    have hv_fva2 : ValValid fv_a T_a_inner2.heap :=
+                      ValValid.length_mono fv_a hv_fva h_he2.len_a
+                    have hv_fvb2 : ValValid fv_b T_b_inner2.heap :=
+                      ValValid.length_mono fv_b hv_fvb h_he2.len_b
+                    obtain ⟨r_b, T_b', h_eval_av_b, h_vv, h_he3, h_tc3,
+                            hv_ra, hv_rb⟩ :=
+                      ih_applyDirect ptable level fv_a fv_b avs_a avs_b
+                        T_a_inner2 T_b_inner2 r_a T_a'
+                        hresp_pt h_ctx2.policy_resp h_ctx2.policy_eq_at
+                        h_ctx2.hv_a h_ctx2.hv_b h_ctx2.heap_len_eq
+                        h_ctx2.level_envs_valid_a h_ctx2.level_envs_valid_b
+                        h_vv_f' h_lvv hv_fva2 hv_fvb2 hv_avsa hv_avsb h_eval
+                    have h_he_chain : HeapEvolution T_a T_b T_a' T_b' :=
+                      HeapEvolution.trans h_he1 (HeapEvolution.trans h_he2 h_he3)
+                    have h_he_outer_a : T_a.heap.length ≤ T_a'.heap.length := by
+                      calc T_a.heap.length
+                          ≤ T_a_inner.heap.length := h_he1.len_a
+                        _ ≤ T_a_inner2.heap.length := h_he2.len_a
+                        _ ≤ T_a'.heap.length := h_he3.len_a
+                    have h_he_outer_b : T_b.heap.length ≤ T_b'.heap.length := by
+                      calc T_b.heap.length
+                          ≤ T_b_inner.heap.length := h_he1.len_b
+                        _ ≤ T_b_inner2.heap.length := h_he2.len_b
+                        _ ≤ T_b'.heap.length := h_he3.len_b
+                    have h_ctx_out : WFCtxT env_a env_b T_a' T_b' level :=
+                      ⟨h_tc3.policy_eq_at,
+                       h_tc3.hv_a_out, h_tc3.hv_b_out,
+                       EnvValid.length_mono h_ctx.ev_a h_he_outer_a,
+                       EnvValid.length_mono h_ctx.ev_b h_he_outer_b,
+                       h_tc3.policy_resp_out,
+                       h_ctx.env_eq, h_tc3.heap_len_eq,
+                       h_tc3.level_envs_valid_a_out, h_tc3.level_envs_valid_b_out⟩
+                    have h_env_out : EnvVis env_a env_b T_a'.heap T_b'.heap :=
+                      h_he_chain.envVis_preserve env_a env_b h_ctx.env_eq
+                        h_ctx.ev_a h_ctx.ev_b h_env
+                    refine ⟨r_b, T_b', ?_, h_vv, h_ctx_out,
+                            h_he_chain, h_env_out, hv_ra, hv_rb⟩
+                    simp [eval, h_eval_f_b, h_eval_args_b, h_eval_av_b]
         | set _ _          => sorry  -- USES policy_eq_at + ValVis_aux_update; substantial
         | em _             => sorry  -- NEW: needs Tower.materialize bisim-preservation
         | letE _ _ _       => sorry  -- mechanical with ih_eval + Heap.alloc preservation
@@ -561,13 +683,13 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                     obtain ⟨operands_b, hl_b, h_lvv_ops, hv_ops_a, hv_ops_b⟩ :=
                       valToList_bisim operands_a operandsList_a operandsList_b
                         T_a.heap T_b.heap hl_a h_vv_olist hv_olist_a hv_olist_b
-                    obtain ⟨r_b, T_b', h_eval_b, h_vv_r, h_he', hv_ra, hv_rb⟩ :=
+                    obtain ⟨r_b, T_b', h_eval_b, h_vv_r, h_he', h_tc, hv_ra, hv_rb⟩ :=
                       ih_applyDirect ptable level actualOp_a actualOp_b
                         operands_a operands_b T_a T_b r_a T_a'
                         hresp_pt h_resp_at h_pol_eq h_hv_a h_hv_b h_hl_eq
                         h_levs_a h_levs_b h_vv_actual h_lvv_ops
                         hv_actual_a hv_actual_b hv_ops_a hv_ops_b h_eval
-                    refine ⟨r_b, T_b', ?_, h_vv_r, h_he', hv_ra, hv_rb⟩
+                    refine ⟨r_b, T_b', ?_, h_vv_r, h_he', h_tc, hv_ra, hv_rb⟩
                     simp only [applyDirect, hl_b, h_eval_b]
         | prim name =>
             have h_opb : op_b = .prim name := by
@@ -595,6 +717,8 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                   applyPrim_bisim name args_a args_b T_a.heap T_b.heap
                     h_lvv hv_argsa hv_argsb v_a' hp_a
                 refine ⟨r_b, T_b, ?_, h_vv_r, HeapEvolution.refl _ _,
+                        TowerCross.refl _ _ _ h_hl_eq h_pol_eq h_hv_a h_hv_b
+                          h_levs_a h_levs_b h_resp_at,
                         hv_ra, hv_rb⟩
                 simp only [applyDirect, hp_b]
         | closure _ _ _ =>
