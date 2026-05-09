@@ -3248,8 +3248,79 @@ private theorem EnvVis_aux_trans_self_cenv (n : Nat) (cenv : Env)
     (h_ab : EnvVis_aux n cenv cenv h_a h_b)
     (h_bc : EnvVis_aux n cenv cenv h_b h_c) :
     EnvVis_aux n cenv cenv h_a h_c := by
-  -- Proof deferred — see ValVis_aux_trans note above.
-  sorry
+  intro x
+  have ha_x := h_ab x
+  have hbc_x := h_bc x
+  -- The trick: use a rfl-proven match-reduction equation as a term-level
+  -- rewrite via `Eq.mpr`, bypassing the tactic-mode rewrite issue.
+  cases h_lookup : cenv.lookup x with
+  | none =>
+      -- Goal: match (cenv.lookup x), (cenv.lookup x) with | none,none => True | ... | _,_ => False
+      -- After rw [h_lookup], it should become True. Use Eq.mpr explicitly.
+      have eq_g : (match cenv.lookup x, cenv.lookup x with
+                   | none, none => True
+                   | some i_a, some i_b =>
+                       match h_a[i_a]?, h_c[i_b]? with
+                       | some v_a, some v_b => ValVis_aux n v_a v_b h_a h_c
+                       | _, _ => False
+                   | _, _ => False) = True := by
+        rw [h_lookup]
+      exact eq_g ▸ trivial
+  | some i =>
+      -- Convert ha_x to reduced form via term-mode equation.
+      have eq_ab : (match cenv.lookup x, cenv.lookup x with
+                    | none, none => True
+                    | some i_a, some i_b =>
+                        match h_a[i_a]?, h_b[i_b]? with
+                        | some v_a, some v_b => ValVis_aux n v_a v_b h_a h_b
+                        | _, _ => False
+                    | _, _ => False) =
+                   (match h_a[i]?, h_b[i]? with
+                    | some v_a, some v_b => ValVis_aux n v_a v_b h_a h_b
+                    | _, _ => False) := by
+        rw [h_lookup]
+      have ha_red : (match h_a[i]?, h_b[i]? with
+                     | some v_a, some v_b => ValVis_aux n v_a v_b h_a h_b
+                     | _, _ => False) := eq_ab ▸ ha_x
+      have eq_bc : (match cenv.lookup x, cenv.lookup x with
+                    | none, none => True
+                    | some i_a, some i_b =>
+                        match h_b[i_a]?, h_c[i_b]? with
+                        | some v_a, some v_b => ValVis_aux n v_a v_b h_b h_c
+                        | _, _ => False
+                    | _, _ => False) =
+                   (match h_b[i]?, h_c[i]? with
+                    | some v_a, some v_b => ValVis_aux n v_a v_b h_b h_c
+                    | _, _ => False) := by
+        rw [h_lookup]
+      have hbc_red : (match h_b[i]?, h_c[i]? with
+                      | some v_a, some v_b => ValVis_aux n v_a v_b h_b h_c
+                      | _, _ => False) := eq_bc ▸ hbc_x
+      -- Build the goal's reduced form, then lift via Eq.mpr.
+      have eq_goal : (match (some i : Option Nat), (some i : Option Nat) with
+                      | none, none => True
+                      | some i_a, some i_b =>
+                          match h_a[i_a]?, h_c[i_b]? with
+                          | some v_a, some v_b => ValVis_aux n v_a v_b h_a h_c
+                          | _, _ => False
+                      | _, _ => False) =
+                     (match h_a[i]?, h_c[i]? with
+                      | some v_a, some v_b => ValVis_aux n v_a v_b h_a h_c
+                      | _, _ => False) := rfl
+      rw [eq_goal]
+      cases h_a_i : h_a[i]? with
+      | none => rw [h_a_i] at ha_red; exact ha_red.elim
+      | some va =>
+          rw [h_a_i] at ha_red
+          cases h_b_i : h_b[i]? with
+          | none => rw [h_b_i] at ha_red; exact ha_red.elim
+          | some vb =>
+              rw [h_b_i] at ha_red hbc_red
+              cases h_c_i : h_c[i]? with
+              | none => rw [h_c_i] at hbc_red; exact hbc_red.elim
+              | some vc =>
+                  rw [h_c_i] at hbc_red
+                  exact ih va vb vc ha_red hbc_red
 
 theorem ValVis_aux_trans : ∀ (n : Nat) (va vb vc : Val) (ha hb hc : Heap),
     ValVis_aux n va vb ha hb → ValVis_aux n vb vc hb hc →
