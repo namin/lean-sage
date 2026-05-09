@@ -363,6 +363,47 @@ theorem TowerState.materialize_heap_grows
       obtain rfl := h_mat.symm
       exact materializeStep_iter_heap_grows T (n + 1 - T.levels.length)
 
+/-! ### Cross-side parallelism for `materialize`
+
+    These lemmas express that `materialize` is "deterministic up to
+    bisimulation": if two tower states have equal heap-length and
+    equal envAt? at all indices, then materialize behaves the same
+    cross-side. The proof structure is:
+
+    1. `materialize` only fails at `n ≥ maxDepth` (independent of T).
+    2. The "no extension" case (`T.levels.length > n`): result is T
+       unchanged on both sides.
+    3. The "extension" case: each fold step appends a level whose env
+       depends only on `T.heap.length` (via `freshLevelEnv`), and a
+       heap suffix of 14 deterministic cells. Cross-side these match.
+
+    Both lemmas needed by `frame_tower`'s `.em` and `applyVia` cases
+    to construct the inductive step at level+1. Proofs sketched but
+    sorry'd — the bookkeeping involves Lean's `Option`/`List.getElem?`
+    interaction which is fiddly. -/
+
+/-- Cross-side: `materialize` succeeds on both or fails on both. -/
+theorem TowerState.materialize_cross_side_some_iff
+    (T_a T_b : TowerState) (n : Nat) :
+    T_a.materialize n = none ↔ T_b.materialize n = none := by
+  unfold materialize
+  by_cases h1 : n ≥ Tower.maxDepth
+  · simp [h1]
+  · simp [h1]
+    constructor <;> (intro h; split at h <;> simp at h)
+
+/-- Cross-side: parallel materialize results have equal heap.length
+    and equal envAt? at all indices. -/
+theorem TowerState.materialize_cross_side_envs_eq
+    (T_a T_b T_a' T_b' : TowerState) (n : Nat)
+    (_h_heap_len : T_a.heap.length = T_b.heap.length)
+    (_h_envs : ∀ m, T_a.envAt? m = T_b.envAt? m)
+    (_h_mat_a : T_a.materialize n = some T_a')
+    (_h_mat_b : T_b.materialize n = some T_b') :
+    T_a'.heap.length = T_b'.heap.length ∧
+    ∀ m, T_a'.envAt? m = T_b'.envAt? m :=
+  sorry
+
 /-! ## RunState compatibility shim
 
     The bisim infrastructure ported from lean-green is written
