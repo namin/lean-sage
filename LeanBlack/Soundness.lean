@@ -907,15 +907,197 @@ theorem eval_tower_safe
                         h_heap_mono_T_alloc h_heap_mono_alloc_T'
                         h_levs_mono_T_alloc hh_alloc hh_T'
                         h_tce_T_alloc h_tce_body
-      | _ =>
-          -- Remaining cases: `.primApp` (multi-step like `.app cons`,
-          -- needs evalList preservation), `.em` (architectural —
-          -- `materializeStep` default `acceptAllPolicy` breaks
-          -- universal SafeEvolution.1), `.set` (gated mutation —
-          -- strengthened `SafeEvolution.1` makes meta-mutation
-          -- tractable via SoundForCE; non-meta needs a "no env-
-          -- aliasing-with-base-apply" runtime invariant).
+      | primApp f args =>
+          -- Multi-step: eval f, evalList args, applyDirect. Needs
+          -- evalList/applyDirect preservation theorems (extension to
+          -- 4-way mutual induction). See DUMP0 Session C.
           sorry
+      | em body =>
+          -- Architectural: `materializeStep` defaults new levels to
+          -- `acceptAllPolicy`, which is NOT UnivSoundAt. Either change
+          -- default to `rejectAllPolicy` (Session B) or weaken
+          -- SafeEvolution to allow extension levels.
+          sorry
+      | set x e =>
+          -- Gated mutation. Strengthened `SafeEvolution.1` (universal
+          -- soundness) makes the meta-mutation case tractable: the
+          -- gate at level L admits a base-apply-cell mutation, and
+          -- by `SoundForCE n` (any n) we get the per-level CE chain.
+          -- Non-meta mutation requires a "no env-aliasing-with-base-
+          -- apply" runtime invariant — left as inline sorry.
+          cases k with
+          | zero => simp [eval] at h_eval
+          | succ j =>
+              simp only [eval] at h_eval
+              cases h_e : eval (j+1) ptable level e env T with
+              | none => rw [h_e] at h_eval; simp at h_eval
+              | some pr =>
+                  rw [h_e] at h_eval
+                  cases pr with
+                  | mk v_e T_mid =>
+                      simp only at h_eval
+                      obtain ⟨h_tce_e, h_safe_mid⟩ :=
+                        ih level e env T hh hev h_levs h_resp_all h_bisim
+                          h_pol_resp_at h_env_self h_safe v_e T_mid h_e
+                      obtain ⟨hh_mid, h_levs_mid, h_resp_all_mid,
+                              h_bisim_mid, hev_mid, hv_v_e, h_heap_mono_12⟩ :=
+                        eval_preserves_self_invariants (j+1) ptable level e
+                          env T v_e T_mid hh hev h_levs h_resp_all h_pt
+                          h_pol_resp_at h_env_self h_e
+                      have h_levs_mono_12 :
+                          ∀ n env_n, T.envAt? n = some env_n →
+                                     T_mid.envAt? n = some env_n :=
+                        fun n env_n h_env =>
+                          eval_preserves_envAt (j+1) ptable level e env T v_e
+                            T_mid n env_n h_e h_env
+                      cases h_lk : env.lookup x with
+                      | none => rw [h_lk] at h_eval; simp at h_eval
+                      | some idx =>
+                          rw [h_lk] at h_eval
+                          simp only at h_eval
+                          by_cases h_meta : isMetaMutation x env T_mid level = true
+                          · simp only [h_meta, if_true] at h_eval
+                            cases h_old : T_mid.heap[idx]? with
+                            | none => rw [h_old] at h_eval; simp at h_eval
+                            | some oldVal =>
+                                rw [h_old] at h_eval
+                                cases h_gate? : T.policyAt? level with
+                                | none => rw [h_gate?] at h_eval; simp at h_eval
+                                | some gate =>
+                                    rw [h_gate?] at h_eval
+                                    simp only at h_eval
+                                    by_cases h_gate :
+                                        gate
+                                          { target := x, heap := T_mid.heap, env := env,
+                                            metaEnv := (T_mid.envAt? level).getD .nil,
+                                            index := idx, level := level }
+                                          oldVal v_e = true
+                                    · -- Sub-case 4: gate accepts.
+                                      rw [h_gate] at h_eval
+                                      simp only [↓reduceIte, Option.some.injEq,
+                                                  Prod.mk.injEq] at h_eval
+                                      obtain ⟨_, h_T_eq⟩ := h_eval
+                                      subst h_T_eq
+                                      have h_gate_univ : ∀ m, gate.UnivSoundAt m :=
+                                        h_safe.1 level gate h_gate?
+                                      have h_ce_oldVal_v :
+                                          ∀ n, CE n T_mid.heap oldVal v_e := fun n =>
+                                        h_gate_univ n
+                                          { target := x, heap := T_mid.heap, env := env,
+                                            metaEnv := (T_mid.envAt? level).getD .nil,
+                                            index := idx, level := level }
+                                          oldVal v_e h_gate
+                                      have h_idx_lt :
+                                          idx < T_mid.heap.length :=
+                                        (List.getElem?_eq_some_iff.mp h_old).1
+                                      have h_update_len :
+                                          (T_mid.updateHeap idx v_e).heap.length =
+                                            T_mid.heap.length :=
+                                        Heap.update_length T_mid.heap idx v_e
+                                      have h_len_le :
+                                          T_mid.heap.length
+                                            ≤ (T_mid.updateHeap idx v_e).heap.length :=
+                                        Nat.le_of_eq h_update_len.symm
+                                      have hh_upd :
+                                          HeapValid (T_mid.updateHeap idx v_e).heap := by
+                                        intro i v_i hp
+                                        by_cases h_ie : i = idx
+                                        · rw [h_ie] at hp
+                                          have h_at : (T_mid.updateHeap idx v_e).heap[idx]?
+                                              = some v_e :=
+                                            Heap.update_get_eq T_mid.heap idx v_e h_idx_lt
+                                          rw [h_at] at hp
+                                          have h_v_eq : v_e = v_i :=
+                                            Option.some.inj hp
+                                          rw [← h_v_eq]
+                                          exact ValValid.length_mono v_e hv_v_e h_len_le
+                                        · have h_get :=
+                                            Heap.update_get_neq T_mid.heap idx v_e i h_ie
+                                          rw [show (T_mid.updateHeap idx v_e).heap[i]?
+                                              = T_mid.heap[i]? from h_get] at hp
+                                          exact ValValid.length_mono v_i
+                                            (hh_mid i v_i hp) h_len_le
+                                      have h_tce_mid_upd :
+                                          TowerCE T_mid (T_mid.updateHeap idx v_e) := by
+                                        intro n idx_ba oldApply newApply
+                                          h_lookup h_old_T_mid h_new_T_upd
+                                        by_cases h_eq_idx : idx_ba = idx
+                                        · subst h_eq_idx
+                                          have h_old_eq : oldApply = oldVal := by
+                                            rw [h_old] at h_old_T_mid
+                                            exact (Option.some.inj h_old_T_mid).symm
+                                          have h_new_eq : newApply = v_e := by
+                                            have h_get :=
+                                              Heap.update_get_eq T_mid.heap idx_ba v_e h_idx_lt
+                                            rw [show
+                                              (T_mid.updateHeap idx_ba v_e).heap[idx_ba]?
+                                                = some v_e from h_get] at h_new_T_upd
+                                            exact (Option.some.inj h_new_T_upd).symm
+                                          subst h_old_eq; subst h_new_eq
+                                          apply CE_weaken_h_ref n T_mid.heap _
+                                            (Nat.le_of_eq h_update_len.symm)
+                                          exact h_ce_oldVal_v n
+                                        · have h_unchanged :
+                                              (T_mid.updateHeap idx v_e).heap[idx_ba]?
+                                                = T_mid.heap[idx_ba]? :=
+                                            Heap.update_get_neq T_mid.heap idx v_e idx_ba
+                                              h_eq_idx
+                                          rw [h_unchanged] at h_new_T_upd
+                                          rw [h_old_T_mid] at h_new_T_upd
+                                          have h_eq_app : oldApply = newApply :=
+                                            Option.some.inj h_new_T_upd
+                                          subst h_eq_app
+                                          have h_self :=
+                                            TowerCE.refl T_mid hh_mid h_levs_mid
+                                              h_resp_all_mid h_bisim_mid
+                                          apply CE_weaken_h_ref n T_mid.heap _
+                                            (Nat.le_of_eq h_update_len.symm)
+                                          exact h_self n idx_ba oldApply oldApply
+                                            h_lookup h_old_T_mid h_old_T_mid
+                                      have h_tce_T_upd :
+                                          TowerCE T (T_mid.updateHeap idx v_e) := by
+                                        apply TowerCE_trans T T_mid
+                                          (T_mid.updateHeap idx v_e)
+                                          h_heap_mono_12
+                                          (Nat.le_of_eq h_update_len.symm)
+                                          h_levs_mono_12 hh_mid hh_upd
+                                          h_tce_e h_tce_mid_upd
+                                      have h_safe_upd :
+                                          SafeEvolution ptable
+                                            (T_mid.updateHeap idx v_e) := by
+                                        refine ⟨?_, h_safe_mid.2⟩
+                                        intro n p hp
+                                        rw [TowerState.updateHeap_policyAt?] at hp
+                                        exact h_safe_mid.1 n p hp
+                                      exact ⟨h_tce_T_upd, h_safe_upd⟩
+                                    · -- Sub-case 5: gate rejects.
+                                      have h_gate_false :
+                                          (gate
+                                              { target := x, heap := T_mid.heap, env := env,
+                                                metaEnv := (T_mid.envAt? level).getD .nil,
+                                                index := idx, level := level }
+                                              oldVal v_e) = false := by
+                                        cases h : gate _ oldVal v_e with
+                                        | true => exact absurd h h_gate
+                                        | false => rfl
+                                      rw [h_gate_false] at h_eval
+                                      simp only [Bool.false_eq_true, ↓reduceIte,
+                                                  Option.some.injEq,
+                                                  Prod.mk.injEq] at h_eval
+                                      obtain ⟨_, h_T_eq⟩ := h_eval
+                                      subst h_T_eq
+                                      exact ⟨h_tce_e, h_safe_mid⟩
+                          · -- Non-meta mutation: needs aliasing invariant. Sorry.
+                            have h_meta_false : isMetaMutation x env T_mid level = false := by
+                              cases h : isMetaMutation x env T_mid level with
+                              | true => exact absurd h h_meta
+                              | false => rfl
+                            rw [h_meta_false] at h_eval
+                            simp only [Bool.false_eq_true, ↓reduceIte,
+                                       Option.some.injEq, Prod.mk.injEq] at h_eval
+                            obtain ⟨_, h_T_eq⟩ := h_eval
+                            subst h_T_eq
+                            sorry
 
 /-! ## Necessity
 
