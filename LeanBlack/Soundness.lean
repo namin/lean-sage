@@ -216,10 +216,31 @@ def SafeEvolution (ptable : PolicyTable) (T : TowerState) : Prop :=
 theorem eval_tower_safe
     (ptable : PolicyTable) (fuel : Nat) (level : Nat)
     (exp : Expr) (env : Env) (T : TowerState)
+    (hh : HeapValid T.heap)
+    (h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
+    (h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+    (h_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap)
     (h_safe : SafeEvolution ptable T)
     (v : Val) (T' : TowerState)
     (h_eval : eval fuel ptable level exp env T = some (v, T')) :
-    TowerCE T T' ∧ SafeEvolution ptable T' :=
+    TowerCE T T' ∧ SafeEvolution ptable T' := by
+  -- The full proof requires a cross-level induction over eval, tracking
+  -- which heap cells get mutated by `.set` and showing the per-level
+  -- policy gates preserve CE (via SoundForCE).
+  -- Key components needed:
+  --   (a) An "eval preserves the WFCtxT-self invariants" lemma — derivable
+  --       from frame_tower with self-pair.
+  --   (b) A `.set`-specific argument: when `set!` mutates a base-apply
+  --       cell, the gate's SoundForCE judgment converts admission
+  --       (`policy ctx old new = true`) to CE (`CE level old new`).
+  --   (c) An induction over fuel + case-split on `exp`. Most cases (.num,
+  --       .bool, .var, .lam, etc.) preserve T' = T trivially (TowerCE.refl);
+  --       .ifte/.app/.seq/.primApp/.letE dispatch to sub-evals via IH;
+  --       .em adds new levels with default acceptAllPolicy (not SoundForCE
+  --       — which is the architectural hole that `.set` at higher levels
+  --       must address); .installPolicy installs a ptable policy
+  --       (UnivSoundAt by SafeEvolution).
+  -- ~500-1000 LOC of careful proof, deferred to a future focused session.
   sorry
 
 /-! ## Necessity
