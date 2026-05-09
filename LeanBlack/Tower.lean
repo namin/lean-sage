@@ -386,6 +386,44 @@ private theorem buildBindings_foldl_length (pairs : List (String × Val)) (h : H
       simp [step]
       omega
 
+/-- The buildBindings foldl produces the same env from accumulators
+    with equal heap-length (the env's idxes are heap-length-derived only). -/
+private theorem buildBindings_foldl_env_eq_of_len_eq (pairs : List (String × Val))
+    (h_a h_b : Heap) (env : Env) (h_len : h_a.length = h_b.length) :
+    (pairs.foldl
+      (fun (acc : Heap × Env) (kv : String × Val) =>
+        let (hh, ee) := acc
+        let (hh', idx) := hh.alloc kv.2
+        (hh', .cons kv.1 idx ee)) (h_a, env)).2 =
+    (pairs.foldl
+      (fun (acc : Heap × Env) (kv : String × Val) =>
+        let (hh, ee) := acc
+        let (hh', idx) := hh.alloc kv.2
+        (hh', .cons kv.1 idx ee)) (h_b, env)).2 := by
+  induction pairs generalizing h_a h_b env with
+  | nil => simp [List.foldl]
+  | cons p rest ih =>
+      simp only [List.foldl]
+      have h_step_len : (h_a.alloc p.2).1.length = (h_b.alloc p.2).1.length := by
+        simp [Heap.alloc, List.length_append, h_len]
+      have h_idx_eq : (h_a.alloc p.2).2 = (h_b.alloc p.2).2 := by
+        simp [Heap.alloc, h_len]
+      rw [h_idx_eq]
+      exact ih _ _ _ h_step_len
+
+/-- `freshLevelEnv h |>.2` depends only on `h.length`, not on the heap's
+    contents. Cross-side, equal heap-lengths give equal envs.
+    Body sorry'd — the proof uses `buildBindings_foldl_env_eq_of_len_eq`
+    + `buildBindings_foldl_length` (both proved above), but Lean's
+    `whnf` hits a heartbeat timeout when `congr 1` tries to normalize
+    the foldl-on-13-element-pairs into the explicit final env. The
+    structural argument is straightforward; the term-level reduction is
+    what's expensive. Workaround: introduce an `opaque` definition for
+    `pairs`, or use `Decidable.decide` to discharge the equality. -/
+theorem freshLevelEnv_env_eq (h_a h_b : Heap) (_h_len : h_a.length = h_b.length) :
+    (freshLevelEnv h_a).2 = (freshLevelEnv h_b).2 := by
+  sorry
+
 /-- `freshLevelEnv h` produces a heap with exactly 14 more cells than `h`. -/
 theorem freshLevelEnv_heap_length (h : Heap) :
     (freshLevelEnv h).1.length = h.length + 14 := by
