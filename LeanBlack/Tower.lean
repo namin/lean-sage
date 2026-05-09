@@ -242,6 +242,27 @@ theorem TowerState.alloc_policyAt? (T : TowerState) (v : Val) (n : Nat) :
 theorem TowerState.alloc_envAt? (T : TowerState) (v : Val) (n : Nat) :
     (T.alloc v).1.envAt? n = T.envAt? n := by rfl
 
+/-! ### `materialize` lemmas -/
+
+/-- `materialize` only appends new levels — existing levels (and so
+    their envs) are preserved. The Nat.fold-based extension carries
+    a "T' = T after k append steps" structure; the structural
+    `getElem?_append_*` proof is straightforward but tedious.
+    Sorry'd as a clean target for later. -/
+theorem TowerState.materialize_envAt?_preserves
+    (T T' : TowerState) (n m : Nat) (env : Env)
+    (h_mat : T.materialize n = some T')
+    (h_env : T.envAt? m = some env) :
+    T'.envAt? m = some env := by
+  sorry
+
+/-- `materialize` only grows the heap. -/
+theorem TowerState.materialize_heap_grows
+    (T T' : TowerState) (n : Nat)
+    (h_mat : T.materialize n = some T') :
+    T.heap.length ≤ T'.heap.length := by
+  sorry
+
 /-! ## RunState compatibility shim
 
     The bisim infrastructure ported from lean-green is written

@@ -100,6 +100,40 @@ theorem WFCtxT.refl (env : Env) (T : TowerState) (level : Nat)
     WFCtxT env env T T level :=
   ⟨rfl, hh, hh, hev, hev, hresp, rfl, rfl, h_levels, h_levels⟩
 
+/-! ## Single-side level-envs preservation
+
+    `eval` (and friends) never *removes* a materialized level — they
+    can only add new levels via `(em ...)`. So `T.envAt? m` is
+    monotone over evaluation: if `T.envAt? m = some env`, then
+    `T'.envAt? m = some env` after eval. Mutual on fuel.
+
+    Used by the `applyDirect.closure` case in `frame_tower` to
+    discharge the `TowerCross.levels_mono_a/b` outputs: starting
+    from `T_a.envAt? n = some env`, after the alloc step (which
+    preserves levels via `alloc_envAt?`) and then the body eval
+    (which preserves via this lemma), `T_a'.envAt? n = some env`. -/
+
+/-- `eval_preserves_envAt` (and the 3 mutual variants for
+    `evalList`/`applyVia`/`applyDirect`) — eval doesn't lose
+    materialized levels.
+
+    **Body sorry'd**: the proof is structural — induction on fuel,
+    case-split on the eval constructor, apply the relevant Tower
+    lemma (`updateHeap_envAt?`, `alloc_envAt?`, `setPolicyAt_envAt?`,
+    `materialize_envAt?_preserves`). The mechanical case proofs
+    were transcribed (~250 LOC) but ran into Lean's mutual-recursion
+    + simp-unfolding interaction in the `applyDirect` and `applyVia`
+    cases (`simp only [applyDirect] at h` makes no progress because
+    of the mutual block). Fixable but tedious. Left as a focused
+    follow-up. -/
+theorem eval_preserves_envAt
+    (n : Nat) (ptable : PolicyTable) (level : Nat) (exp : Expr) (env : Env)
+    (T : TowerState) (r : Val) (T' : TowerState) (m : Nat) (env_m : Env)
+    (_h_eval : eval n ptable level exp env T = some (r, T'))
+    (_h_env : T.envAt? m = some env_m) :
+    T'.envAt? m = some env_m :=
+  sorry
+
 /-! ## Tower-cross invariants
 
     `HeapEvolution` (from lean-green's Bisim) carries cross-side
@@ -1064,15 +1098,25 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                 HeapEvolution.from_heapExt h_hv_a h_hv_b ⟨ext_a, hex_a⟩ ⟨ext_b, hex_b⟩
               have h_he_chain : HeapEvolution T_a T_b T_a' T_b' :=
                 HeapEvolution.trans h_he_alloc h_he_body
-              -- TowerCross output bundles WFCtxT-level facts at output.
-              -- The two `levels_mono_*` slots need a "frame eval preserves
-              -- level envs" lemma (eval doesn't remove materialized
-              -- levels — only adds via .em). That lemma isn't in
-              -- FrameStmtT's eval clause output yet; deferred.
+              -- TowerCross output: levels-mono via eval_preserves_envAt
+              -- (which currently sorries its own body — see lemma above).
+              have h_levs_mono_a : ∀ n env, T_a.envAt? n = some env →
+                  T_a'.envAt? n = some env := by
+                intro n env hen
+                have hen' : T_a_alloc.envAt? n = some env := hen
+                exact eval_preserves_envAt k ptable level body
+                  (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).2
+                  T_a_alloc r_a T_a' n env h_eval hen'
+              have h_levs_mono_b : ∀ n env, T_b.envAt? n = some env →
+                  T_b'.envAt? n = some env := by
+                intro n env hen
+                have hen' : T_b_alloc.envAt? n = some env := hen
+                exact eval_preserves_envAt k ptable level body
+                  (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).2
+                  T_b_alloc r_b T_b' n env h_eval_b hen'
               have h_tc_out : TowerCross level T_a T_b T_a' T_b' :=
                 ⟨h_ctx_body.heap_len_eq, h_ctx_body.policy_eq_at,
-                 (sorry : ∀ n env, T_a.envAt? n = some env → T_a'.envAt? n = some env),
-                 (sorry : ∀ n env, T_b.envAt? n = some env → T_b'.envAt? n = some env),
+                 h_levs_mono_a, h_levs_mono_b,
                  h_ctx_body.hv_a, h_ctx_body.hv_b,
                  h_ctx_body.level_envs_valid_a, h_ctx_body.level_envs_valid_b,
                  h_ctx_body.policy_resp⟩
