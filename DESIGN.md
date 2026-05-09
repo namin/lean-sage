@@ -6,13 +6,12 @@ heap+closure+`set!`, value bisimulation à la CakeML). The goal is a single
 formalization that is **both** infinite-and-reflective-in-its-governance **and**
 operationally-faithful-to-Black.
 
-> **Status update**: this doc was the initial sketch before any code. The
-> design has been substantially realized — see the README for the current
-> snapshot (~6700 LOC, runtime + ported Bisim foundation + tower-aware
-> framing infrastructure with the cross-level synthesis structurally
-> complete). The architectural decisions below all hold; only the per-level
-> *policy storage* (lines 67-74) deviated from this draft (see correction
-> in that section).
+> 13,571 LOC of library + 684 LOC of demo executables, 0 sorries. Headline
+> theorems proved: `eval_tower_safe`, `frame_tower`, `shift_respect`,
+> `applyDirect_heap_extend_weak`, `multnExact_soundForCE_first_install_tower`,
+> `safeEvolution_necessary`. Smoke 8/8 + Demos 29/29 across 12 scenes.
+> Per-level *policy storage* (lines 67-74) deviated from this draft — see
+> correction in that section.
 
 ## What each parent gives
 
