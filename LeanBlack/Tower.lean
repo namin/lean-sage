@@ -156,3 +156,24 @@ def TowerState.updateHeap (T : TowerState) (idx : Nat) (v : Val) : TowerState :=
 def TowerState.alloc (T : TowerState) (v : Val) : TowerState × Nat :=
   let (h', idx) := T.heap.alloc v
   ({ T with heap := h' }, idx)
+
+/-! ## RunState compatibility shim
+
+    The bisim infrastructure ported from lean-green is written
+    against `RunState`. To reuse it, `RunState` is defined as an
+    alias for `TowerState` and a `.policy` projection is provided
+    that returns the level-0 policy by default.
+
+    This shim is *adequate for the framing infrastructure* (where
+    the policy carried in `WFCtx.policy_resp` only needs to be
+    deterministic and stable). The truly cross-level lift —
+    `StateExt` / `WFCtx` parameterized by level — is the work of
+    `TowerBisim.lean` (forthcoming), which will refine this shim. -/
+
+abbrev RunState := TowerState
+
+/-- Project a single `BlackPolicy` from a `TowerState`. Defaults to
+    level 0; returns `acceptAllPolicy` if level 0 is unmaterialized
+    (which never happens for `initTower`-rooted runs). -/
+def TowerState.policy (T : TowerState) : BlackPolicy :=
+  (T.policyAt? 0).getD acceptAllPolicy

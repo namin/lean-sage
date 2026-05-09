@@ -17,10 +17,10 @@ Status, by file:
 | File | Status | Notes |
 |---|---|---|
 | `Black.lean` | done | Val/Expr/Env, Heap ops, primitives, MutationCtx, BlackPolicy |
-| `Tower.lean` | done | LevelState, TowerState, materialization, accessors |
+| `Tower.lean` | done | LevelState, TowerState, materialization, accessors, `RunState := TowerState` shim |
 | `Eval.lean` | done | tower-indexed eval/evalList/applyVia/applyDirect |
 | `Smoke.lean` | done | 8 tests across 4 scenes — all pass |
-| `Bisim.lean` | TODO | will port lean-green's ValVis/WFCtx/HeapEvolution |
+| `Bisim.lean` | partial (3057/7580 LOC) | depth-indexed bisim, validity, heap-extension, in-place-update preservation, `HeapEvolution`, list/listToVal/applyPrim bisim, alloc-chain, `bisim_imp_eq` — all ported verbatim via the `RunState := TowerState` shim. **Frame theorem and post-frame (shift, Deep, runtime invariants) deferred** — frame's signature drops lean-green's `metaEnv` parameter and adds `level`, and the `.em` case is genuinely new logic, so those sections need real engineering, not a port |
 | `Policies.lean` | TODO | will port multnExactPolicy + soundness theorem |
 | `Soundness.lean` | TODO | the headline `eval_tower_safe` theorem |
 | `DESIGN.md` | done | architectural rationale, decisions, scope |
@@ -86,23 +86,39 @@ Pinned to `leanprover/lean4:v4.20.0` via `lean-toolchain` (matches lean-green).
 
 Roughly ordered by load-bearingness:
 
-1. **Port `Bisim.lean` from lean-green** verbatim. The per-level `ValVis` /
-   `WFCtx` / `HeapEvolution` / `ValVis_aux_update` / `EnvVis_aux_update`
-   apparatus is level-agnostic — it operates within a single eval call and
-   doesn't see the tower structure. ~7K LOC port-as-is.
+1. **Port the frame theorem** (`Bisim.lean`, lines 3059-4790 of lean-green's
+   version). This is genuine engineering — the lean-green `WFCtx` and
+   `FrameStmt` carry a `metaEnv` parameter that the tower model collapses
+   (env at level N+1 *is* the metaEnv from level N's view) and need a new
+   `level : Nat` parameter. The `.em` case is genuinely new — it shifts
+   levels and recurses at the new level, where lean-green's `(em body)` was
+   essentially a no-op (stage-1 metaEnv-of-meta = self). Estimate:
+   ~1500-2000 LOC of port + adaptation.
 
-2. **Port `Policies.lean`** verbatim. `BlackPolicy` is unchanged (modulo
+2. **Port the post-frame sections** (`shift`, `Deep`, runtime invariants —
+   lines 4792-7580 of lean-green's version). Once frame ports, these are
+   mostly mechanical: `shift_*` / `*Deep` / `*AllBelow` are heap-only
+   primitives. The `runtime_invariants_initial` lemma needs to talk about
+   the lean-black `initTower`, not lean-green's `initState`.
+
+3. **Port `Policies.lean`** verbatim. `BlackPolicy` is unchanged (modulo
    the `level` field added to `MutationCtx`). `multnExactPolicy`,
    `numGuardPolicy`, `rejectAll` and their respect-bisim / respect-shift
-   theorems port directly. The headline
-   `multnExact_soundForCE_first_install` becomes per-level (it talks about
-   one install at one level).
+   theorems port directly.
 
-3. **`Soundness.lean`**: the headline `eval_tower_safe` theorem.
+4. **`Soundness.lean`**: the headline `eval_tower_safe` theorem.
    Roughly 500-1500 new LOC: the tower-level induction over `eval`'s cases,
    composing per-level lemmas via a cross-level `TowerVis` lift.
 
-4. **Optional: LLM cascade** (`Bedrock.lean` / `Elab.lean` / `Runner.lean`).
+5. **Refine the `RunState` shim.** Currently `RunState := TowerState` and
+   `TowerState.policy` projects level 0's policy. This is adequate for the
+   ported pre-frame theorems (which only need a stable, deterministic
+   policy projection for `WFCtx.policy_resp`-style invariants). The
+   refinement: parameterize the cross-side `WFCtx` and `StateExt` by
+   `level : Nat`, so the policy that matters is `T.policyAt? level`. This
+   is part of the frame port (item 1), not a separate task.
+
+6. **Optional: LLM cascade** (`Bedrock.lean` / `Elab.lean` / `Runner.lean`).
    Ports unchanged from lean-green for single-level demos; the interesting
    tower extension is a meta-meta proposer, but that's a separate research
    thread.
