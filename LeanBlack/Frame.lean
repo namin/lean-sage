@@ -297,6 +297,56 @@ private theorem freshLevelEnv_env_valid (h : Heap) :
     have := h_inner name i hl
     omega
 
+/-- For envs at *newly-materialized* levels (m ≥ T.levels.length), all
+    bindings are at indices ≥ T.heap.length. This means fresh-level
+    bindings live entirely in the freshly-allocated extras range. -/
+private theorem materializeStep_iter_fresh_env_lookups_geq
+    (T : TowerState) (k : Nat) :
+    ∀ m env, T.levels.length ≤ m →
+    (Nat.fold k (fun _ _ T' => materializeStep T') T).envAt? m = some env →
+    ∀ name i, env.lookup name = some i → T.heap.length ≤ i := by
+  induction k with
+  | zero =>
+      intro m env h_m hen name i hl
+      simp only [Nat.fold] at hen
+      unfold TowerState.envAt? TowerState.levelAt? at hen
+      have h_oob : T.levels[m]? = none := List.getElem?_eq_none h_m
+      rw [h_oob] at hen
+      simp at hen
+  | succ k ih =>
+      intro m env h_m hen name i hl
+      simp only [Nat.fold] at hen
+      let T_k := Nat.fold k (fun _ _ T' => materializeStep T') T
+      change (materializeStep T_k).envAt? m = some env at hen
+      unfold materializeStep at hen
+      unfold TowerState.envAt? TowerState.levelAt? at hen
+      by_cases h_in : m < T_k.levels.length
+      · -- Pre-existing in T_k: env from T_k.envAt? m. By IH, lookups ≥ T.heap.length.
+        rw [List.getElem?_append_left h_in] at hen
+        have h_T_k_env : T_k.envAt? m = some env := by
+          unfold TowerState.envAt? TowerState.levelAt?; exact hen
+        exact ih m env h_m h_T_k_env name i hl
+      · by_cases h_eq_idx : m = T_k.levels.length
+        · -- New level at T_k.levels.length: env = freshLevelEnv T_k.heap.snd.
+          subst h_eq_idx
+          rw [List.getElem?_append_right (Nat.le_refl _)] at hen
+          simp at hen
+          -- hen: env = (freshLevelEnv T_k.heap).snd
+          rw [← hen] at hl
+          have h_geq_Tk : T_k.heap.length ≤ i :=
+            freshLevelEnv_env_lookups_geq T_k.heap name i hl
+          have h_grows : T.heap.length ≤ T_k.heap.length :=
+            materializeStep_iter_heap_grows T k
+          omega
+        · -- m > T_k.levels.length: out of bounds.
+          have h_oob : (T_k.levels ++
+              [({env := (freshLevelEnv T_k.heap).snd, policy := acceptAllPolicy} :
+                LevelState)])[m]? = none := by
+            apply List.getElem?_eq_none
+            simp [List.length_append]; omega
+          rw [h_oob] at hen
+          simp at hen
+
 /-- One materializeStep preserves "level envs valid in heap". -/
 private theorem materializeStep_level_envs_valid_preserves
     (T : TowerState)
@@ -1357,8 +1407,81 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                         rw [hex_a, hex_b]
                         exact EnvVis_extends ls.env ls.env T_a.heap T_b.heap ext_a ext_b
                           h_ctx.hv_a h_ctx.hv_b h_evalid_a h_evalid_b h_inv
-                      · -- Case B: newly-materialized level. Bindings → atomic cells.
-                        sorry
+                      · -- Case B: newly-materialized level (m ≥ T_a.levels.length).
+                        -- env's bindings live in the freshly-allocated extras range,
+                        -- which is identical cross-side (extras determined by primPairs
+                        -- + h.length, equal cross-side); cells there are closedValB-true.
+                        have h_m_geq : T_a.levels.length ≤ m := Nat.le_of_not_lt hm_lt
+                        -- Cross-side extras-equality + closedness.
+                        obtain ⟨ext, ha_ext_eq, hb_ext_eq, h_ext_closed⟩ :=
+                          TowerState.materialize_heap_extends_eq T_a T_b T_a_mat T_b_mat
+                            (level + 1) h_ctx.heap_len_eq h_ctx.level_envs_eq hm_a hm_b
+                        -- Convert hm_a to iter form. Either T_a.levels.length > level + 1
+                        -- (no-op, T_a_mat = T_a, contradicts m ≥ T_a.levels.length AND
+                        -- T_a_mat.envAt? m = some env) or iter form (what we need).
+                        have h_T_a_mat_iter :
+                            T_a_mat = Nat.fold ((level + 1) + 1 - T_a.levels.length)
+                              (fun _ _ T' => materializeStep T') T_a := by
+                          unfold TowerState.materialize at hm_a
+                          by_cases h1 : level + 1 ≥ Tower.maxDepth
+                          · simp [h1] at hm_a
+                          · simp [h1] at hm_a
+                            by_cases h2 : T_a.levels.length > level + 1
+                            · -- no-op case: T_a_mat = T_a, contradicts hen for m ≥ T_a.levels.length.
+                              simp [h2] at hm_a
+                              exfalso
+                              have h_T_eq : T_a = T_a_mat := hm_a
+                              rw [← h_T_eq] at hen
+                              unfold TowerState.envAt? TowerState.levelAt? at hen
+                              have h_oob : T_a.levels[m]? = none :=
+                                List.getElem?_eq_none h_m_geq
+                              rw [h_oob] at hen
+                              simp at hen
+                            · simp [h2] at hm_a; exact hm_a.symm
+                        -- Apply iter lookups_geq.
+                        have h_iter_hen :
+                            (Nat.fold ((level + 1) + 1 - T_a.levels.length)
+                              (fun _ _ T' => materializeStep T') T_a).envAt? m = some env := by
+                          rw [← h_T_a_mat_iter]; exact hen
+                        intro depth x
+                        cases hl : env.lookup x with
+                        | none => simp
+                        | some i =>
+                            simp only [hl]
+                            have h_i_geq : T_a.heap.length ≤ i :=
+                              materializeStep_iter_fresh_env_lookups_geq T_a
+                                ((level + 1) + 1 - T_a.levels.length)
+                                m env h_m_geq h_iter_hen x i hl
+                            -- Get T_a_mat.heap[i]? = some v_a.
+                            have h_i_lt_a : i < T_a_mat.heap.length :=
+                              h_levs_valid_a_mat m env hen x i hl
+                            have h_a_some : ∃ v, T_a_mat.heap[i]? = some v := by
+                              cases hp : T_a_mat.heap[i]? with
+                              | none =>
+                                  exfalso
+                                  have := List.getElem?_eq_none_iff.mp hp
+                                  omega
+                              | some v => exact ⟨v, rfl⟩
+                            obtain ⟨v, hv_a_eq⟩ := h_a_some
+                            -- v ∈ ext (since i ≥ T_a.heap.length and ha_ext_eq).
+                            have h_v_in_ext : v ∈ ext := by
+                              have h_in : T_a_mat.heap[i]? = some v := hv_a_eq
+                              rw [ha_ext_eq, List.getElem?_append_right h_i_geq] at h_in
+                              exact List.mem_of_getElem? h_in
+                            -- T_b_mat.heap[i]? = some v also (extras equal cross-side).
+                            have h_b_get : T_b_mat.heap[i]? = some v := by
+                              have h_a_get : T_a_mat.heap[i]? = ext[i - T_a.heap.length]? := by
+                                rw [ha_ext_eq, List.getElem?_append_right h_i_geq]
+                              have h_i_geq_b : T_b.heap.length ≤ i := by
+                                rw [← h_ctx.heap_len_eq]; exact h_i_geq
+                              have h_b_get_aux : T_b_mat.heap[i]? = ext[i - T_b.heap.length]? := by
+                                rw [hb_ext_eq, List.getElem?_append_right h_i_geq_b]
+                              rw [h_b_get_aux, ← h_ctx.heap_len_eq, ← h_a_get, hv_a_eq]
+                            -- Conclude via closedness.
+                            have h_v_closed : closedValB v = true :=
+                              h_ext_closed v h_v_in_ext
+                            rw [hv_a_eq, h_b_get]
+                            exact closedValB_ValVis_aux depth v T_a_mat.heap T_b_mat.heap h_v_closed
                     have h_ctx_mat : WFCtxT upEnv_a upEnv_a T_a_mat T_b_mat (level + 1) :=
                       ⟨h_pols_eq_mat (level + 1), h_hv_a_mat, h_hv_b_mat,
                        h_ev_a, h_ev_b, h_pol_resp_at,

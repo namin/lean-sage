@@ -359,21 +359,32 @@ theorem freshLevelEnv_heap_extends (h : Heap) :
   refine ⟨extras ++ [.builtinBaseApply], ?_⟩
   rw [h_eq, List.append_assoc]
 
+/-- All values stored in primPairs are atomic primitives (closedValB). -/
+theorem primPairs_atoms_closed : ∀ v ∈ primPairs.map (·.2), closedValB v = true := by
+  intro v hv
+  unfold primPairs at hv
+  -- After unfold, hv shows v is one of the .prim values.
+  simp [List.map] at hv
+  rcases hv with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
+  all_goals rfl
+
 /-- After k materializeStep iterations, the heap is the input heap appended
     with a *fixed* extras list determined by `k` alone (not the input heap).
     Cross-side parallelism: starting from heaps of equal length, the
-    materialize iter appends the same extras on both sides. -/
+    materialize iter appends the same extras on both sides, and all
+    cells in the extras are atomic primitives (closedValB-true). -/
 private theorem materializeStep_iter_heap_eq
     (T_a T_b : TowerState) (k : Nat)
     (_h_len : T_a.heap.length = T_b.heap.length) :
     ∃ extras,
       (Nat.fold k (fun _ _ T' => materializeStep T') T_a).heap = T_a.heap ++ extras ∧
-      (Nat.fold k (fun _ _ T' => materializeStep T') T_b).heap = T_b.heap ++ extras := by
+      (Nat.fold k (fun _ _ T' => materializeStep T') T_b).heap = T_b.heap ++ extras ∧
+      ∀ v ∈ extras, closedValB v = true := by
   induction k with
-  | zero => exact ⟨[], by simp [Nat.fold], by simp [Nat.fold]⟩
+  | zero => exact ⟨[], by simp [Nat.fold], by simp [Nat.fold], by intro _ h; simp at h⟩
   | succ k ih =>
-      obtain ⟨extras_k, ha_eq, hb_eq⟩ := ih
-      refine ⟨extras_k ++ primPairs.map (·.2) ++ [.builtinBaseApply], ?_, ?_⟩
+      obtain ⟨extras_k, ha_eq, hb_eq, h_closed_k⟩ := ih
+      refine ⟨extras_k ++ primPairs.map (·.2) ++ [.builtinBaseApply], ?_, ?_, ?_⟩
       · -- a-side: heap evolves by materializeStep one more time.
         have h_step : (Nat.fold (k + 1) (fun _ _ T' => materializeStep T') T_a).heap
             = (freshLevelEnv (Nat.fold k (fun _ _ T' => materializeStep T') T_a).heap).1 := by
@@ -386,9 +397,15 @@ private theorem materializeStep_iter_heap_eq
           simp [Nat.fold, materializeStep]
         rw [h_step, freshLevelEnv_heap_eq, hb_eq]
         simp [List.append_assoc]
+      · intro v hv
+        rcases List.mem_append.mp hv with h_in_left | h_in_right
+        · rcases List.mem_append.mp h_in_left with h_in_extras_k | h_in_primPairs
+          · exact h_closed_k v h_in_extras_k
+          · exact primPairs_atoms_closed v h_in_primPairs
+        · simp at h_in_right; rw [h_in_right]; rfl
 
 /-- After k applications of the fold step, the heap grows monotonically. -/
-private theorem materializeStep_iter_heap_grows (T : TowerState) (k : Nat) :
+theorem materializeStep_iter_heap_grows (T : TowerState) (k : Nat) :
     T.heap.length ≤ (Nat.fold k (fun _ _ T' => materializeStep T') T).heap.length := by
   induction k with
   | zero => simp [Nat.fold]
@@ -608,15 +625,17 @@ private theorem levels_length_eq_of_envs_eq
 
 /-- Cross-side parallel materialize produces *identical* extras on both
     sides (since `freshLevelEnv` extras depend only on `h.length`,
-    equal cross-side). Strengthens `materialize_heap_extends` to give
-    the same `extras` cross-side. -/
+    equal cross-side), and all extras are atomic (closedValB-true).
+    Strengthens `materialize_heap_extends` to give the same `extras`
+    cross-side. -/
 theorem TowerState.materialize_heap_extends_eq
     (T_a T_b T_a' T_b' : TowerState) (n : Nat)
     (h_heap_len : T_a.heap.length = T_b.heap.length)
     (h_envs : ∀ m, T_a.envAt? m = T_b.envAt? m)
     (h_mat_a : T_a.materialize n = some T_a')
     (h_mat_b : T_b.materialize n = some T_b') :
-    ∃ extras, T_a'.heap = T_a.heap ++ extras ∧ T_b'.heap = T_b.heap ++ extras := by
+    ∃ extras, T_a'.heap = T_a.heap ++ extras ∧ T_b'.heap = T_b.heap ++ extras ∧
+      ∀ v ∈ extras, closedValB v = true := by
   have h_lvl_len : T_a.levels.length = T_b.levels.length :=
     levels_length_eq_of_envs_eq T_a T_b h_envs
   unfold materialize at h_mat_a h_mat_b
@@ -628,7 +647,7 @@ theorem TowerState.materialize_heap_extends_eq
       simp [h2] at h_mat_a; simp [h2_b] at h_mat_b
       obtain rfl := h_mat_a.symm
       obtain rfl := h_mat_b.symm
-      exact ⟨[], by simp, by simp⟩
+      exact ⟨[], by simp, by simp, by intro _ h; simp at h⟩
     · have h2_b : ¬ T_b.levels.length > n := h_lvl_len ▸ h2
       simp [h2] at h_mat_a; simp [h2_b] at h_mat_b
       obtain rfl := h_mat_a.symm
