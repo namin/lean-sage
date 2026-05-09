@@ -12,29 +12,23 @@
   side policy equality is checked at a specific `level`, not on a
   monolithic `s.policy`.
 
-  ## What's done
+  ## Contents
 
   - `callAsBaseApply` (tower-aware)
   - `CE` / `CE_weak` (per-level)
-  - `acceptAll` / `rejectAll` SoundForCE proofs
+  - `rejectAllPolicy` SoundForCE proof
   - `numGuardPolicy` / `multnExactPolicy` definitions + structural
     shape lemmas
   - `verifiedTable` and indexing constants
-  - The headline theorem statement
-    `multnExact_soundForCE_first_install_tower` (sorry'd —
-    discharging it requires the full frame port)
-
-  ## What's deferred (waiting on Frame.lean completion)
-
-  - `*_respects_bisim` theorems for `numGuardPolicy` /
-    `multnExactPolicy` (they need `bisim_imp_eq` which is in
-    `Bisim.lean` — those *can* port; on the to-do list).
-  - `*_respects_shift` theorems (they need the shift apparatus
-    which lives in the post-frame Bisim section, not yet ported).
-  - The conditional CE soundness theorems
-    (`multnExact_CE_num_case_vacuous` /
-    `multnExact_CE_nonnum_case`) — both depend on the frame
-    theorem.
+  - `OrigBoundIn` / `NumQBoundIn` / `InstallFacts` / `RuntimeWF`
+    install-protocol structures
+  - `multnExactPolicy_implies_InstallFacts` (bridge lemma)
+  - `multn_closure_body_unfolds` (closure-body trace)
+  - `multnExact_CE_num_case_vacuous` (numerical case, vacuous)
+  - `multnExact_CE_nonnum_case` (substantive non-numerical case via
+    `applyDirect_heap_extend_weak`)
+  - `multnExact_soundForCE_first_install_tower` (the headline,
+    proven by combining the num and non-num cases)
 -/
 
 import LeanBlack.Black
@@ -475,9 +469,8 @@ theorem multn_closure_body_unfolds
 
     Ported from lean-green:Policies.lean:1110-1196. Tower-aware:
     threads `level` through callAsBaseApply / applyDirect. Uses
-    sorry'd `applyDirect_heap_extend_weak` for the prefix-extension
-    lemma (lean-green proves this via `shift_respect`; the tower-
-    aware proof is a multi-session port — see DUMP2.md). -/
+    `applyDirect_heap_extend_weak` (Frame.lean) for the prefix-
+    extension lemma, which is itself derived from `shift_respect`. -/
 theorem multnExact_CE_nonnum_case
     {new : Val} {ctx : MutationCtx}
     (h_admit : multnExactPolicy ctx .builtinBaseApply new = true)

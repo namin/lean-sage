@@ -1,5 +1,6 @@
 /-
-  lean-black: Frame theorem (tower-aware).
+  lean-black: Frame theorem (tower-aware) + shift apparatus + the
+  framing lemmas needed for `applyDirect_heap_extend_weak`.
 
   Adapts lean-green's `frame` to the tower model. Shape changes:
 
@@ -8,34 +9,31 @@
     threaded as an independent parameter. In the tower model,
     metaEnv at level N *is* `T.envAt? (level + 1)` — derived from
     the tower, not an independent parameter.
-  - **New `level : Nat` parameter.** WFCtx and FrameStmt are
+  - **New `level : Nat` parameter.** WFCtxT and FrameStmtT are
     parameterized by the level at which the eval is happening.
-  - **`StateExt`-like component changes.** Cross-side policy
-    equality is at *the current level*: `T_a.policyAt? level =
-    T_b.policyAt? level`. The lean-green shimmed `StateExt` (level-0
-    policy equality) is too weak.
+  - **Per-level cross-side policy equality.** `T_a.policyAt? level =
+    T_b.policyAt? level`, instead of lean-green's global `s.policy`
+    equality.
 
-  This file defines the new `WFCtxT` / `FrameStmtT` and states the
-  `frame_tower` theorem. **The case proofs are deferred** —
-  porting them is genuine engineering (~1500-2000 LOC adapted from
-  lean-green's `frame`):
+  Contents (all proved):
 
-  - Mechanical cases (`.num`, `.bool`, `.lam`, `.var`, `.ifte`,
-    `.app`, `.primApp`, `.letE`, `.seq`) port nearly verbatim,
-    threading `level` through inner IH calls. A few are proved
-    here as templates.
-  - **`.em`** is genuinely new logic: the level shifts. We need a
-    bisim-preserving materialization lemma (`Tower.materialize`
-    extends both sides equivalently).
-  - **`.set`** uses `T.policyAt? level` for the gate; the cross-
-    side argument needs `policies_eq_at_level`.
-  - **`.installPolicy`** mutates `T.policyAt? level`; both sides
-    get the same new policy at the same level.
-  - **`applyVia`** dispatches through `T.envAt? (level + 1)`
-    instead of an independent metaEnv. The level-(level+1) env
-    needs to be bisim-related cross-side.
-
-  The remaining case proofs are the work of follow-up sessions.
+  - `WFCtxT` (13 fields), `TowerCross` (12 fields), `FrameStmtT`,
+    `frame_tower` (4-way mutual induction over fuel covering
+    eval/evalList/applyVia/applyDirect — all 13 expression cases
+    handled in eval, including `.em` via materialize-cross-side
+    lemmas, `.set` via per-level policy_eq_at, and `.installPolicy`).
+  - Single-side materialize preservation lemmas
+    (`materialize_HeapValid_preserves`,
+    `materialize_level_envs_valid_preserves`,
+    `materialize_policies_resp_preserves`).
+  - `all_preserves_envAt` (mutual conjunction).
+  - `heap_mono` (4-way mutual induction over fuel).
+  - `policy_shift_preserved` (preserves PolicyRespectsShift on all
+    levels' policies through eval steps).
+  - `shift_respect` (4-way commutativity proof: eval/evalList/
+    applyVia/applyDirect commute with `shift_state`).
+  - `applyDirect_heap_extend_weak` (prefix-extension, derived via
+    `shift_respect` + `frame_tower` self-bisim).
 -/
 
 import LeanBlack.Black
@@ -90,9 +88,8 @@ theorem rejectAllPolicy_respects_bisimT :
 
     Used by `.em` and `applyVia` cases below. Each says materialize
     preserves a single-side invariant (HeapValid, level-envs-valid,
-    all-policies-respect-bisim). Bodies sorry'd — straightforward
-    inductions over Nat.fold + appeal to `freshLevelEnv`'s
-    deterministic structure. -/
+    all-policies-respect-bisim). Proved by induction over `Nat.fold`
+    + appeal to `freshLevelEnv`'s deterministic structure. -/
 
 /-- HeapValid is preserved when appending closed values (atoms have
     `ValValid v _` = True regardless of heap; pre-existing cells get
@@ -980,8 +977,7 @@ private def FrameStmtT (n : Nat) : Prop :=
       TowerCross level T_a T_b T_a' T_b' ∧
       ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap)
 
-/-! ## The headline theorem (zero case + literal cases proved;
-    everything else `sorry`'d as a stub for follow-up sessions) -/
+/-! ## The framing theorem -/
 
 theorem frame_tower : ∀ n, FrameStmtT n := by
   intro n

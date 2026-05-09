@@ -2,17 +2,14 @@
   lean-black: Data layer.
 
   Val, Expr, Env (mutual), Heap, primitives, MutationCtx, BlackPolicy.
-
-  Adapted from `lean-green/LeanBlack/Black.lean`. Trimmed to the
-  runtime essentials: the structural-`beq` correctness lemmas and
-  the verified policy library are deferred (they live in `Bisim.lean`
-  / `Policies.lean` in lean-green; the lean-black ports come once
-  the runtime layer here is solid).
+  Plus structural-`beq` correctness lemmas (`val_beq_eq`,
+  `expr_beq_eq`, `env_beq_eq`) and `valToList_listToVal`, ported from
+  lean-green for use by `multnExactPolicy_implies_InstallFacts`.
 
   The per-level `LevelState` and the `Tower` type live in
   `Tower.lean`; `eval` / `evalList` / `applyVia` / `applyDirect`
-  thread a `Tower` instead of a single `RunState` and live in
-  `Eval.lean`.
+  thread a `TowerState` instead of a single `RunState` and live in
+  `Eval.lean`. The verified policy library lives in `Policies.lean`.
 -/
 
 mutual

@@ -1,5 +1,5 @@
 /-
-  lean-black: Tower-level soundness theorem (statement scaffold).
+  lean-black: Tower-level soundness theorem.
 
   The headline theorem is the cross-level lift of:
   - lean-grey's `eval_tower_conservative` (which has the *shape* —
@@ -15,23 +15,29 @@
   program preserves cross-level conservative extension across the
   entire tower AND preserves `SafeEvolution` post-eval.
 
-  ## Status
+  ## Contents
 
-  This file is a **scaffold**: the statement is in place, the body
-  is `sorry`. Discharging it requires:
-  - The full frame theorem (`Frame.lean` — currently 6 cases
-    sorry'd).
-  - The headline single-install soundness
-    (`Policies.lean :: multnExact_soundForCE_first_install_tower`
-    — currently sorry, depends on frame).
-  - A coinductive (or maxDepth-bounded) lift of single-install
-    soundness to the cross-level `TowerCE` predicate below.
+  - `TowerCE` and `SafeEvolution` definitions, with the `h_ref` /
+    heap-extension premise that supports composition across mutating
+    sub-evals.
+  - `TowerCE` helpers: `refl`, `trans`, `of_heap_eq`,
+    `of_heap_extends`, `lift_source`, `weaken_h_ref`.
+  - `Expr.IsAtomic` + `eval_atomic_T_unchanged`.
+  - Self-invariant preservation lemmas
+    (`eval_preserves_self_invariants`, `evalList_*`, `applyVia_*`,
+    `applyDirect_*`).
+  - `safeEvolution_necessary` (concrete diverging-closure
+    counterexample showing per-level policy soundness is required).
+  - `all_tower_safe`: the 4-way mutual safety theorem — joint
+    preservation of `TowerCE` and `SafeEvolution` for `eval` /
+    `evalList` / `applyVia` / `applyDirect`, by single induction on
+    fuel.
+  - `eval_tower_safe`: wrapper projecting the eval clause from
+    `all_tower_safe`.
 
-  The architecture of the cross-level lift mirrors lean-grey's
-  `eval_tower_conservative` proof, but instantiated against the
-  real-heap operational semantics from lean-green rather than the
-  abstract `ApplyRule` layer. This is precisely the synthesis
-  promised by `DESIGN.md`.
+  Mirrors lean-grey's `eval_tower_conservative` proof, instantiated
+  against the real-heap operational semantics from lean-green rather
+  than the abstract `ApplyRule` layer.
 -/
 
 import LeanBlack.Black
@@ -77,14 +83,13 @@ def TowerCE (T T' : TowerState) : Prop :=
 /-- `TowerCE` is reflexive (every well-formed tower CE-extends itself).
     Uses `frame_tower`'s applyDirect clause with self-pair (T_a = T_b)
     to derive bisim, HeapValid preservation, and heap monotonicity for
-    the `callAsBaseApply` post-state. The `.builtinBaseApply` case is
-    fully proved; the non-builtin case (closures, atoms) is sorry'd
-    because we'd need `ValValid oldApply T₀.heap` (oldApply is from T,
-    test state is T₀ — which may differ).
-    A complete proof would require either further CE preconditions
-    (e.g., a `ValValid old T.heap` premise for the candidate base-apply
-    value) or a more refined statement scoped to test states whose
-    heaps extend T's. -/
+    the `callAsBaseApply` post-state. All Val-constructor cases handled:
+    `.builtinBaseApply` dispatches via applyDirect on op/operands;
+    `.prim s` dispatches via applyPrim; `.closure ps body cenv` uses
+    the `hv_oldApply` premise (added when CE was strengthened with a
+    `ValValid old T.heap` precondition) to discharge the closure's
+    `EnvValid cenv T.heap` requirement; `.num`/`.bool`/`.nilV`/`.sym`/
+    `.cons` cases are vacuous (applyDirect returns none on these). -/
 theorem TowerCE.refl (T : TowerState)
     (hh : HeapValid T.heap)
     (h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
@@ -458,7 +463,7 @@ def SafeEvolution (ptable : PolicyTable) (T : TowerState) : Prop :=
   (∀ n p, T.policyAt? n = some p → ∀ m, p.UnivSoundAt m) ∧
   (∀ p, p ∈ ptable → ∀ level, p.UnivSoundAt level)
 
-/-! ## The headline theorem (statement; body deferred) -/
+/-! ## The headline theorem -/
 
 /-- `eval` preserves the self-WFCtxT invariants (HeapValid, level-envs-valid,
     policies-resp-all, EnvVis self-self at all materialized levels), plus
