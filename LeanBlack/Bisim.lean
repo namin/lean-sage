@@ -3078,3 +3078,156 @@ theorem bisim_imp_eq : ∀ (v1 v2 : Val) (h1 h2 : Heap),
       | cons _ _ => simp [ValVis_aux] at h1
       | prim _ => simp [ValVis_aux] at h1
       | builtinBaseApply => simp [ValVis_aux] at h1
+
+/-! ## AllBelow / Deep predicates
+
+    Ported from lean-green:Bisim.lean:5037-5162. Independent of tower
+    state — these are pure structural predicates on Env / Val / Heap.
+
+    `Env.AllBelow cutoff env` says every binding in `env` (including
+    shadowed ones) has `idx < cutoff`. Stronger than `EnvValid` which
+    only constrains lookups.
+
+    `EnvDeep env h` says every binding in `env` has `idx < h.length`,
+    making it suitable for length-monotonicity arguments.
+
+    `HeapDeep h` says every cell of `h` is `ValDeep` in `h`. Used by
+    the multnExact non-num case proof to derive uniform shifts. -/
+
+def Env.AllBelow (cutoff : Nat) : Env → Prop
+  | .nil               => True
+  | .cons _ idx rest   => idx < cutoff ∧ Env.AllBelow cutoff rest
+
+def Val.AllBelow (cutoff : Nat) : Val → Prop
+  | .num _              => True
+  | .bool _             => True
+  | .nilV               => True
+  | .sym _              => True
+  | .prim _             => True
+  | .builtinBaseApply   => True
+  | .cons x y           => Val.AllBelow cutoff x ∧ Val.AllBelow cutoff y
+  | .closure _ _ cenv   => Env.AllBelow cutoff cenv
+
+def ListVal.AllBelow (cutoff : Nat) : List Val → Prop
+  | []      => True
+  | v :: vs => Val.AllBelow cutoff v ∧ ListVal.AllBelow cutoff vs
+
+theorem Env.AllBelow.mono {cutoff cutoff' : Nat} (h_le : cutoff ≤ cutoff') :
+    ∀ {env : Env}, Env.AllBelow cutoff env → Env.AllBelow cutoff' env
+  | .nil,           _   => trivial
+  | .cons _ _ rest, ⟨h_idx, h_rest⟩ =>
+      ⟨Nat.lt_of_lt_of_le h_idx h_le, Env.AllBelow.mono h_le h_rest⟩
+
+theorem Val.AllBelow.mono {cutoff cutoff' : Nat} (h_le : cutoff ≤ cutoff') :
+    ∀ {v : Val}, Val.AllBelow cutoff v → Val.AllBelow cutoff' v
+  | .num _,            _ => trivial
+  | .bool _,           _ => trivial
+  | .nilV,             _ => trivial
+  | .sym _,            _ => trivial
+  | .prim _,           _ => trivial
+  | .builtinBaseApply, _ => trivial
+  | .cons x y,         ⟨hx, hy⟩ =>
+      ⟨Val.AllBelow.mono h_le hx, Val.AllBelow.mono h_le hy⟩
+  | .closure _ _ _,    h => Env.AllBelow.mono h_le h
+
+theorem ListVal.AllBelow.mono {cutoff cutoff' : Nat} (h_le : cutoff ≤ cutoff') :
+    ∀ {xs : List Val}, ListVal.AllBelow cutoff xs → ListVal.AllBelow cutoff' xs
+  | [],      _ => trivial
+  | _ :: _, ⟨h, t⟩ => ⟨Val.AllBelow.mono h_le h, ListVal.AllBelow.mono h_le t⟩
+
+def EnvDeep : Env → Heap → Prop
+  | .nil,             _ => True
+  | .cons _ idx rest, h => idx < h.length ∧ EnvDeep rest h
+
+def ValDeep : Val → Heap → Prop
+  | .num _,            _ => True
+  | .bool _,           _ => True
+  | .nilV,             _ => True
+  | .sym _,            _ => True
+  | .prim _,           _ => True
+  | .builtinBaseApply, _ => True
+  | .cons x y,         h => ValDeep x h ∧ ValDeep y h
+  | .closure _ _ cenv, h => EnvDeep cenv h
+
+def ListValDeep : List Val → Heap → Prop
+  | [],      _ => True
+  | x :: xs, h => ValDeep x h ∧ ListValDeep xs h
+
+def HeapDeep (h : Heap) : Prop :=
+  ∀ (i : Nat) (v : Val), h[i]? = some v → ValDeep v h
+
+theorem EnvDeep.toAllBelow : ∀ {env : Env} {h : Heap},
+    EnvDeep env h → Env.AllBelow h.length env
+  | Env.nil,           _, _   => trivial
+  | Env.cons _ _ rest, _, ⟨h_idx, h_rest⟩ =>
+      ⟨h_idx, EnvDeep.toAllBelow h_rest⟩
+
+theorem ValDeep.toAllBelow : ∀ {v : Val} {h : Heap},
+    ValDeep v h → Val.AllBelow h.length v
+  | .num _,            _, _ => trivial
+  | .bool _,           _, _ => trivial
+  | .nilV,             _, _ => trivial
+  | .sym _,            _, _ => trivial
+  | .prim _,           _, _ => trivial
+  | .builtinBaseApply, _, _ => trivial
+  | .cons x y,         _, ⟨hx, hy⟩ =>
+      ⟨ValDeep.toAllBelow hx, ValDeep.toAllBelow hy⟩
+  | .closure _ _ _,    _, h => EnvDeep.toAllBelow h
+
+theorem ListValDeep.toAllBelow : ∀ {vs : List Val} {h : Heap},
+    ListValDeep vs h → ListVal.AllBelow h.length vs
+  | [],      _, _ => trivial
+  | _ :: _, _, ⟨hx, hxs⟩ =>
+      ⟨ValDeep.toAllBelow hx, ListValDeep.toAllBelow hxs⟩
+
+theorem EnvDeep.length_mono : ∀ {env : Env} {h h' : Heap},
+    EnvDeep env h → h.length ≤ h'.length → EnvDeep env h'
+  | Env.nil,           _, _, _, _   => trivial
+  | Env.cons _ _ rest, _, _, ⟨h_idx, h_rest⟩, h_le =>
+      ⟨Nat.lt_of_lt_of_le h_idx h_le, EnvDeep.length_mono h_rest h_le⟩
+
+theorem ValDeep.length_mono : ∀ {v : Val} {h h' : Heap},
+    ValDeep v h → h.length ≤ h'.length → ValDeep v h'
+  | .num _,            _, _, _,  _   => trivial
+  | .bool _,           _, _, _,  _   => trivial
+  | .nilV,             _, _, _,  _   => trivial
+  | .sym _,            _, _, _,  _   => trivial
+  | .prim _,           _, _, _,  _   => trivial
+  | .builtinBaseApply, _, _, _,  _   => trivial
+  | .cons x y,         _, _, ⟨hx, hy⟩, h_le =>
+      ⟨ValDeep.length_mono hx h_le, ValDeep.length_mono hy h_le⟩
+  | .closure _ _ _,    _, _, hev, h_le => EnvDeep.length_mono hev h_le
+
+theorem ListValDeep.length_mono : ∀ {vs : List Val} {h h' : Heap},
+    ListValDeep vs h → h.length ≤ h'.length → ListValDeep vs h'
+  | [],      _, _, _, _ => trivial
+  | _ :: _, _, _, ⟨hx, hxs⟩, h_le =>
+      ⟨ValDeep.length_mono hx h_le, ListValDeep.length_mono hxs h_le⟩
+
+/-- Atoms (non-closure, non-cons values) are `ValDeep` in any heap. -/
+theorem ValDeep.atom : ∀ {v : Val} {h : Heap},
+    (∀ ps body cenv, v ≠ .closure ps body cenv) →
+    (∀ x y, v ≠ .cons x y) → ValDeep v h
+  | .num _,            _, _, _ => trivial
+  | .bool _,           _, _, _ => trivial
+  | .nilV,             _, _, _ => trivial
+  | .sym _,            _, _, _ => trivial
+  | .prim _,           _, _, _ => trivial
+  | .builtinBaseApply, _, _, _ => trivial
+  | .cons x y,         _, _, h_no_cons => absurd rfl (h_no_cons x y)
+  | .closure ps body cenv, _, h_no_closure, _ =>
+      absurd rfl (h_no_closure ps body cenv)
+
+/-- Closed values are vacuously `AllBelow` at any cutoff. -/
+theorem closedValB_AllBelow (cutoff : Nat) :
+    ∀ (v : Val), closedValB v = true → Val.AllBelow cutoff v
+  | .num _,            _ => trivial
+  | .bool _,           _ => trivial
+  | .nilV,             _ => trivial
+  | .sym _,            _ => trivial
+  | .prim _,           _ => trivial
+  | .builtinBaseApply, _ => trivial
+  | .cons x y, hc => by
+      simp [closedValB, Bool.and_eq_true] at hc
+      exact ⟨closedValB_AllBelow cutoff x hc.1, closedValB_AllBelow cutoff y hc.2⟩
+  | .closure _ _ _, hc => by simp [closedValB] at hc
