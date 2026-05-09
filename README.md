@@ -4,7 +4,14 @@ A synthesis of [`lean-grey`](../lean-grey/) (abstract infinite tower with
 proved governance coherence) and [`lean-green`](../lean-green/) (Black-faithful
 heap+closure+`set!` interpreter with CakeML-style value bisimulation).
 
-**Current snapshot:** ~6500 LOC, 9 sorries (Tower 0, Frame 5, Policies 1, Soundness 3). Smoke 8/8. The cross-level synthesis is structurally complete: `.em` runs end-to-end through real `materialize_cross_side_*` lemmas and a fully-proved chain of materialize-preservation helpers. `eval_preserves_envAt` is wrapped over a conjunction `all_preserves_envAt` whose body is ~70% complete (eval cases except `.set` meta-mutation, full `evalList`, full `applyVia` — applyDirect case + `.set` meta-mutation sub-case sorry'd as `cases-rw` interaction friction).
+**Current snapshot:** ~6550 LOC, 8 sorries (Tower 0, Frame 4, Policies 1, Soundness 3). Smoke 8/8. The cross-level synthesis is structurally complete: `.em` runs end-to-end through real `materialize_cross_side_*` lemmas and a fully-proved chain of materialize-preservation helpers. `all_preserves_envAt` (which `eval_preserves_envAt` wraps) is ~95% complete — only the `.set` meta-mutation sub-case remains (Lean tactic friction).
+
+**Sorry breakdown — the 4 Frame sorries cluster around 2 architectural gaps + 2 mechanical issues:**
+- **Architectural** (need cross-side heap-content-bisim invariant added to WFCtxT): `h_env_mat` in `.em`, `applyVia` clause in `frame_tower`. Both blocked on the same gap.
+- **Mechanical** (Lean tactic friction): `.set` meta-mutation sub-case in `all_preserves_envAt` — joint `match T_e.heap[i]?, gate? with` resists clean cases-rw.
+- **Substantial** (heaviest single case): `.set` in `frame_tower` — needs `ValVis_aux_update` machinery + policy gate semantics.
+
+Plus 1 Policies sorry (`multnExact_soundForCE_first_install_tower` headline) and 3 Soundness sorries (`TowerCE.refl`, `eval_tower_safe`, `safeEvolution_necessary`) — all downstream of frame completion.
 
 ## What's here
 
