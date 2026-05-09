@@ -1300,7 +1300,387 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                     refine ⟨r_b, T_b', ?_, h_vv, h_ctx_out,
                             h_he_chain, h_env_out, hv_ra, hv_rb⟩
                     simp [eval, h_eval_f_b, h_eval_args_b, h_eval_av_b]
-        | set _ _          => sorry  -- USES policy_eq_at + ValVis_aux_update; substantial
+        | set x e =>
+            -- The operational governance case. Cross-side mutation at the same
+            -- idx (env_eq → same lookup), gate decision agrees via policy_resp.
+            -- Heap update preserves bisim via ValVis_aux_update / EnvVis_aux_update.
+            simp only [eval] at h_eval
+            cases he : eval k ptable level e env_a T_a with
+            | none => rw [he] at h_eval; simp at h_eval
+            | some pr =>
+                obtain ⟨v_a, T_a_inner⟩ := pr
+                rw [he] at h_eval
+                simp only at h_eval
+                -- IH on e gives bisim for v_a, v_b.
+                obtain ⟨v_b, T_b_inner, h_eval_e_b, h_vv_v, h_ctx_inner, h_he_inner,
+                        h_env_inner, hv_va, hv_vb⟩ :=
+                  ih_eval ptable level e env_a env_b T_a T_b v_a T_a_inner
+                    hresp_pt h_ctx h_env he
+                -- env.lookup x: same idx cross-side via env_eq.
+                cases hl : env_a.lookup x with
+                | none => rw [hl] at h_eval; simp at h_eval
+                | some idx =>
+                    rw [hl] at h_eval
+                    simp only at h_eval
+                    have hl_b : env_b.lookup x = some idx := by
+                      rw [← h_ctx.env_eq]; exact hl
+                    -- Validity at NEW heaps (length-preserved by Heap.update).
+                    have hv_va_new0 :
+                        ValValid v_a (T_a_inner.heap.update idx v_a) :=
+                      ValValid.length_mono v_a hv_va
+                        (Nat.le_of_eq (Heap.update_length _ _ _).symm)
+                    have hv_vb_new0 :
+                        ValValid v_b (T_b_inner.heap.update idx v_b) :=
+                      ValValid.length_mono v_b hv_vb
+                        (Nat.le_of_eq (Heap.update_length _ _ _).symm)
+                    -- Self-update preserves universal-depth bisim (depth-induction).
+                    have h_vis_v_at_new_strong :
+                        ∀ K k, k ≤ K → ValVis_aux k v_a v_b
+                              (T_a_inner.heap.update idx v_a)
+                              (T_b_inner.heap.update idx v_b) := by
+                      intro K
+                      induction K with
+                      | zero =>
+                          intro k h_le
+                          have : k = 0 := Nat.le_zero.mp h_le
+                          subst this
+                          trivial
+                      | succ N ih =>
+                          intro k h_le
+                          by_cases h_le_N : k ≤ N
+                          · exact ih k h_le_N
+                          · have h_eq : k = N + 1 := by omega
+                            subst h_eq
+                            apply ValVis_aux_update (N+1) v_a v_b
+                              T_a_inner.heap T_b_inner.heap idx v_a v_b
+                              h_ctx_inner.hv_a h_ctx_inner.hv_b
+                              h_ctx_inner.heap_len_eq hv_va hv_vb
+                              ?_ hv_va_new0 hv_vb_new0 (h_vv_v (N+1))
+                            intro k' h_lt
+                            exact ih k' (Nat.le_of_lt_succ h_lt)
+                    have h_vis_v_at_new :
+                        ∀ k, ValVis_aux k v_a v_b
+                              (T_a_inner.heap.update idx v_a)
+                              (T_b_inner.heap.update idx v_b) := by
+                      intro k
+                      exact h_vis_v_at_new_strong k k (Nat.le_refl k)
+                    have hv_va_new :
+                        ValValid v_a (T_a_inner.heap.update idx v_a) := hv_va_new0
+                    have hv_vb_new :
+                        ValValid v_b (T_b_inner.heap.update idx v_b) := hv_vb_new0
+                    -- HeapEvolution from a self-update at idx.
+                    have h_he_update :
+                        HeapEvolution T_a_inner T_b_inner
+                          (T_a_inner.updateHeap idx v_a)
+                          (T_b_inner.updateHeap idx v_b) := by
+                      refine ⟨?_, ?_, ?_, ?_⟩
+                      · show T_a_inner.heap.length ≤
+                            (T_a_inner.heap.update idx v_a).length
+                        rw [Heap.update_length]; exact Nat.le_refl _
+                      · show T_b_inner.heap.length ≤
+                            (T_b_inner.heap.update idx v_b).length
+                        rw [Heap.update_length]; exact Nat.le_refl _
+                      · intro nE env_a' env_b' h_env_eq' hev_a' hev_b' h_env_vis
+                        exact EnvVis_aux_update nE env_a' env_b'
+                          T_a_inner.heap T_b_inner.heap idx v_a v_b
+                          h_ctx_inner.hv_a h_ctx_inner.hv_b
+                          h_ctx_inner.heap_len_eq hev_a' hev_b'
+                          h_env_eq' (fun k _ => h_vis_v_at_new k)
+                          hv_va_new hv_vb_new h_env_vis
+                      · intro nV v_x v_y hv_x hv_y h_v_vis
+                        exact ValVis_aux_update nV v_x v_y
+                          T_a_inner.heap T_b_inner.heap idx v_a v_b
+                          h_ctx_inner.hv_a h_ctx_inner.hv_b
+                          h_ctx_inner.heap_len_eq hv_x hv_y
+                          (fun k _ => h_vis_v_at_new k)
+                          hv_va_new hv_vb_new h_v_vis
+                    -- Output WFCtxT for plain or meta-accept update.
+                    have h_le_a : T_a_inner.heap.length ≤
+                        (T_a_inner.heap.update idx v_a).length :=
+                      Nat.le_of_eq (Heap.update_length _ _ _).symm
+                    have h_le_b : T_b_inner.heap.length ≤
+                        (T_b_inner.heap.update idx v_b).length :=
+                      Nat.le_of_eq (Heap.update_length _ _ _).symm
+                    have hh_a_new : HeapValid (T_a_inner.heap.update idx v_a) := by
+                      intro i v hp
+                      by_cases h_ieq : i = idx
+                      · subst h_ieq
+                        rw [Heap.update_get_eq _ _ _
+                            (h_ctx_inner.ev_a x i hl)] at hp
+                        simp only [Option.some.injEq] at hp
+                        subst hp
+                        exact ValValid.length_mono v_a hv_va h_le_a
+                      · rw [Heap.update_get_neq _ _ _ _ h_ieq] at hp
+                        have hv_old := h_ctx_inner.hv_a i v hp
+                        exact ValValid.length_mono v hv_old h_le_a
+                    have hh_b_new : HeapValid (T_b_inner.heap.update idx v_b) := by
+                      intro i v hp
+                      by_cases h_ieq : i = idx
+                      · subst h_ieq
+                        rw [Heap.update_get_eq _ _ _
+                            (h_ctx_inner.ev_b x i hl_b)] at hp
+                        simp only [Option.some.injEq] at hp
+                        subst hp
+                        exact ValValid.length_mono v_b hv_vb h_le_b
+                      · rw [Heap.update_get_neq _ _ _ _ h_ieq] at hp
+                        have hv_old := h_ctx_inner.hv_b i v hp
+                        exact ValValid.length_mono v hv_old h_le_b
+                    -- updateHeap preserves levels (envAt?, policyAt?).
+                    have h_envs_a_upd : ∀ m,
+                        (T_a_inner.updateHeap idx v_a).envAt? m = T_a_inner.envAt? m :=
+                      fun m => rfl
+                    have h_envs_b_upd : ∀ m,
+                        (T_b_inner.updateHeap idx v_b).envAt? m = T_b_inner.envAt? m :=
+                      fun m => rfl
+                    have h_pols_a_upd : ∀ m,
+                        (T_a_inner.updateHeap idx v_a).policyAt? m = T_a_inner.policyAt? m :=
+                      fun m => rfl
+                    have h_pols_b_upd : ∀ m,
+                        (T_b_inner.updateHeap idx v_b).policyAt? m = T_b_inner.policyAt? m :=
+                      fun m => rfl
+                    -- Output level_envs_valid (env at level m valid in updated heap).
+                    have h_levs_a_upd : ∀ m env, (T_a_inner.updateHeap idx v_a).envAt? m = some env →
+                        EnvValid env (T_a_inner.updateHeap idx v_a).heap := by
+                      intro m env hen
+                      rw [h_envs_a_upd] at hen
+                      exact EnvValid.length_mono (h_ctx_inner.level_envs_valid_a m env hen) h_le_a
+                    have h_levs_b_upd : ∀ m env, (T_b_inner.updateHeap idx v_b).envAt? m = some env →
+                        EnvValid env (T_b_inner.updateHeap idx v_b).heap := by
+                      intro m env hen
+                      rw [h_envs_b_upd] at hen
+                      exact EnvValid.length_mono (h_ctx_inner.level_envs_valid_b m env hen) h_le_b
+                    -- Output heap_content_bisim_at_levels: cells unchanged at non-idx
+                    -- positions; cell at idx now holds bisim-related v_a, v_b.
+                    -- Lift via h_he_update.envVis_preserve, applied to the input
+                    -- invariant from h_ctx_inner.heap_content_bisim_at_levels.
+                    have h_bisim_upd : ∀ m env,
+                        (T_a_inner.updateHeap idx v_a).envAt? m = some env →
+                        EnvVis env env (T_a_inner.updateHeap idx v_a).heap
+                          (T_b_inner.updateHeap idx v_b).heap := by
+                      intro m env hen
+                      rw [h_envs_a_upd] at hen
+                      have h_evalid_a : EnvValid env T_a_inner.heap :=
+                        h_ctx_inner.level_envs_valid_a m env hen
+                      have h_evalid_b : EnvValid env T_b_inner.heap :=
+                        h_ctx_inner.level_envs_valid_b m env
+                          (by rw [← h_ctx_inner.level_envs_eq]; exact hen)
+                      exact h_he_update.envVis_preserve env env rfl h_evalid_a h_evalid_b
+                        (h_ctx_inner.heap_content_bisim_at_levels m env hen)
+                    -- Output WFCtxT helper for the update case.
+                    have h_pol_eq_upd : (T_a_inner.updateHeap idx v_a).policyAt? level
+                        = (T_b_inner.updateHeap idx v_b).policyAt? level :=
+                      h_ctx_inner.policy_eq_at
+                    have h_heap_len_eq_upd :
+                        (T_a_inner.updateHeap idx v_a).heap.length =
+                        (T_b_inner.updateHeap idx v_b).heap.length := by
+                      simp [TowerState.updateHeap, Heap.update_length,
+                            h_ctx_inner.heap_len_eq]
+                    have h_ctx_upd_full : WFCtxT env_a env_b
+                        (T_a_inner.updateHeap idx v_a) (T_b_inner.updateHeap idx v_b) level :=
+                      ⟨h_pol_eq_upd,
+                       hh_a_new, hh_b_new,
+                       EnvValid.length_mono h_ctx_inner.ev_a h_le_a,
+                       EnvValid.length_mono h_ctx_inner.ev_b h_le_b,
+                       h_ctx_inner.policy_resp,
+                       h_ctx_inner.env_eq,
+                       h_heap_len_eq_upd,
+                       h_levs_a_upd, h_levs_b_upd,
+                       fun m => h_ctx_inner.level_envs_eq m,
+                       fun m => h_ctx_inner.policies_eq m,
+                       fun m p hp => h_ctx_inner.policies_resp_all m p hp,
+                       h_bisim_upd⟩
+                    -- HeapEvolution chain.
+                    have h_he_chain_upd : HeapEvolution T_a T_b
+                        (T_a_inner.updateHeap idx v_a) (T_b_inner.updateHeap idx v_b) :=
+                      HeapEvolution.trans h_he_inner h_he_update
+                    have h_env_out_upd : EnvVis env_a env_b
+                        (T_a_inner.updateHeap idx v_a).heap
+                        (T_b_inner.updateHeap idx v_b).heap :=
+                      h_he_chain_upd.envVis_preserve env_a env_b h_ctx.env_eq
+                        h_ctx.ev_a h_ctx.ev_b h_env
+                    -- Now case-analyze on isMetaMutation.
+                    by_cases h_meta_mut : isMetaMutation x env_a T_a_inner level = true
+                    · -- META MUTATION case.
+                      have h_meta_mut_eq_check : isMetaMutation x env_b T_b_inner level =
+                          isMetaMutation x env_a T_a_inner level := by
+                        unfold isMetaMutation
+                        rw [← h_ctx.env_eq, ← h_ctx_inner.level_envs_eq]
+                      have h_meta_mut_b : isMetaMutation x env_b T_b_inner level = true := by
+                        rw [h_meta_mut_eq_check]; exact h_meta_mut
+                      have h_meta_lookup_a : ∃ metaEnv_a,
+                          T_a_inner.envAt? level = some metaEnv_a ∧
+                          metaEnv_a.lookup x = some idx := by
+                        have h_mm := h_meta_mut
+                        unfold isMetaMutation at h_mm
+                        rw [hl] at h_mm
+                        cases h_ml : T_a_inner.envAt? level with
+                        | none => simp [h_ml] at h_mm
+                        | some metaEnv =>
+                            cases h_ml_x : metaEnv.lookup x with
+                            | none => simp [h_ml, h_ml_x] at h_mm
+                            | some i_meta =>
+                                simp [h_ml, h_ml_x] at h_mm
+                                refine ⟨metaEnv, rfl, ?_⟩
+                                rw [h_ml_x, h_mm]
+                      obtain ⟨metaEnv, h_metaEnv, h_metaEnv_x⟩ := h_meta_lookup_a
+                      simp only [h_meta_mut, if_true] at h_eval
+                      cases hp_a : T_a_inner.heap[idx]? with
+                      | none => rw [hp_a] at h_eval; simp at h_eval
+                      | some oldVal_a =>
+                          rw [hp_a] at h_eval
+                          -- Cross-side: get oldVal_b at idx via heap_content_bisim_at_levels.
+                          have h_bisim_meta : EnvVis metaEnv metaEnv T_a_inner.heap T_b_inner.heap :=
+                            h_ctx_inner.heap_content_bisim_at_levels level metaEnv h_metaEnv
+                          have h_bisim_meta_1 := h_bisim_meta 1 x
+                          rw [h_metaEnv_x] at h_bisim_meta_1
+                          simp only at h_bisim_meta_1
+                          rw [hp_a] at h_bisim_meta_1
+                          cases hp_b : T_b_inner.heap[idx]? with
+                          | none =>
+                              rw [hp_b] at h_bisim_meta_1
+                              simp at h_bisim_meta_1
+                          | some oldVal_b =>
+                              rw [hp_b] at h_bisim_meta_1
+                              -- Universal-depth ValVis on (oldVal_a, oldVal_b).
+                              have h_vv_old : ValVis oldVal_a oldVal_b
+                                  T_a_inner.heap T_b_inner.heap := by
+                                intro d
+                                have h_d := h_bisim_meta d x
+                                rw [h_metaEnv_x] at h_d
+                                simp only at h_d
+                                rw [hp_a, hp_b] at h_d
+                                exact h_d
+                              have hv_old_a : ValValid oldVal_a T_a_inner.heap :=
+                                h_ctx_inner.hv_a idx oldVal_a hp_a
+                              have hv_old_b : ValValid oldVal_b T_b_inner.heap :=
+                                h_ctx_inner.hv_b idx oldVal_b hp_b
+                              -- Frozen gate on a-side.
+                              cases hg_a : T_a.policyAt? level with
+                              | none => rw [hg_a] at h_eval; simp at h_eval
+                              | some gate =>
+                                  rw [hg_a] at h_eval
+                                  simp only at h_eval
+                                  have h_gate_resp := h_ctx.policy_resp gate hg_a
+                                  -- env_eq: env_a = env_b. metaEnv self-bisim follows
+                                  -- from h_bisim_meta (lifted to T_a_inner heaps; we want
+                                  -- on T_a_inner heaps, which is exactly h_bisim_meta).
+                                  have h_env_inner_self_a : EnvVis env_a env_a
+                                      T_a_inner.heap T_b_inner.heap := by
+                                    rw [h_ctx_inner.env_eq] at h_env_inner ⊢
+                                    exact h_env_inner
+                                  -- Apply policy_resp to get same gate decision cross-side.
+                                  have h_metaEnv_b : T_b_inner.envAt? level = some metaEnv := by
+                                    rw [← h_ctx_inner.level_envs_eq]; exact h_metaEnv
+                                  have h_gate_eq :
+                                      gate { target := x, heap := T_a_inner.heap,
+                                             env := env_a,
+                                             metaEnv := (T_a_inner.envAt? level).getD .nil,
+                                             index := idx, level := level } oldVal_a v_a =
+                                      gate { target := x, heap := T_b_inner.heap,
+                                             env := env_a,
+                                             metaEnv := (T_a_inner.envAt? level).getD .nil,
+                                             index := idx, level := level } oldVal_b v_b := by
+                                    rw [show (T_a_inner.envAt? level).getD .nil = metaEnv from by
+                                            rw [h_metaEnv]; rfl]
+                                    exact h_gate_resp x idx level env_a metaEnv
+                                      T_a_inner.heap T_b_inner.heap
+                                      oldVal_a oldVal_b v_a v_b
+                                      h_ctx_inner.hv_a h_ctx_inner.hv_b
+                                      h_ctx_inner.ev_a (h_ctx_inner.env_eq ▸ h_ctx_inner.ev_b)
+                                      (h_ctx_inner.level_envs_valid_a level metaEnv h_metaEnv)
+                                      (h_ctx_inner.level_envs_valid_b level metaEnv h_metaEnv_b)
+                                      hv_old_a hv_old_b hv_va hv_vb
+                                      h_env_inner_self_a h_bisim_meta h_vv_old h_vv_v
+                                  by_cases h_gate_dec :
+                                      gate { target := x, heap := T_a_inner.heap,
+                                             env := env_a,
+                                             metaEnv := (T_a_inner.envAt? level).getD .nil,
+                                             index := idx, level := level } oldVal_a v_a = true
+                                  · -- Gate accepts.
+                                    rw [h_gate_dec] at h_eval
+                                    simp only [↓reduceIte, Option.some.injEq,
+                                               Prod.mk.injEq] at h_eval
+                                    obtain ⟨h_r, h_T⟩ := h_eval
+                                    subst h_r; subst h_T
+                                    -- B-side gate also accepts.
+                                    have hg_b : T_b.policyAt? level = some gate := by
+                                      rw [← h_ctx.policy_eq_at]; exact hg_a
+                                    have h_gate_b :
+                                        gate { target := x, heap := T_b_inner.heap,
+                                               env := env_b,
+                                               metaEnv := (T_b_inner.envAt? level).getD .nil,
+                                               index := idx, level := level } oldVal_b v_b = true := by
+                                      rw [show env_b = env_a from h_ctx.env_eq.symm,
+                                          show (T_b_inner.envAt? level).getD .nil =
+                                               (T_a_inner.envAt? level).getD .nil from by
+                                              rw [h_metaEnv, h_metaEnv_b]]
+                                      rw [← h_gate_eq]; exact h_gate_dec
+                                    refine ⟨.bool true, T_b_inner.updateHeap idx v_b, ?_, ?_,
+                                            h_ctx_upd_full, h_he_chain_upd, h_env_out_upd,
+                                            trivial, trivial⟩
+                                    · simp [eval, h_eval_e_b, hl_b, h_meta_mut_b, hp_b, hg_b,
+                                            h_gate_b]
+                                    · intro d
+                                      cases d with | zero => trivial | succ _ => rfl
+                                  · -- Gate rejects.
+                                    have h_gate_false :
+                                        gate { target := x, heap := T_a_inner.heap,
+                                               env := env_a,
+                                               metaEnv := (T_a_inner.envAt? level).getD .nil,
+                                               index := idx, level := level } oldVal_a v_a = false := by
+                                      cases h_dec : gate ⟨x, T_a_inner.heap, env_a,
+                                          (T_a_inner.envAt? level).getD .nil, idx, level⟩
+                                          oldVal_a v_a
+                                      · rfl
+                                      · exact absurd h_dec h_gate_dec
+                                    rw [h_gate_false] at h_eval
+                                    simp only [Bool.false_eq_true, ↓reduceIte,
+                                               Option.some.injEq, Prod.mk.injEq] at h_eval
+                                    obtain ⟨h_r, h_T⟩ := h_eval
+                                    subst h_r; subst h_T
+                                    have hg_b : T_b.policyAt? level = some gate := by
+                                      rw [← h_ctx.policy_eq_at]; exact hg_a
+                                    have h_gate_b_false :
+                                        gate { target := x, heap := T_b_inner.heap,
+                                               env := env_b,
+                                               metaEnv := (T_b_inner.envAt? level).getD .nil,
+                                               index := idx, level := level } oldVal_b v_b = false := by
+                                      rw [show env_b = env_a from h_ctx.env_eq.symm,
+                                          show (T_b_inner.envAt? level).getD .nil =
+                                               (T_a_inner.envAt? level).getD .nil from by
+                                              rw [h_metaEnv, h_metaEnv_b]]
+                                      rw [← h_gate_eq]; exact h_gate_false
+                                    refine ⟨.bool false, T_b_inner, ?_, ?_,
+                                            h_ctx_inner, h_he_inner, h_env_inner,
+                                            trivial, trivial⟩
+                                    · simp [eval, h_eval_e_b, hl_b, h_meta_mut_b, hp_b, hg_b,
+                                            h_gate_b_false]
+                                    · intro d
+                                      cases d with | zero => trivial | succ _ => rfl
+                    · -- PLAIN MUTATION case.
+                      have h_meta_mut_b_eq : isMetaMutation x env_b T_b_inner level =
+                          isMetaMutation x env_a T_a_inner level := by
+                        unfold isMetaMutation
+                        rw [h_ctx.env_eq, h_ctx_inner.level_envs_eq]
+                      have h_meta_mut_a_false :
+                          isMetaMutation x env_a T_a_inner level = false := by
+                        cases h_dec : isMetaMutation x env_a T_a_inner level
+                        · rfl
+                        · exact absurd h_dec h_meta_mut
+                      have h_meta_mut_b_false :
+                          isMetaMutation x env_b T_b_inner level = false := by
+                        rw [h_meta_mut_b_eq]; exact h_meta_mut_a_false
+                      rw [h_meta_mut_a_false] at h_eval
+                      simp only [Bool.false_eq_true, ↓reduceIte,
+                                 Option.some.injEq, Prod.mk.injEq] at h_eval
+                      obtain ⟨h_r, h_T⟩ := h_eval
+                      subst h_r; subst h_T
+                      refine ⟨.bool true, T_b_inner.updateHeap idx v_b, ?_, ?_,
+                              h_ctx_upd_full, h_he_chain_upd, h_env_out_upd,
+                              trivial, trivial⟩
+                      · simp [eval, h_eval_e_b, hl_b, h_meta_mut_b_false]
+                      · intro d
+                        cases d with | zero => trivial | succ _ => rfl
         | em body =>
             -- Cross-side materialize-bisim. Now that all the Tower
             -- cross-side lemmas are proved, the .em case threads them
