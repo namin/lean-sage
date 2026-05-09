@@ -192,16 +192,131 @@ theorem materialize_HeapValid_preserves
       obtain rfl := h_mat.symm
       exact materializeStep_iter_HeapValid_preserves T (n + 1 - T.levels.length) h_hv
 
-/-- Materialize preserves "level envs valid in heap": existing levels
-    extend trivially via `EnvValid.heap_extends`; new levels' envs are
-    constructed from `freshLevelEnv` to be valid in the extended heap. -/
+/-- After buildBindings foldl, every lookup in the resulting env points
+    to an idx within the resulting heap. -/
+private theorem buildBindings_foldl_env_lookups_in_range
+    (pairs : List (String × Val)) (h : Heap) (env : Env)
+    (h_env_in_range : ∀ name i, env.lookup name = some i → i < h.length) :
+    ∀ name i, (pairs.foldl
+      (fun (acc : Heap × Env) (kv : String × Val) =>
+        (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
+      (h, env)).2.lookup name = some i →
+    i < (pairs.foldl
+      (fun (acc : Heap × Env) (kv : String × Val) =>
+        (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
+      (h, env)).1.length := by
+  induction pairs generalizing h env with
+  | nil =>
+      simp only [List.foldl]; exact h_env_in_range
+  | cons p rest ih =>
+      simp only [List.foldl]
+      apply ih (h ++ [p.2]) (.cons p.1 h.length env)
+      intro name i hl
+      simp only [Env.lookup, List.length_append, List.length_singleton]
+      simp only [Env.lookup] at hl
+      split at hl
+      · -- p.1 == name: hl gives some h.length = some i
+        simp at hl; rw [← hl]; omega
+      · -- p.1 ≠ name: hl is env.lookup name = some i
+        have h_in_range := h_env_in_range name i hl
+        omega
+
+/-- The env from `freshLevelEnv` is valid in the resulting heap. -/
+private theorem freshLevelEnv_env_valid (h : Heap) :
+    EnvValid (freshLevelEnv h).2 (freshLevelEnv h).1 := by
+  intro name i hl
+  unfold freshLevelEnv at hl ⊢
+  simp only [Heap.alloc] at hl ⊢
+  -- The result env is `.cons "base-apply" (foldl-h.length) envPrims`
+  -- Result heap has length (foldl-h.length) + 1
+  simp only [Env.lookup] at hl
+  rw [List.length_append, List.length_singleton]
+  split at hl
+  · -- "base-apply" == name: hl is some foldl-h.length = some i
+    simp at hl; rw [← hl]; omega
+  · -- envPrims.lookup name = some i
+    have h_inner : ∀ name i, ((primPairs.foldl
+        (fun (acc : Heap × Env) (kv : String × Val) =>
+          (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
+        (h, .nil)).2).lookup name = some i →
+        i < (primPairs.foldl
+          (fun (acc : Heap × Env) (kv : String × Val) =>
+            (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
+          (h, .nil)).1.length :=
+      buildBindings_foldl_env_lookups_in_range primPairs h .nil
+        (fun _ _ h => by simp [Env.lookup] at h)
+    have := h_inner name i hl
+    omega
+
+/-- One materializeStep preserves "level envs valid in heap". -/
+private theorem materializeStep_level_envs_valid_preserves
+    (T : TowerState)
+    (h_hv : HeapValid T.heap)
+    (h_levs : ∀ m env, T.envAt? m = some env → EnvValid env T.heap) :
+    ∀ m env, (materializeStep T).envAt? m = some env →
+    EnvValid env (materializeStep T).heap := by
+  intro m env hen
+  unfold materializeStep at hen ⊢
+  obtain ⟨extras, h_eq, _⟩ := freshLevelEnv_extras_closed T.heap
+  unfold TowerState.envAt? TowerState.levelAt? at hen
+  by_cases h_in : m < T.levels.length
+  · -- Existing level: env unchanged, lift via heap_extends
+    rw [List.getElem?_append_left h_in] at hen
+    have h_old : T.envAt? m = some env := by
+      unfold TowerState.envAt? TowerState.levelAt?; exact hen
+    have h_old_valid : EnvValid env T.heap := h_levs m env h_old
+    show EnvValid env (freshLevelEnv T.heap).1
+    rw [h_eq]
+    exact EnvValid.heap_extends h_old_valid ⟨extras, rfl⟩
+  · -- New level (or out of bounds)
+    by_cases h_eq_idx : m = T.levels.length
+    · -- New level
+      subst h_eq_idx
+      rw [List.getElem?_append_right (Nat.le_refl _)] at hen
+      simp at hen
+      rw [← hen]
+      show EnvValid (freshLevelEnv T.heap).2 (freshLevelEnv T.heap).1
+      exact freshLevelEnv_env_valid T.heap
+    · -- Out of bounds
+      let new_ls : LevelState :=
+        { env := (freshLevelEnv T.heap).2, policy := acceptAllPolicy }
+      have h_oob : (T.levels ++ [new_ls]).length ≤ m := by
+        simp [List.length_append]; omega
+      rw [List.getElem?_eq_none h_oob] at hen
+      exact Option.noConfusion hen
+
+/-- Iterated materializeStep preserves "level envs valid in heap". -/
+private theorem materializeStep_iter_level_envs_valid_preserves
+    (T : TowerState) (k : Nat)
+    (h_hv : HeapValid T.heap)
+    (h_levs : ∀ m env, T.envAt? m = some env → EnvValid env T.heap) :
+    ∀ m env, (Nat.fold k (fun _ _ T' => materializeStep T') T).envAt? m = some env →
+    EnvValid env (Nat.fold k (fun _ _ T' => materializeStep T') T).heap := by
+  induction k with
+  | zero => simp [Nat.fold]; exact h_levs
+  | succ k ih =>
+      simp only [Nat.fold]
+      have ih_hv := materializeStep_iter_HeapValid_preserves T k h_hv
+      exact materializeStep_level_envs_valid_preserves _ ih_hv ih
+
+/-- Materialize preserves "level envs valid in heap". -/
 theorem materialize_level_envs_valid_preserves
     (T T' : TowerState) (n : Nat)
-    (_h_mat : T.materialize n = some T')
-    (_h_hv : HeapValid T.heap)
-    (_h_levs : ∀ m env, T.envAt? m = some env → EnvValid env T.heap) :
-    ∀ m env, T'.envAt? m = some env → EnvValid env T'.heap :=
-  sorry
+    (h_mat : T.materialize n = some T')
+    (h_hv : HeapValid T.heap)
+    (h_levs : ∀ m env, T.envAt? m = some env → EnvValid env T.heap) :
+    ∀ m env, T'.envAt? m = some env → EnvValid env T'.heap := by
+  unfold TowerState.materialize at h_mat
+  by_cases h1 : n ≥ Tower.maxDepth
+  · simp [h1] at h_mat
+  · simp [h1] at h_mat
+    by_cases h2 : T.levels.length > n
+    · simp [h2] at h_mat
+      obtain rfl := h_mat.symm
+      exact h_levs
+    · simp [h2] at h_mat
+      obtain rfl := h_mat.symm
+      exact materializeStep_iter_level_envs_valid_preserves T (n + 1 - T.levels.length) h_hv h_levs
 
 /-- Materialize preserves "all policies satisfy P" provided P holds for
     `acceptAllPolicy` (which materialize uses for new levels). -/
