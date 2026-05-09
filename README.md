@@ -21,7 +21,7 @@ Status, by file:
 | `Eval.lean` | done | tower-indexed eval/evalList/applyVia/applyDirect |
 | `Smoke.lean` | done | 8 tests across 4 scenes — all pass |
 | `Bisim.lean` | partial (3057/7580 LOC) | depth-indexed bisim, validity, heap-extension, in-place-update preservation, `HeapEvolution`, list/listToVal/applyPrim bisim, alloc-chain, `bisim_imp_eq` — all ported verbatim via the `RunState := TowerState` shim |
-| `Frame.lean` | scaffold + trivial cases | tower-aware `WFCtxT`, `FrameStmtT`, `frame_tower` defined. Proved cases: `zero`, `.num`, `.bool`, `.lam`, `.quote`, `.var`. Sorry'd with named TODOs: `.ifte`, `.app`, `.primApp`, `.set`, `.em`, `.letE`, `.seq`, `.installPolicy`, plus the `evalList`, `applyVia`, `applyDirect` cases |
+| `Frame.lean` | partial (603 LOC, 9 sorries) | tower-aware `WFCtxT`, `FrameStmtT`, `frame_tower` defined. Proved: zero (all 4 functions) + eval cases (`.num`, `.bool`, `.quote`, `.var`, `.lam`, `.ifte`, `.seq`) + full `evalList` + applyDirect non-applicable / `.builtinBaseApply` / `.prim` cases. Mostly proved (with one trailing WFCtxT-output sorry): eval `.app`. Sorry'd: eval (`.primApp`, `.set`, `.em`, `.letE`, `.installPolicy`), full `applyVia`, applyDirect `.closure`. The recurring blocker on `.app` / `.primApp` is that `ih_applyVia` / `ih_applyDirect` outputs `HeapEvolution` but not the full `WFCtxT` — fixing this requires a `TowerEvolution` that adds policy-eq-at and level-envs-stability invariants on top of `HeapEvolution` |
 | `Policies.lean` | TODO | will port multnExactPolicy + soundness theorem |
 | `Soundness.lean` | TODO | the headline `eval_tower_safe` theorem |
 | `DESIGN.md` | done | architectural rationale, decisions, scope |
