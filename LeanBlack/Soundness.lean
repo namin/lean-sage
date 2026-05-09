@@ -53,19 +53,26 @@ def BlackPolicy.UnivSoundAt (level : Nat) (p : BlackPolicy) : Prop :=
     every materialized level `n`, the level-`n` apply rule (= the
     value at `(T.envAt? (n+1)).lookup "base-apply"` projected
     through the heap, or `.builtinBaseApply` if absent) in `T'`
-    conservatively extends the corresponding rule in `T`. -/
+    conservatively extends the corresponding rule in `T`.
+
+    The `h_ref` for the underlying CE is `T'.heap` (the post-state
+    heap). This restricts test states to those extending `T'.heap`,
+    which is what enables compositional CE-chaining: when composing
+    `T → T_mid → T''`, intermediate values from `T_mid.heap` (which
+    is a prefix of `T''.heap`) remain ValValid in any test state
+    extending `T''.heap`. -/
 def TowerCE (T T' : TowerState) : Prop :=
   ∀ (n : Nat),
     -- For each materialized level `n`, the apply value at level
     -- `n` in `T'` conservatively extends the apply value at level
     -- `n` in `T`. (Concretely: the value bound at the
     -- `base-apply` cell of level `(n+1)`'s env in `T`'s heap and
-    -- in `T'`'s heap, related by `CE n`.)
+    -- in `T'`'s heap, related by `CE n`, with `h_ref := T'.heap`.)
     ∀ idx oldApply newApply,
       (T.envAt? (n + 1)).bind (·.lookup "base-apply") = some idx →
       T.heap[idx]? = some oldApply →
       T'.heap[idx]? = some newApply →
-      CE n oldApply newApply
+      CE n T'.heap oldApply newApply
 
 /-- `TowerCE` is reflexive (every well-formed tower CE-extends itself).
     Uses `frame_tower`'s applyDirect clause with self-pair (T_a = T_b)
@@ -88,7 +95,7 @@ theorem TowerCE.refl (T : TowerState)
   have h_eq : oldApply = newApply := by
     rw [h_old] at h_new; exact Option.some.inj h_new
   subst h_eq
-  intro fuel ptable op operands T₀ r T₀' hh_T₀ hv_op hv_args
+  intro fuel ptable op operands T₀ r T₀' _h_ext hh_T₀ hv_op hv_args
         hv_oldApply hv_oldApply' h_pt
         h_pol_resp_T₀ h_levs_T₀ h_resp_all_T₀ h_bisim_T₀ h_call
   obtain ⟨_, _, _, h_apd⟩ := frame_tower fuel
@@ -184,6 +191,24 @@ theorem TowerCE.refl (T : TowerState)
       refine ⟨fuel, T_b', r_b, ?_, h_vv_r, h_tc.policy_eq_at, h_tc.hv_b_out, h_he.len_b⟩
       simp only [callAsBaseApply]; exact h_call_b
 
+/-- `CE` is covariant in `h_ref` (a smaller `h_ref` gives a stronger CE
+    that implies the CE for any larger `h_ref`). When `h₂` extends `h₁`,
+    the test states extending `h₂` are a subset of those extending `h₁`,
+    so `CE level h₁ old new` implies `CE level h₂ old new`. -/
+private theorem CE_weaken_h_ref (level : Nat) (h₁ h₂ : Heap)
+    (h_ext : ∃ extras, h₂ = h₁ ++ extras)
+    (old new : Val) (h_ce : CE level h₁ old new) :
+    CE level h₂ old new := by
+  intro fuel ptable op operands T r T' h_ext_T hh hv_op hv_args
+        hv_old hv_new h_pt h_pol_resp h_levs h_resp_all h_bisim h_call
+  obtain ⟨e2, he2⟩ := h_ext
+  obtain ⟨e1, he1⟩ := h_ext_T
+  have h_ext_T_h₁ : ∃ extras, T.heap = h₁ ++ extras := by
+    refine ⟨e2 ++ e1, ?_⟩
+    rw [he1, he2, List.append_assoc]
+  exact h_ce fuel ptable op operands T r T' h_ext_T_h₁ hh hv_op hv_args
+        hv_old hv_new h_pt h_pol_resp h_levs h_resp_all h_bisim h_call
+
 /-- If `T'` has the same heap as `T` (e.g., after `setPolicyAt`), then
     `TowerCE T T'` reduces to `TowerCE T T`. The heap-equality forces
     `oldApply = newApply` in TowerCE's premises, and the rest follows
@@ -194,14 +219,13 @@ private theorem TowerCE_of_heap_eq (T T' : TowerState)
     TowerCE T T' := by
   intro n idx oldApply newApply h_lookup h_old h_new
   have h_new_T : T.heap[idx]? = some newApply := h_heap_eq ▸ h_new
+  -- h_self gives CE n T.heap; we need CE n T'.heap. Since heaps equal, rewrite.
+  rw [h_heap_eq]
   exact h_self n idx oldApply newApply h_lookup h_old h_new_T
 
 /-- More general than `TowerCE_of_heap_eq`: if `T'.heap` extends `T.heap`
     by appending cells (no mutation), then `TowerCE T T'` reduces to
-    `TowerCE T T`. The base-apply lookup gives `idx < T.heap.length` (via
-    `T.heap[idx]? = some old`), and on that range the prefix equality
-    forces `newApply = oldApply`. Useful for non-mutating compound
-    expressions (those whose only heap effect is allocation). -/
+    `TowerCE T T` plus a `CE_weaken_h_ref` lift. -/
 private theorem TowerCE_of_heap_extends (T T' : TowerState)
     (h_ext : ∃ extras, T'.heap = T.heap ++ extras)
     (h_self : TowerCE T T) :
@@ -215,7 +239,10 @@ private theorem TowerCE_of_heap_extends (T T' : TowerState)
   rw [h_t', h_old] at h_new
   have h_eq_app : oldApply = newApply := Option.some.inj h_new
   subst h_eq_app
-  exact h_self n idx oldApply oldApply h_lookup h_old h_old
+  -- h_self gives CE n T.heap oldApply oldApply; we need CE n T'.heap.
+  -- T'.heap extends T.heap by h_ext, so apply CE_weaken_h_ref.
+  exact CE_weaken_h_ref n T.heap T'.heap ⟨extras, h_eq⟩ oldApply oldApply
+    (h_self n idx oldApply oldApply h_lookup h_old h_old)
 
 /-- An expression is *atomic* if its evaluation reduces to a result
     pair `(cv, T)` without mutating the tower state. The atomic
@@ -285,6 +312,68 @@ private theorem eval_atomic_T_unchanged
   | ifte _ _ _ | app _ | set _ _ | em _
   | primApp _ _ | letE _ _ _ | seq _ | installPolicy _ =>
       simp [Expr.IsAtomic] at h_atomic
+
+/-- **TowerCE composition (transitivity).** Given two-step CE chain
+    `T → T_mid → T''` with appropriate monotonicity, derives
+    `TowerCE T T''`. The strengthened CE (with `h_ref` premise) is
+    what makes this work: a test state `T₀` extending `T''.heap`
+    also extends `T_mid.heap` (by transitivity of heap-prefix), so
+    intermediate values from `T_mid.heap` remain ValValid in
+    `T₀.heap` — the precondition needed to invoke the second CE.
+
+    Depends on `ValVis_trans` (currently sorry'd in `Bisim.lean`)
+    for chaining the bisim conclusion of the two CE invocations.
+
+    Preconditions:
+    - `T_mid.heap` extends `T.heap` (no mutations in first sub-eval
+      of base-apply cells)
+    - `T''.heap` extends `T_mid.heap` (heap monotonicity)
+    - per-level envs are stable across the first transition
+    - `HeapValid T_mid.heap` (so intermediate values are ValValid)
+
+    Note: this is the *general* composition lemma. For specific
+    cases where one of the heaps is unchanged (e.g., `.installPolicy`),
+    use `TowerCE_of_heap_eq` instead — it doesn't need ValVis_trans. -/
+private theorem TowerCE_trans (T T_mid T'' : TowerState)
+    (h_mono_12 : ∃ extras, T_mid.heap = T.heap ++ extras)
+    (h_mono_23 : ∃ extras, T''.heap = T_mid.heap ++ extras)
+    (h_env_eq_12 : ∀ n, T_mid.envAt? n = T.envAt? n)
+    (h_hh_mid : HeapValid T_mid.heap)
+    (h_hh_T'' : HeapValid T''.heap)
+    (h12 : TowerCE T T_mid)
+    (h23 : TowerCE T_mid T'') :
+    TowerCE T T'' := by
+  intro n idx oldApply newApply h_lookup h_old h_new
+  -- Get mid = T_mid.heap[idx]?. Some by monotonicity.
+  obtain ⟨extras12, h_eq_12⟩ := h_mono_12
+  have h_lt : idx < T.heap.length := (List.getElem?_eq_some_iff.mp h_old).1
+  have h_t_mid_idx : T_mid.heap[idx]? = T.heap[idx]? := by
+    rw [h_eq_12]; exact List.getElem?_append_left h_lt
+  have h_mid : T_mid.heap[idx]? = some oldApply := h_t_mid_idx.trans h_old
+  -- Apply h12 at (n, idx, old, mid).
+  obtain ⟨extras23, h_eq_23⟩ := h_mono_23
+  -- TowerCE T T_mid uses T_mid.heap as h_ref. We have T_mid.heap[idx] = some oldApply
+  -- (from h_mid). Apply h12 to get CE n T_mid.heap oldApply oldApply
+  -- (since old = mid because heap is unchanged at this idx).
+  have h_ce_12 : CE n T_mid.heap oldApply oldApply :=
+    h12 n idx oldApply oldApply h_lookup h_old h_mid
+  -- TowerCE T_mid T'' uses T''.heap as h_ref. Apply h23 at (n, idx, oldApply, newApply)
+  -- with the env lookup lifted via h_env_eq_12.
+  have h_lookup_mid : (T_mid.envAt? (n + 1)).bind (·.lookup "base-apply") = some idx := by
+    rw [h_env_eq_12]; exact h_lookup
+  have h_ce_23 : CE n T''.heap oldApply newApply :=
+    h23 n idx oldApply newApply h_lookup_mid h_mid h_new
+  -- Goal: CE n T''.heap oldApply newApply.
+  -- We have h_ce_23 directly. Wait — but what about h_ce_12's contribution?
+  -- If oldApply = newApply (no mutation), CE refl works. Otherwise, need
+  -- ValVis_trans to chain through mid (= oldApply).
+  -- For now, just use h_ce_23 (which directly answers the question).
+  -- The composition only matters if mid ≠ old, in which case h_ce_12 gives
+  -- CE old mid (which is the chain T → T_mid). That's needed to chain through
+  -- if T''.heap[idx] differs from T.heap[idx] AND from T_mid.heap[idx].
+  -- Since T_mid.heap[idx] = T.heap[idx] = oldApply (heap monotonicity preserved
+  -- old), we just have CE n T''.heap oldApply newApply directly.
+  exact h_ce_23
 
 /-- If `T_mid` shares its heap and per-level envs with `T`, then
     `TowerCE T_mid T''` lifts to `TowerCE T T''`. Useful when a
@@ -694,6 +783,65 @@ private theorem cex_T_bisim_self : ∀ n env,
   intro n env hen
   exact EnvVis_self_of_valid env cex_T.heap (cex_T_envValid_at n env hen) cex_T_heapValid
 
+/-! cex_T'-side helpers: the strengthened CE requires the test state's
+    heap to extend `cex_T'.heap`. Using `cex_T'` as the test state
+    trivially satisfies this. The post-set heap holds `cex_div_closure`
+    at idx 0; we need ValValidity in `cex_T'.heap` instead of `cex_T.heap`. -/
+
+private theorem cex_T'_envValid_cex_envL1 : EnvValid cex_envL1 cex_T'.heap := by
+  intro x i hx
+  simp [cex_envL1, Env.lookup] at hx
+  -- hx : "base-apply" = x ∧ 0 = i
+  rw [← hx.2]
+  simp [cex_T', cex_T, TowerState.updateHeap, Heap.update]
+
+private theorem cex_T'_heapValid : HeapValid cex_T'.heap := by
+  intro i v hp
+  match i, hp with
+  | 0, h =>
+      have : v = cex_div_closure := by
+        simp [cex_T', cex_T, TowerState.updateHeap, Heap.update] at h
+        exact h.symm
+      rw [this]
+      -- ValValid cex_div_closure cex_T'.heap = EnvValid cex_envL1 cex_T'.heap
+      exact cex_T'_envValid_cex_envL1
+  | k + 1, h => simp [cex_T', cex_T, TowerState.updateHeap, Heap.update] at h
+
+private theorem cex_T'_envAt_eq : ∀ n, cex_T'.envAt? n = cex_T.envAt? n := by
+  intro n; rfl
+
+private theorem cex_T'_policyAt_eq : ∀ n, cex_T'.policyAt? n = cex_T.policyAt? n := by
+  intro n; rfl
+
+private theorem cex_T'_envValid_at : ∀ n env,
+    cex_T'.envAt? n = some env → EnvValid env cex_T'.heap := by
+  intro n env hen
+  rw [cex_T'_envAt_eq] at hen
+  -- For n = 1, env = cex_envL1.
+  match n, hen with
+  | 0, h =>
+      have : env = .nil := by
+        simp [cex_T, TowerState.envAt?, TowerState.levelAt?] at h; exact h.symm
+      rw [this]
+      intro x i hx; simp [Env.lookup] at hx
+  | 1, h =>
+      have h_env : env = cex_envL1 := by
+        simp [cex_T, TowerState.envAt?, TowerState.levelAt?] at h; exact h.symm
+      rw [h_env]
+      exact cex_T'_envValid_cex_envL1
+  | n + 2, h => simp [cex_T, TowerState.envAt?, TowerState.levelAt?] at h
+
+private theorem cex_T'_policyResp_all : ∀ n p,
+    cex_T'.policyAt? n = some p → PolicyRespectsBisimT p := by
+  intro n p hp
+  rw [cex_T'_policyAt_eq] at hp
+  exact cex_T_policyResp_all n p hp
+
+private theorem cex_T'_bisim_self : ∀ n env,
+    cex_T'.envAt? n = some env → EnvVis env env cex_T'.heap cex_T'.heap := by
+  intro n env hen
+  exact EnvVis_self_of_valid env cex_T'.heap (cex_T'_envValid_at n env hen) cex_T'_heapValid
+
 theorem safeEvolution_necessary :
     ∃ (ptable : PolicyTable) (fuel : Nat) (level : Nat) (exp : Expr)
       (env : Env) (T : TowerState) (v : Val) (T' : TowerState),
@@ -714,29 +862,33 @@ theorem safeEvolution_necessary :
         (cex_T.envAt? 1).bind (·.lookup "base-apply") = some 0 := rfl
     have h_old : cex_T.heap[0]? = some .builtinBaseApply := rfl
     have h_new : cex_T'.heap[0]? = some cex_div_closure := rfl
-    have h_ce : CE 0 .builtinBaseApply cex_div_closure :=
+    -- With strengthened CE, h_tce gives CE 0 cex_T'.heap (h_ref is post-state).
+    have h_ce : CE 0 cex_T'.heap .builtinBaseApply cex_div_closure :=
       h_tce 0 0 .builtinBaseApply cex_div_closure h_lookup h_old h_new
-    -- The premise: builtinBaseApply admits (+ 1 2) → (.num 3).
+    -- The premise: builtinBaseApply admits (+ 1 2) → (.num 3) at cex_T'.
     have h_witness :
         callAsBaseApply 10 [] 0 .builtinBaseApply (.prim "+")
-          [.num 1, .num 2] cex_T = some (.num 3, cex_T) := by
+          [.num 1, .num 2] cex_T' = some (.num 3, cex_T') := by
       simp [callAsBaseApply, applyDirect, applyPrim, applyPrim_plus]
-    have h_pol_resp : ∀ p, cex_T.policyAt? 0 = some p → PolicyRespectsBisimT p :=
-      cex_T_policyResp_all 0
+    have h_pol_resp : ∀ p, cex_T'.policyAt? 0 = some p → PolicyRespectsBisimT p :=
+      cex_T'_policyResp_all 0
     have h_pt_empty : PolicyTableRespectsBisimT [] := by intro idx p hp; simp at hp
-    have hv_old_cex : ValValid Val.builtinBaseApply cex_T.heap := trivial
-    have hv_new_cex : ValValid cex_div_closure cex_T.heap := by
-      show EnvValid cex_envL1 cex_T.heap
-      exact cex_T_envValid_at 1 cex_envL1 rfl
+    have hv_old_cex : ValValid Val.builtinBaseApply cex_T'.heap := trivial
+    have hv_new_cex : ValValid cex_div_closure cex_T'.heap :=
+      cex_T'_envValid_cex_envL1
+    -- Test state extends cex_T'.heap trivially (use cex_T' itself).
+    have h_ext : ∃ extras, cex_T'.heap = cex_T'.heap ++ extras := ⟨[], by simp⟩
     obtain ⟨fuel', T'', r', h_call, _⟩ :=
-      h_ce 10 [] (.prim "+") [.num 1, .num 2] cex_T (.num 3) cex_T
-        cex_T_heapValid trivial ⟨trivial, trivial, trivial⟩
+      h_ce 10 [] (.prim "+") [.num 1, .num 2] cex_T' (.num 3) cex_T'
+        h_ext
+        cex_T'_heapValid trivial ⟨trivial, trivial, trivial⟩
         hv_old_cex hv_new_cex
-        h_pt_empty h_pol_resp cex_T_envValid_at cex_T_policyResp_all cex_T_bisim_self
+        h_pt_empty h_pol_resp cex_T'_envValid_at cex_T'_policyResp_all
+        cex_T'_bisim_self
         h_witness
     -- Every call through cex_div_closure diverges (body = (.app [])).
     have h_div : ∀ f, callAsBaseApply f [] 0 cex_div_closure (.prim "+")
-        [.num 1, .num 2] cex_T = none := by
+        [.num 1, .num 2] cex_T' = none := by
       intro f
       match f with
       | 0 =>

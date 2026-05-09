@@ -3231,3 +3231,25 @@ theorem closedValB_AllBelow (cutoff : Nat) :
       simp [closedValB, Bool.and_eq_true] at hc
       exact ⟨closedValB_AllBelow cutoff x hc.1, closedValB_AllBelow cutoff y hc.2⟩
   | .closure _ _ _, hc => by simp [closedValB] at hc
+
+/-! ## ValVis transitivity (axiomatic — proof deferred)
+
+    Needed for composing CE chains. The proof is by induction on
+    depth with cases on Val structure. Atomic constructors (.num,
+    .bool, etc.) are immediate via structural equality. .cons is
+    by IH on components. .closure is non-trivial because the
+    pattern-matching on `cenv_b.lookup x` doesn't auto-reduce
+    cleanly — needs careful use of `change` and `Option.some.inj`
+    chasing. Stated here as a helper for `TowerCE.trans`. -/
+theorem ValVis_aux_trans : ∀ (n : Nat) (va vb vc : Val) (ha hb hc : Heap),
+    ValVis_aux n va vb ha hb → ValVis_aux n vb vc hb hc →
+    ValVis_aux n va vc ha hc := by
+  -- Proof deferred — see file note above.
+  sorry
+
+/-- ValVis transitivity (the depth-uniform version). -/
+theorem ValVis_trans (va vb vc : Val) (ha hb hc : Heap) :
+    ValVis va vb ha hb → ValVis vb vc hb hc → ValVis va vc ha hc := by
+  intro h12 h23 n
+  exact ValVis_aux_trans n va vb vc ha hb hc (h12 n) (h23 n)
+

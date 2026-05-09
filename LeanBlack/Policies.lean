@@ -67,9 +67,20 @@ def callAsBaseApply (fuel : Nat) (ptable : PolicyTable) (level : Nat)
     reflective replacement that hijacked the policy at the
     governing level would violate this (and so violate CE). The
     lean-green version asks `s'.policy = s''.policy`; the tower
-    version specializes to the level-of-interest. -/
-def CE (level : Nat) (old new : Val) : Prop :=
+    version specializes to the level-of-interest.
+
+    **`h_ref` parameter (compositional CE):** the test state's heap
+    is required to extend `h_ref` (`∃ extras, T.heap = h_ref ++ extras`).
+    This lets us compose CE chains: when proving CE n h_ref old new
+    via CE n h_ref old mid composed with CE n h_ref mid new, the
+    `mid` value sits in some intermediate state's heap that is a
+    prefix of the test state's heap, so `ValValid mid T.heap`
+    follows from heap-extension. Without `h_ref`, the test state
+    is unrestricted and composition fails (cf. lean-green's CE,
+    which is single-stage and doesn't need this). -/
+def CE (level : Nat) (h_ref : Heap) (old new : Val) : Prop :=
   ∀ fuel ptable op operands T r T',
+    (∃ extras, T.heap = h_ref ++ extras) →
     HeapValid T.heap → ValValid op T.heap → ListValValid operands T.heap →
     ValValid old T.heap → ValValid new T.heap →
     PolicyTableRespectsBisimT ptable →
@@ -85,12 +96,10 @@ def CE (level : Nat) (old new : Val) : Prop :=
       HeapValid T''.heap ∧
       T.heap.length ≤ T''.heap.length
 
-/-- Same as `CE` but with `ValVis_weak` in the conclusion. The
-    behavioral statement; weaker than `CE` for closure-typed
-    results, equivalent for first-order results. See lean-green's
-    `WAND.md` for the full architectural argument. -/
-def CE_weak (level : Nat) (old new : Val) : Prop :=
+/-- Same as `CE` but with `ValVis_weak` in the conclusion. -/
+def CE_weak (level : Nat) (h_ref : Heap) (old new : Val) : Prop :=
   ∀ fuel ptable op operands T r T',
+    (∃ extras, T.heap = h_ref ++ extras) →
     HeapValid T.heap → ValValid op T.heap → ListValValid operands T.heap →
     ValValid old T.heap → ValValid new T.heap →
     PolicyTableRespectsBisimT ptable →
@@ -106,11 +115,16 @@ def CE_weak (level : Nat) (old new : Val) : Prop :=
       HeapValid T''.heap ∧
       T.heap.length ≤ T''.heap.length
 
+/-- Soundness for CE binds `h_ref := ctx.heap` — the policy's view of the
+    heap at admission time. Test states extending `ctx.heap` see CE-soundness
+    (this matches the natural use: a `.set` step admits a modification
+    based on the heap at the moment of decision, and consumers of the
+    resulting CE pass test states extending that heap). -/
 abbrev BlackPolicy.SoundForCE (level : Nat) (p : BlackPolicy) : Prop :=
-  p.Sound (CE level)
+  ∀ ctx old new, p ctx old new = true → CE level ctx.heap old new
 
 abbrev BlackPolicy.SoundForCE_weak (level : Nat) (p : BlackPolicy) : Prop :=
-  p.Sound (CE_weak level)
+  ∀ ctx old new, p ctx old new = true → CE_weak level ctx.heap old new
 
 /-! ## Trivial policies -/
 
