@@ -1,7 +1,7 @@
 # lean-black — design sketch
 
-A synthesis of [`lean-grey`](../lean-grey/) (abstract infinite tower, governance
-coherence proved) and [`lean-green`](../lean-green/) (Black-faithful
+A synthesis of [`lean-grey`](https://github.com/namin/lean-grey) (abstract infinite tower, governance
+coherence proved) and [`lean-green`](https://github.com/namin/lean-green) (Black-faithful
 heap+closure+`set!`, value bisimulation à la CakeML). The goal is a single
 formalization that is **both** infinite-and-reflective-in-its-governance **and**
 operationally-faithful-to-Black.
