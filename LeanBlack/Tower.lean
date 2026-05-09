@@ -112,6 +112,13 @@ def initUserEnv (T : TowerState) : Env :=
 
 /-! ## Materialization and accessors -/
 
+/-- The fold step that materialize applies one or more times.
+    Defined here so the lemmas about `materialize` can refer to it
+    by name (rather than to an anonymous lambda inside the `fold`). -/
+def materializeStep (T : TowerState) : TowerState :=
+  let (h', env) := freshLevelEnv T.heap
+  { heap := h', levels := T.levels ++ [{ env := env, policy := acceptAllPolicy }] }
+
 /-- Ensure level `n` is materialized in `T`. Returns the (potentially
     extended) tower, or `none` if `n ≥ maxDepth`. -/
 def TowerState.materialize (T : TowerState) (n : Nat) : Option TowerState :=
@@ -120,10 +127,7 @@ def TowerState.materialize (T : TowerState) (n : Nat) : Option TowerState :=
   else
     let needed := n + 1 - T.levels.length
     let extended : TowerState :=
-      Nat.fold needed (fun _ _ T' =>
-        let (h', env) := freshLevelEnv T'.heap
-        { heap := h', levels := T'.levels ++ [{ env := env, policy := acceptAllPolicy }] })
-        T
+      Nat.fold needed (fun _ _ T' => materializeStep T') T
     some extended
 
 /-- Look up level `n`'s state. Returns `none` only if not
@@ -244,24 +248,120 @@ theorem TowerState.alloc_envAt? (T : TowerState) (v : Val) (n : Nat) :
 
 /-! ### `materialize` lemmas -/
 
+/-- After k applications of the fold step, levels has the original prefix
+    extended by k new levels. -/
+private theorem materializeStep_iter_levels_prefix (T : TowerState) (k : Nat) :
+    ∃ extra : List LevelState,
+      (Nat.fold k (fun _ _ T' => materializeStep T') T).levels = T.levels ++ extra ∧
+      extra.length = k := by
+  induction k with
+  | zero =>
+      refine ⟨[], ?_, ?_⟩
+      · simp [Nat.fold]
+      · rfl
+  | succ k ih =>
+      obtain ⟨extras, h_eq, h_len⟩ := ih
+      simp only [Nat.fold]
+      let T_k := Nat.fold k (fun _ _ T' => materializeStep T') T
+      let new_ls : LevelState :=
+        { env := (freshLevelEnv T_k.heap).2, policy := acceptAllPolicy }
+      refine ⟨extras ++ [new_ls], ?_, ?_⟩
+      · show (materializeStep T_k).levels = T.levels ++ (extras ++ [new_ls])
+        unfold materializeStep
+        show T_k.levels ++ [new_ls] = T.levels ++ (extras ++ [new_ls])
+        rw [h_eq, List.append_assoc]
+      · simp [List.length_append, h_len]
+
+/-- `freshLevelEnv` only grows the heap. -/
+private theorem freshLevelEnv_heap_grows (h : Heap) :
+    h.length ≤ (freshLevelEnv h).1.length := by
+  -- freshLevelEnv = (buildBindings-foldl over 13 prims) >>= alloc builtinBaseApply
+  -- Each step appends one cell. Just trace through.
+  unfold freshLevelEnv
+  simp only [Heap.alloc, List.length_append, List.length_singleton]
+  -- After buildBindings, heap is h ++ [13 prim cells]. Then alloc baseApply
+  -- appends one more. So final length = h.length + 14 ≥ h.length.
+  -- Use foldl_induction: each step preserves "length ≥ original".
+  have h_inner : ∀ (pairs : List (String × Val)) (acc : Heap × Env),
+      acc.1.length ≤ (pairs.foldl
+        (fun (a : Heap × Env) (kv : String × Val) =>
+          let (hh, ee) := a
+          let (hh', idx) := hh.alloc kv.2
+          (hh', .cons kv.1 idx ee)) acc).1.length := by
+    intro pairs
+    induction pairs with
+    | nil => intro acc; simp [List.foldl]
+    | cons p rest ih =>
+        intro acc
+        simp only [List.foldl]
+        have h_step :
+            acc.1.length ≤ (acc.1.alloc p.2).1.length := by
+          simp [Heap.alloc, List.length_append]
+        have h_rest := ih ((acc.1.alloc p.2).1, .cons p.1 (acc.1.alloc p.2).2 acc.2)
+        exact Nat.le_trans h_step h_rest
+  exact Nat.le_trans (h_inner _ (h, .nil)) (Nat.le_succ _)
+
+/-- After k applications of the fold step, the heap grows monotonically. -/
+private theorem materializeStep_iter_heap_grows (T : TowerState) (k : Nat) :
+    T.heap.length ≤ (Nat.fold k (fun _ _ T' => materializeStep T') T).heap.length := by
+  induction k with
+  | zero => simp [Nat.fold]
+  | succ k ih =>
+      simp only [Nat.fold]
+      have h_step : (Nat.fold k (fun _ _ T' => materializeStep T') T).heap.length
+          ≤ (materializeStep (Nat.fold k (fun _ _ T' => materializeStep T') T)).heap.length := by
+        unfold materializeStep
+        exact freshLevelEnv_heap_grows _
+      exact Nat.le_trans ih h_step
+
 /-- `materialize` only appends new levels — existing levels (and so
-    their envs) are preserved. The Nat.fold-based extension carries
-    a "T' = T after k append steps" structure; the structural
-    `getElem?_append_*` proof is straightforward but tedious.
-    Sorry'd as a clean target for later. -/
+    their envs) are preserved. -/
 theorem TowerState.materialize_envAt?_preserves
     (T T' : TowerState) (n m : Nat) (env : Env)
     (h_mat : T.materialize n = some T')
     (h_env : T.envAt? m = some env) :
     T'.envAt? m = some env := by
-  sorry
+  unfold materialize at h_mat
+  by_cases h1 : n ≥ Tower.maxDepth
+  · simp [h1] at h_mat
+  · simp [h1] at h_mat
+    by_cases h2 : T.levels.length > n
+    · simp [h2] at h_mat
+      obtain rfl := h_mat.symm
+      exact h_env
+    · simp [h2] at h_mat
+      obtain rfl := h_mat.symm
+      -- Goal: (Nat.fold ... T).envAt? m = some env
+      have h_lt : m < T.levels.length := by
+        unfold envAt? levelAt? at h_env
+        cases hh : T.levels[m]? with
+        | none => rw [hh] at h_env; simp at h_env
+        | some _ => exact List.getElem?_eq_some_iff.mp hh |>.1
+      obtain ⟨extras, h_lvl_eq, _⟩ :=
+        materializeStep_iter_levels_prefix T (n + 1 - T.levels.length)
+      unfold envAt? levelAt?
+      rw [h_lvl_eq]
+      have : (T.levels ++ extras)[m]? = T.levels[m]? :=
+        List.getElem?_append_left h_lt
+      rw [this]
+      exact h_env
 
 /-- `materialize` only grows the heap. -/
 theorem TowerState.materialize_heap_grows
     (T T' : TowerState) (n : Nat)
     (h_mat : T.materialize n = some T') :
     T.heap.length ≤ T'.heap.length := by
-  sorry
+  unfold materialize at h_mat
+  by_cases h1 : n ≥ Tower.maxDepth
+  · simp [h1] at h_mat
+  · simp [h1] at h_mat
+    by_cases h2 : T.levels.length > n
+    · simp [h2] at h_mat
+      obtain rfl := h_mat.symm
+      exact Nat.le_refl _
+    · simp [h2] at h_mat
+      obtain rfl := h_mat.symm
+      exact materializeStep_iter_heap_grows T (n + 1 - T.levels.length)
 
 /-! ## RunState compatibility shim
 

@@ -17,7 +17,7 @@ Status, by file:
 | File | Status | Notes |
 |---|---|---|
 | `Black.lean` | done | Val/Expr/Env, Heap ops, primitives, MutationCtx, BlackPolicy |
-| `Tower.lean` | done | LevelState, TowerState, materialization, accessors, `RunState := TowerState` shim |
+| `Tower.lean` | done (357 LOC, 0 sorries) | LevelState, TowerState, materialization, accessors, `RunState := TowerState` shim, foundational lemmas (`setPolicyAt`/`updateHeap`/`alloc`/`materialize` preservation facts including `materialize_envAt?_preserves` and `materialize_heap_grows`, both fully proved) |
 | `Eval.lean` | done | tower-indexed eval/evalList/applyVia/applyDirect |
 | `Smoke.lean` | done | 8 tests across 4 scenes — all pass |
 | `Bisim.lean` | partial (3057/7580 LOC) | depth-indexed bisim, validity, heap-extension, in-place-update preservation, `HeapEvolution`, list/listToVal/applyPrim bisim, alloc-chain, `bisim_imp_eq` — all ported verbatim via the `RunState := TowerState` shim |
