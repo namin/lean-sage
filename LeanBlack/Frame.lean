@@ -107,22 +107,90 @@ private theorem HeapValid_append_closed (h : Heap) (extras : Heap)
     have h_in : v ∈ extras := List.getElem?_mem hp
     exact closedValB_ValValid v (h ++ extras) (h_extras v h_in)
 
-/-- Materialize preserves heap validity. The proof chain (sorry'd
-    as a single top-level claim until the supporting `primPairs_atoms`
-    proof clears Lean's irreducibility-vs-disjunction handling):
-    1. `HeapValid_append_closed` (proved above): appending closed cells
-       preserves HeapValid.
-    2. `primPairs_atoms` (TBD): every primPairs entry is `.prim _` (closed).
-    3. `buildBindings_extras_closed` (TBD): foldl extras inherit closedness.
-    4. `freshLevelEnv_extras_closed` (TBD): + `.builtinBaseApply` is closed.
-    5. `materializeStep_HeapValid_preserves` (TBD): single-step preservation.
-    6. `materialize_HeapValid_preserves`: iterate via Nat.fold induction. -/
+/-- Every cell in `primPairs` is a closed value. Proved by `decide`
+    after `unfold` exposes the concrete 13-element list. -/
+private theorem primPairs_atoms : ∀ p ∈ primPairs, closedValB p.2 = true := by
+  unfold primPairs
+  decide
+
+/-- The buildBindings foldl extras are all closed. -/
+private theorem buildBindings_extras_closed
+    (pairs : List (String × Val)) (h : Heap) (env : Env)
+    (h_atoms : ∀ p ∈ pairs, closedValB p.2 = true) :
+    ∃ extras, (pairs.foldl
+      (fun (acc : Heap × Env) (kv : String × Val) =>
+        (acc.1 ++ [kv.2], Env.cons kv.1 acc.1.length acc.2))
+      (h, env)).1 = h ++ extras ∧ (∀ v ∈ extras, closedValB v = true) := by
+  induction pairs generalizing h env with
+  | nil =>
+      refine ⟨[], by simp [List.foldl], ?_⟩
+      intro v hv; cases hv
+  | cons p rest ih =>
+      simp only [List.foldl]
+      have h_p : closedValB p.2 = true := h_atoms p (List.mem_cons_self)
+      have h_rest_atoms : ∀ q ∈ rest, closedValB q.2 = true :=
+        fun q hq => h_atoms q (List.mem_cons_of_mem _ hq)
+      obtain ⟨extras, h_eq, h_closed⟩ :=
+        ih (h ++ [p.2]) (.cons p.1 h.length env) h_rest_atoms
+      refine ⟨[p.2] ++ extras, ?_, ?_⟩
+      · rw [h_eq, List.append_assoc]
+      · intro v hv
+        rcases List.mem_append.mp hv with h_in | h_in
+        · simp at h_in; rw [h_in]; exact h_p
+        · exact h_closed v h_in
+
+/-- `freshLevelEnv h` extras are all closed. -/
+private theorem freshLevelEnv_extras_closed (h : Heap) :
+    ∃ extras, (freshLevelEnv h).1 = h ++ extras ∧
+      (∀ v ∈ extras, closedValB v = true) := by
+  unfold freshLevelEnv
+  simp only [Heap.alloc]
+  obtain ⟨extras, h_eq, h_closed⟩ :=
+    buildBindings_extras_closed primPairs h .nil primPairs_atoms
+  refine ⟨extras ++ [.builtinBaseApply], ?_, ?_⟩
+  · rw [h_eq, List.append_assoc]
+  · intro v hv
+    rcases List.mem_append.mp hv with h_in | h_in
+    · exact h_closed v h_in
+    · simp at h_in; rw [h_in]; rfl
+
+/-- One materializeStep preserves HeapValid. -/
+private theorem materializeStep_HeapValid_preserves (T : TowerState)
+    (h_hv : HeapValid T.heap) :
+    HeapValid (materializeStep T).heap := by
+  unfold materializeStep
+  obtain ⟨extras, h_eq, h_closed⟩ := freshLevelEnv_extras_closed T.heap
+  show HeapValid (freshLevelEnv T.heap).1
+  rw [h_eq]
+  exact HeapValid_append_closed T.heap extras h_hv h_closed
+
+/-- Iterated materializeStep preserves HeapValid. -/
+private theorem materializeStep_iter_HeapValid_preserves (T : TowerState) (k : Nat)
+    (h_hv : HeapValid T.heap) :
+    HeapValid (Nat.fold k (fun _ _ T' => materializeStep T') T).heap := by
+  induction k with
+  | zero => simp [Nat.fold]; exact h_hv
+  | succ k ih =>
+      simp only [Nat.fold]
+      exact materializeStep_HeapValid_preserves _ ih
+
+/-- Materialize preserves heap validity. -/
 theorem materialize_HeapValid_preserves
     (T T' : TowerState) (n : Nat)
-    (_h_mat : T.materialize n = some T')
-    (_h_hv : HeapValid T.heap) :
-    HeapValid T'.heap :=
-  sorry
+    (h_mat : T.materialize n = some T')
+    (h_hv : HeapValid T.heap) :
+    HeapValid T'.heap := by
+  unfold TowerState.materialize at h_mat
+  by_cases h1 : n ≥ Tower.maxDepth
+  · simp [h1] at h_mat
+  · simp [h1] at h_mat
+    by_cases h2 : T.levels.length > n
+    · simp [h2] at h_mat
+      obtain rfl := h_mat.symm
+      exact h_hv
+    · simp [h2] at h_mat
+      obtain rfl := h_mat.symm
+      exact materializeStep_iter_HeapValid_preserves T (n + 1 - T.levels.length) h_hv
 
 /-- Materialize preserves "level envs valid in heap": existing levels
     extend trivially via `EnvValid.heap_extends`; new levels' envs are
