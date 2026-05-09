@@ -217,6 +217,75 @@ private theorem TowerCE_of_heap_extends (T T' : TowerState)
   subst h_eq_app
   exact h_self n idx oldApply oldApply h_lookup h_old h_old
 
+/-- An expression is *atomic* if its evaluation reduces to a result
+    pair `(cv, T)` without mutating the tower state. The atomic
+    constructors are: `.num`, `.bool`, `.lam`, `.var`, `.quote`. -/
+def Expr.IsAtomic : Expr → Prop
+  | .num _   => True
+  | .bool _  => True
+  | .lam _ _ => True
+  | .var _   => True
+  | .quote _ => True
+  | _        => False
+
+/-- For atomic expressions, `eval` doesn't change the tower state.
+    A useful lemma for proving compound cases of `eval_tower_safe`
+    where the first sub-eval is on an atomic expression. -/
+private theorem eval_atomic_T_unchanged
+    (k : Nat) (ptable : PolicyTable) (level : Nat) (c : Expr)
+    (env : Env) (T : TowerState) (cv : Val) (T_mid : TowerState)
+    (h_atomic : c.IsAtomic)
+    (h_eval : eval k ptable level c env T = some (cv, T_mid)) :
+    T_mid = T := by
+  cases c with
+  | num i =>
+      cases k with
+      | zero => simp [eval] at h_eval
+      | succ j =>
+          simp [eval] at h_eval
+          exact h_eval.2.symm
+  | bool b =>
+      cases k with
+      | zero => simp [eval] at h_eval
+      | succ j =>
+          simp [eval] at h_eval
+          exact h_eval.2.symm
+  | lam ps body =>
+      cases k with
+      | zero => simp [eval] at h_eval
+      | succ j =>
+          simp [eval] at h_eval
+          exact h_eval.2.symm
+  | var x =>
+      cases k with
+      | zero => simp [eval] at h_eval
+      | succ j =>
+          simp only [eval] at h_eval
+          cases hx : env.lookup x with
+          | none => rw [hx] at h_eval; simp at h_eval
+          | some idx =>
+              rw [hx] at h_eval
+              simp only at h_eval
+              cases hp : T.heap[idx]? with
+              | none => rw [hp] at h_eval; simp at h_eval
+              | some w =>
+                  rw [hp] at h_eval
+                  simp only [Option.some.injEq, Prod.mk.injEq] at h_eval
+                  exact h_eval.2.symm
+  | quote w =>
+      cases k with
+      | zero => simp [eval] at h_eval
+      | succ j =>
+          simp only [eval] at h_eval
+          by_cases hc : closedValB w = true
+          · simp only [hc, if_true, Option.some.injEq, Prod.mk.injEq] at h_eval
+            exact h_eval.2.symm
+          · simp only [hc, if_false] at h_eval
+            simp at h_eval
+  | ifte _ _ _ | app _ | set _ _ | em _
+  | primApp _ _ | letE _ _ _ | seq _ | installPolicy _ =>
+      simp [Expr.IsAtomic] at h_atomic
+
 /-- If `T_mid` shares its heap and per-level envs with `T`, then
     `TowerCE T_mid T''` lifts to `TowerCE T T''`. Useful when a
     sub-eval doesn't change the tower (e.g., the condition of an
@@ -429,11 +498,30 @@ theorem eval_tower_safe
                   -- h_eval : eval k ptable level e env T = some (v, T')
                   apply ih <;> assumption
               | cons e' rest' =>
-                  -- exps = e :: e' :: rest' — multi-step composition.
-                  -- TowerCE composition has architectural issues (DUMP.md):
-                  -- the second CE invocation needs ValValid mid T₀.heap
-                  -- where T₀ is the test state. Deferred.
-                  sorry
+                  -- exps = e :: e' :: rest'.
+                  -- Sub-case: e is atomic ⇒ eval e doesn't mutate (T_mid = T),
+                  -- so we can apply IH to (.seq (e' :: rest')) at T directly.
+                  -- For non-atomic e, composition required (deferred).
+                  cases e with
+                  | num _ | bool _ | lam _ _ | var _ | quote _ =>
+                      simp only [eval] at h_eval
+                      -- h_eval has structure: match (eval k ... e env T) with ...
+                      cases h_e : eval k ptable level _ env T with
+                      | none => rw [h_e] at h_eval; simp at h_eval
+                      | some pr =>
+                          rw [h_e] at h_eval
+                          cases pr with
+                          | mk _ T_mid =>
+                              simp only at h_eval
+                              have h_T_eq : T_mid = T :=
+                                eval_atomic_T_unchanged k ptable level _ env T _
+                                  T_mid (by simp [Expr.IsAtomic]) h_e
+                              subst h_T_eq
+                              apply ih <;> assumption
+                  | _ =>
+                      -- Non-atomic e: composition required (DUMP.md
+                      -- "Architectural blocker").
+                      sorry
       | ifte c t e =>
           -- For atomic conditions (.num/.bool/.lam/.quote/.var), eval c
           -- doesn't change T, so the branch eval handles everything via
