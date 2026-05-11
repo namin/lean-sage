@@ -20,15 +20,15 @@ a hands-on walkthrough.
 |---|---|
 | `ApprovedModification` structure | shipped |
 | `approvedPolicy` runtime policy | shipped |
-| `CE_weak_strong` (the proof-bearing predicate) | shipped |
+| `CE_weak_strong` (the proof-based predicate) | shipped |
 | `approvedPolicy_soundForCE_weak_strong` (headline soundness) | proved |
 | Identity demos (vacuous + closure) | shipped |
-| Multn approval (worked example) | **deferred** — two concrete blockers |
+| **Multn approval (worked example)** | **proved sorry-free** |
 | W1 (existential equational defeat) | **proved** (baseline-policy form) |
 | Parameterized W1 (under `[approvedPolicy approvals]`) | deferred — needs `NoSet` policy-independence lemma |
-| Scene A (end-to-end with multn) | deferred (downstream of multn) |
+| Scene A (end-to-end with multn) | partial — `multnApproval` constructs + matches verified in `ProofBasedSmoke.lean` Scene 3 |
 | Scene B (custom non-multn) | deferred |
-| Scene C (compile-time refusal) | deferred (downstream of Scene A) |
+| Scene C (compile-time refusal) | deferred |
 | W2 / W3 | out of scope; future work |
 
 All deferred items have file/line pointers and effort estimates in

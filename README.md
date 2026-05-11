@@ -4,10 +4,11 @@ A synthesis of [`lean-grey`](../lean-grey/) (abstract infinite tower with
 proved governance coherence) and [`lean-green`](../lean-green/) (Black-faithful
 heap+closure+`set!` interpreter with CakeML-style value bisimulation).
 
-**Status: 0 sorries** (in active code). ~14.1k LOC of library
-(8 files in `LeanBlack/`) + ~828 LOC of demo executables. Smoke 8/8
-passing. Demos 29/29 passing across 12 scenes. `proofBasedSmoke` 4/4
-passing across 2 scenes. All headline theorems proved.
+**Status: 0 sorries.** ~14.5k LOC of library (8 files in `LeanBlack/`)
++ ~900 LOC of demo executables. Smoke 8/8 passing. Demos 29/29
+passing across 12 scenes. `proofBasedSmoke` 6/6 passing across 3
+scenes (identity admit, identity refuse, multn approval). All
+headline theorems proved.
 
 ## What this is
 
@@ -132,10 +133,10 @@ consistent with lean-green (one heap, level-uniform allocation discipline).
 | `Frame.lean` | 4948 | `PolicyRespectsBisimT`, `PolicyTableRespectsBisimT`. Single-side materialize preservation lemmas. Tower-aware `WFCtxT` (13 fields), `TowerCross` (12 fields), `FrameStmtT`, `frame_tower` (the framing theorem, all 4 mutual clauses, all 13 expression cases proved). `all_preserves_envAt` (mutual conjunction). `heap_mono` (4-way mutual induction over fuel). `policy_shift_preserved` (4-way mutual). `shift_respect` (the 4-way commutativity proof). `applyDirect_heap_extend_weak` (prefix-extension, derived via `shift_respect` + `frame_tower` self-bisim). |
 | `Soundness.lean` | 1990 | `TowerCE`, `SafeEvolution`. `TowerCE` helpers (`refl`/`trans`/`of_heap_eq`/`of_heap_extends`/`lift_source`/`weaken_h_ref`). `Expr.IsAtomic` and `eval_atomic_T_unchanged`. `HeapValid_alloc_one`, `EnvValid_cons_alloc`, self-invariant preservation lemmas. `safeEvolution_necessary` (concrete counterexample). `all_tower_safe` (the 4-way mutual safety theorem). `eval_tower_safe` (wrapper). |
 | `Policies.lean` | 611 | Tower-aware `callAsBaseApply`, per-level `CE`/`CE_weak`, `BlackPolicy.SoundForCE`/`_weak`, `numGuardPolicy`/`multnExactPolicy` definitions + shape lemmas, `verifiedTable`. `OrigBoundIn`/`NumQBoundIn`/`InstallFacts`/`RuntimeWF` (tower-aware install-protocol structures). `multnExactPolicy_implies_InstallFacts` (bridge lemma). `multn_closure_body_unfolds` (closure-body trace). `multnExact_CE_num_case_vacuous` (vacuous numerical case). `multnExact_CE_nonnum_case` (substantive non-numerical case via `applyDirect_heap_extend_weak`). `multnExact_soundForCE_first_install_tower` (the headline). |
-| `ProofBased.lean` | 586 | Proof-based admission. `DecidableEq` for Val/Expr/Env (mutual `*_beq_self` + instance derivation from existing `*_beq_eq`). `CE_weak_strong` predicate + `CE_weak_to_strong` weakening + `BlackPolicy.SoundForCE_weak_strong` abbrev. `ApprovedModification` structure (proof field is `CE_weak_strong`-typed). `approvedPolicy` runtime gate. `structural_policy_yields_approval` (bridge from `SoundForCE_weak` to the new predicate). `CE_weak_strong_heap_mono`, `approvedPolicy_soundForCE_weak_strong` (headline soundness). `CE_weak_num_identity` + `numIdentityApproval` (vacuous identity). `callAsBaseApply_preserves` + `CE_weak_refl` + `identityApproval` (closure-identity). `ObsEquivConverges` + `wand_defeated_existential` (W1, the existential equational-theory defeat, proved sorry-free via `native_decide`). |
+| `ProofBased.lean` | 806 | Proof-based admission. `DecidableEq` for Val/Expr/Env (mutual `*_beq_self` + instance derivation from existing `*_beq_eq`). `HeapPrefix` predicate + lemmas (`length_le`, `refl`, `trans`, `getElem?`). `CE_weak_strong` predicate (with content-prefix premise) + `CE_weak_to_strong` weakening + `BlackPolicy.SoundForCE_weak_strong` abbrev. `ApprovedModification` structure (proof field is `CE_weak_strong`-typed; matches checks content-prefix). `approvedPolicy` runtime gate. `structural_policy_yields_approval`. `CE_weak_strong_heap_mono`, `approvedPolicy_soundForCE_weak_strong` (headline soundness). `CE_weak_num_identity` + `numIdentityApproval` (vacuous identity). `callAsBaseApply_preserves` + `CE_weak_refl` + `identityApproval` (closure-identity). `ObsEquivConverges` + `wand_defeated_existential` (W1, the existential equational-theory defeat, proved sorry-free via `native_decide`). `InstallFacts.heap_extend` via `OrigBoundIn_heap_extend` + `NumQBoundIn_heap_extend`, `applyDirect_prim_fuel_bump`, `callAsBaseApply_one_builtin_succeeds_implies_prim`, `multnApproval` (the worked multn case, proved sorry-free). |
 | `Smoke.lean` | 176 | 4 scenes, 8 tests. |
 | `Demos.lean` | 508 | 12 demos, 29 tests. Doubling, identity, tripler, install-composition (multn-then-double, double-then-multn), three-level meta-meta, constant wrapper, inspection (return op/args), self-modifying wrapper, lazy multn (adaptive), three-level governance, selective fail. |
-| `ProofBasedSmoke.lean` | 144 | 2 scenes, 4 tests. Integration of `approvedPolicy` with the tower runtime: admit (identity mod) + refuse (non-matching mod), both checking arithmetic preservation afterward. |
+| `ProofBasedSmoke.lean` | 207 | 3 scenes, 6 tests. Integration of `approvedPolicy` with the tower runtime: admit (identity mod) + refuse (non-matching mod), both checking arithmetic preservation; multn approval constructs and matches admit/refuse. |
 | `DESIGN.md` | — | Architectural rationale (the structural-policy half), decisions, scope. |
 | `DESIGN_PROOF.md` | — | Proof-based admission design + status. |
 | `TUTORIAL.md` | — | Hands-on walkthrough of proof-based admission. |
@@ -146,7 +147,7 @@ consistent with lean-green (one heap, level-uniform allocation discipline).
 lake build               # library + all three executables
 lake exe smoke           # 4 scenes, 8 tests
 lake exe demos           # 12 scenes, 29 tests
-lake exe proofBasedSmoke # 2 scenes, 4 tests
+lake exe proofBasedSmoke # 3 scenes, 6 tests
 ```
 
 Pinned to `leanprover/lean4:v4.20.0` via `lean-toolchain` (matches lean-green).

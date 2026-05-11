@@ -130,6 +130,65 @@ def runOne (label : String) (expected : String) (actual : Option Val) : IO Unit 
   let mark := if got == expected then "OK " else "XX "
   IO.println s!"  {mark} {label}: expected {expected}, got {got}"
 
+/-! ## Scene 3: multn approval constructs and matches
+
+    Build a minimal admission state for the multn shape:
+      heap     = [.builtinBaseApply, .prim "num?"]      -- indices 0, 1
+      cenv     = orig→0, num?→1                          -- closure env
+      newClosure = (λ (op args). if num? op then mul-list (cons op args) else orig op args)
+
+    `multnExactPolicy` admits this combo (verified by `decide`).
+    `multnApproval` constructs the `ApprovedModification` (the Lean
+    kernel type-checks the `CE_weak_strong` proof). Its `matches`
+    returns `true` on the corresponding context.
+
+    This is the keynote-grade artifact: a proof-bearing approval for
+    a non-trivial modification (not just identity), with the soundness
+    witness piping through `multnExact_soundForCE_first_install_tower`. -/
+
+def sampleAdmitHeap : Heap :=
+  [.builtinBaseApply, .prim "num?"]
+
+def sampleAdmitCenv : Env :=
+  .cons "orig" 0 (.cons "num?" 1 .nil)
+
+def sampleMultnClosure : Val :=
+  .closure ["op", "args"]
+    (.ifte (.primApp (.var "num?") [.var "op"])
+      (.primApp (.var "mul-list")
+        [.primApp (.var "cons") [.var "op", .var "args"]])
+      (.primApp (.var "orig") [.var "op", .var "args"]))
+    sampleAdmitCenv
+
+def sampleAdmitCtx : MutationCtx :=
+  { target := "base-apply", heap := sampleAdmitHeap,
+    env := sampleAdmitCenv, metaEnv := .nil, index := 0, level := 1 }
+
+theorem sample_multn_admit :
+    multnExactPolicy sampleAdmitCtx .builtinBaseApply sampleMultnClosure = true := by
+  native_decide
+
+/-- The multn approval, fully constructed. The kernel accepts the
+    `CE_weak_strong` proof field (which threads through fuel splits +
+    `multnExact_soundForCE_first_install_tower`). -/
+def sampleMultnApproval : ApprovedModification :=
+  multnApproval 1 sampleAdmitHeap sampleAdmitCenv .nil 0
+    sampleMultnClosure sample_multn_admit
+
+def sampleMultnApprovals : List ApprovedModification :=
+  [sampleMultnApproval]
+
+/-- Test: `approvedPolicy [sampleMultnApproval]` admits the multn
+    modification on the matching context. -/
+def test_multn_admitted : Bool :=
+  approvedPolicy sampleMultnApprovals sampleAdmitCtx
+    .builtinBaseApply sampleMultnClosure
+
+/-- Test: rejects a different newVal at the same context. -/
+def test_multn_refuses_other : Bool :=
+  approvedPolicy sampleMultnApprovals sampleAdmitCtx
+    .builtinBaseApply (.num 0)
+
 def main : IO Unit := do
   IO.println "Scene 1: proof-bearing admission — identity mod ADMITTED"
   runOne "(em (set! base-apply base-apply)) ⇒ bool(true)"
@@ -142,3 +201,7 @@ def main : IO Unit := do
          "bool(false)" test_badmod_refused
   runOne "post-refuse, (+ 1 2) still 3 (no mod in effect)"
          "num(3)"      test_badmod_preserves_plus
+  IO.println ""
+  IO.println "Scene 3: multn approval constructs + matches"
+  IO.println s!"  {if test_multn_admitted then "OK " else "XX "} multnApproval admits multn ctx: expected true, got {test_multn_admitted}"
+  IO.println s!"  {if test_multn_refuses_other then "XX " else "OK "} multnApproval refuses non-multn newVal: expected false, got {test_multn_refuses_other}"

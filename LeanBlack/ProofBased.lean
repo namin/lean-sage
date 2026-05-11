@@ -139,26 +139,59 @@ discharge the Deep+Shift hypotheses at admission time, where the
 runner already maintains them as invariants.
 -/
 
-/-! ## CE_weak_strong: CE_weak extended with Deep + Shift hypotheses
+/-! ## HeapPrefix and CE_weak_strong
 
-The proof-bearing payload for approvals. Same conclusion shape as
-`CE_weak`, but with extra hypotheses on the test state `T`:
+`HeapPrefix h₁ h₂` says `h₁` is a content-prefix of `h₂`:
+`h₁ = h₂.take h₁.length`. Stronger than length-only — preserves cell
+contents, not just cardinality. Needed for transporting heap-content-
+dependent facts (`InstallFacts`, `OrigBoundIn`, etc.) from an approval's
+admission heap to a test state's heap.
 
-- `HeapDeep T.heap`, `ValDeep op T.heap`, `ListValDeep operands T.heap`,
-  and `EnvDeep` at every level.
-- `PolicyTableRespectsShift T.heap.length [op, listToVal operands] ptable`
-  and the per-level analogue.
+`CE_weak_strong` extends `CE_weak`'s hypothesis chain with
+`HeapDeep`/`ValDeep`/`ListValDeep`/`EnvDeep`, Shift-respect, AND
+`HeapPrefix h_ref T.heap` (replacing the old length-only premise). The
+conclusion is identical to `CE_weak`'s. Relationship to `CE_weak`:
+`CE_weak → CE_weak_strong` via `CE_weak_to_strong` (more hypotheses on
+the strong side, harder property to state but easier to invoke).
 
-These match the hypothesis chain of
-`multnExact_soundForCE_first_install_tower`, so the multn proof
-template produces a `CE_weak_strong` directly.
+Consumers of an approval discharge the Deep+Shift+HeapPrefix hypotheses
+at admission moment, where the runner already maintains validity
+invariants and the gate's `matches` enforces the prefix relation. -/
 
-The trivial weakening `CE_weak → CE_weak_strong` (theorem
-`CE_weak_to_strong`) lets the existing identity/structural-policy
-infrastructure feed into the new predicate without rework. -/
+def HeapPrefix (h₁ h₂ : Heap) : Prop := h₁ = h₂.take h₁.length
+
+theorem HeapPrefix.length_le {h₁ h₂ : Heap} (h : HeapPrefix h₁ h₂) :
+    h₁.length ≤ h₂.length := by
+  unfold HeapPrefix at h
+  have : h₁.length = (h₂.take h₁.length).length := by rw [← h]
+  rw [List.length_take] at this
+  omega
+
+theorem HeapPrefix.refl (h : Heap) : HeapPrefix h h := by
+  unfold HeapPrefix
+  simp [List.take_length]
+
+theorem HeapPrefix.trans {h₁ h₂ h₃ : Heap}
+    (h12 : HeapPrefix h₁ h₂) (h23 : HeapPrefix h₂ h₃) :
+    HeapPrefix h₁ h₃ := by
+  have h_le : h₁.length ≤ h₂.length := HeapPrefix.length_le h12
+  show h₁ = h₃.take h₁.length
+  calc h₁ = h₂.take h₁.length := h12
+    _ = (h₃.take h₂.length).take h₁.length := by rw [← h23]
+    _ = h₃.take (min h₁.length h₂.length) := by rw [List.take_take]
+    _ = h₃.take h₁.length := by rw [Nat.min_eq_left h_le]
+
+theorem HeapPrefix.getElem? {h₁ h₂ : Heap} (h : HeapPrefix h₁ h₂)
+    (i : Nat) (h_i : i < h₁.length) : h₁[i]? = h₂[i]? := by
+  have hh : h₁ = h₂.take h₁.length := h
+  rw [hh, List.getElem?_take]
+  split
+  · rfl
+  · omega
+
 def CE_weak_strong (level : Nat) (h_ref : Heap) (old new : Val) : Prop :=
   ∀ fuel ptable op operands T r T',
-    h_ref.length ≤ T.heap.length →
+    HeapPrefix h_ref T.heap →
     HeapValid T.heap → ValValid op T.heap → ListValValid operands T.heap →
     ValValid old T.heap → ValValid new T.heap →
     PolicyTableRespectsBisimT ptable →
@@ -188,12 +221,12 @@ theorem CE_weak_to_strong {level : Nat} {h_ref : Heap} {old new : Val}
     (h : CE_weak level h_ref old new) :
     CE_weak_strong level h_ref old new := by
   intro fuel ptable op operands T r T'
-    h_T_len h_heap h_op h_operands h_old h_new
+    h_prefix h_heap h_op h_operands h_old h_new
     h_ptable h_lvl_pol h_env h_pol h_env_bisim
     _h_heap_deep _h_op_deep _h_operands_deep _h_env_deep
     _h_pt_shift _h_pol_shift h_call
   exact h fuel ptable op operands T r T'
-    h_T_len h_heap h_op h_operands h_old h_new
+    (HeapPrefix.length_le h_prefix) h_heap h_op h_operands h_old h_new
     h_ptable h_lvl_pol h_env h_pol h_env_bisim h_call
 
 /-- Soundness predicate for the proof-bearing reading: a policy is
@@ -215,18 +248,18 @@ structure ApprovedModification where
 
 /-- Boolean match of an approval against a runtime mutation context
     and proposed new value. Uses structural `Val.beq` on `oldVal` and
-    `newVal`, and `decide` on the level. The heap match is by length —
-    the approval's CE_weak proof quantifies over test states whose
-    heap extends `am.heap`, so any runtime `ctx.heap` with
-    `am.heap.length ≤ ctx.heap.length` qualifies.
+    `newVal`, `decide` on the level, and **content-prefix equality**
+    on the heap (`am.heap = ctx.heap.take am.heap.length`).
 
-    (A stricter match — heap-prefix equality — would tie an approval
-    to a specific heap snapshot. The length-prefix form is what the
-    CE_weak proof actually requires.) -/
+    Content-prefix (not just length-prefix) is needed so that heap-
+    content-dependent facts — `InstallFacts`, `OrigBoundIn`, etc. —
+    transport from the approval's admission-heap snapshot to the
+    runtime heap and onward to any test state that itself extends
+    the runtime heap. -/
 def ApprovedModification.matches
     (am : ApprovedModification) (ctx : MutationCtx) (oldVal newVal : Val) : Bool :=
   decide (am.level = ctx.level) &&
-  decide (am.heap.length ≤ ctx.heap.length) &&
+  decide (am.heap = ctx.heap.take am.heap.length) &&
   Val.beq am.oldVal oldVal &&
   Val.beq am.newVal newVal
 
@@ -281,11 +314,11 @@ one over `ctx.heap`.
     `ctx.heap`, which is at least as long. -/
 theorem CE_weak_strong_heap_mono
     {level : Nat} {h₁ h₂ : Heap} {old new : Val}
-    (h_le : h₁.length ≤ h₂.length)
+    (h_pref : HeapPrefix h₁ h₂)
     (h : CE_weak_strong level h₁ old new) :
     CE_weak_strong level h₂ old new := by
-  intro fuel ptable op operands T r T' h_T_len
-  exact h fuel ptable op operands T r T' (Nat.le_trans h_le h_T_len)
+  intro fuel ptable op operands T r T' h_T_prefix
+  exact h fuel ptable op operands T r T' (HeapPrefix.trans h_pref h_T_prefix)
 
 /-- The headline: `approvedPolicy approvals` is sound for
     `CE_weak_strong` at any level whose approvals all bind to that
@@ -302,14 +335,14 @@ theorem approvedPolicy_soundForCE_weak_strong
   obtain ⟨am, h_mem, h_match⟩ := h_admit
   unfold ApprovedModification.matches at h_match
   simp only [Bool.and_eq_true, decide_eq_true_eq] at h_match
-  obtain ⟨⟨⟨_h_lvl_eq, h_heap_len⟩, h_old_beq⟩, h_new_beq⟩ := h_match
+  obtain ⟨⟨⟨_h_lvl_eq, h_heap_prefix⟩, h_old_beq⟩, h_new_beq⟩ := h_match
   have h_old_eq : am.oldVal = old := val_beq_eq _ _ h_old_beq
   have h_new_eq : am.newVal = new := val_beq_eq _ _ h_new_beq
   have h_level : am.level = level := h_levels am h_mem
   subst h_old_eq
   subst h_new_eq
   subst h_level
-  exact CE_weak_strong_heap_mono h_heap_len am.proof
+  exact CE_weak_strong_heap_mono (show HeapPrefix _ _ from h_heap_prefix) am.proof
 
 /-! ## CE_weak reflexivity (identity modifications)
 
@@ -556,31 +589,218 @@ Proof by structural induction on `Expr` (or fuel). About 80 LOC.
 With it, `wand_defeated_existential_gated` follows by chaining
 through the baseline form. Deferred. -/
 
-/-! ## Worked example placeholder (multn)
+/-! ## Multn approval — the worked example
 
-The next step is to construct an `ApprovedModification` for the multn
-closure using `multnExact_soundForCE_first_install_tower` after
-discharging its side conditions. The natural call site is the demo
-or smoke runner, where the runtime state provides the deep-validity
-and shift-respect facts via `initState_deep` and
-`verifiedTable_respects_shift` (already in `Policies.lean`).
+This is the headline construction: an `ApprovedModification` for the
+multn closure, built by invoking `multnExact_soundForCE_first_install_tower`
+inside the `CE_weak_strong` proof.
 
-A sample construction (sketched here; not yet wired up):
+Two pieces of machinery are needed:
 
-```lean
-def multnApproval (level : Nat) (heap : Heap) (newClosure : Val)
-    (h_admit : multnExactPolicy ⟨"base-apply", heap, env, metaEnv, idx, level⟩
-                  .builtinBaseApply newClosure = true)
-    -- … side-condition discharges …
-    : ApprovedModification :=
-  { level   := level
-    heap    := heap
-    oldVal  := .builtinBaseApply
-    newVal  := newClosure
-    proof   := by
-      -- apply multnExact_soundForCE_first_install_tower
-      sorry }
-```
+1. **`InstallFacts.heap_extend`** — `OrigBoundIn` and `NumQBoundIn`
+   are about specific heap-cell lookups, so they transport across a
+   content-preserving `HeapPrefix` extension. This is why the
+   approval's `matches` checks content-prefix and `CE_weak_strong`
+   carries `HeapPrefix h_ref T.heap`.
+
+2. **Fuel split.** `multnExact_soundForCE_first_install_tower` requires
+   `fuel ≥ 2`. `CE_weak_strong` quantifies over arbitrary `fuel`.
+   - `fuel = 0`: `callAsBaseApply 0 .builtinBaseApply ... = applyDirect 0 ... = none`,
+     so `h_old` is unsatisfiable. Vacuous.
+   - `fuel = 1`: `callAsBaseApply 1 .builtinBaseApply op operands T
+     = applyDirect 1 ... op operands T`. By case on `op`:
+     - `.num`/`.bool`/`.nilV`/`.sym`/`.cons`/`.closure`: `applyDirect 1`
+       returns `none` (closure body eval with fuel 0 is `none`; other
+       constructors are non-callable). Vacuous.
+     - `.prim p`: returns `some (applyPrim p operands, T)` (fuel-
+       independent). This subcase needs a separate proof; we handle
+       it by "bumping" fuel to 2 (`applyDirect_prim_fuel_bump`).
+     - `.builtinBaseApply`: recurses to `applyDirect 0` → `none`.
+       Vacuous.
+   - `fuel ≥ 2`: invoke the multn theorem directly.
 -/
+
+/-! ### `InstallFacts.heap_extend` -/
+
+/-- If `h₁[idx]? = some v`, then `idx < h₁.length`. -/
+theorem getElem?_some_lt_length {α} {l : List α} {idx : Nat} {v : α}
+    (h : l[idx]? = some v) : idx < l.length := by
+  cases h_lt : decide (idx < l.length) with
+  | true =>
+      exact of_decide_eq_true h_lt
+  | false =>
+      exfalso
+      have h_ge : l.length ≤ idx := Nat.le_of_not_lt (of_decide_eq_false h_lt)
+      rw [List.getElem?_eq_none h_ge] at h
+      exact Option.noConfusion h
+
+theorem OrigBoundIn_heap_extend
+    {h₁ h₂ : Heap} {old new : Val}
+    (h_pref : HeapPrefix h₁ h₂) (h_orig : OrigBoundIn h₁ old new) :
+    OrigBoundIn h₂ old new := by
+  obtain ⟨ps, body, cenv, idx, h_eq, h_lookup, h_heap⟩ := h_orig
+  refine ⟨ps, body, cenv, idx, h_eq, h_lookup, ?_⟩
+  have h_idx : idx < h₁.length := getElem?_some_lt_length h_heap
+  rw [← HeapPrefix.getElem? h_pref idx h_idx]; exact h_heap
+
+theorem NumQBoundIn_heap_extend
+    {h₁ h₂ : Heap} {new : Val}
+    (h_pref : HeapPrefix h₁ h₂) (h_numq : NumQBoundIn h₁ new) :
+    NumQBoundIn h₂ new := by
+  obtain ⟨ps, body, cenv, idx, h_eq, h_lookup, h_heap⟩ := h_numq
+  refine ⟨ps, body, cenv, idx, h_eq, h_lookup, ?_⟩
+  have h_idx : idx < h₁.length := getElem?_some_lt_length h_heap
+  rw [← HeapPrefix.getElem? h_pref idx h_idx]; exact h_heap
+
+theorem InstallFacts_heap_extend
+    {h₁ h₂ : Heap} {old new : Val}
+    (h_pref : HeapPrefix h₁ h₂) (install : InstallFacts old new h₁) :
+    InstallFacts old new h₂ :=
+  { orig := OrigBoundIn_heap_extend h_pref install.orig
+    numq := NumQBoundIn_heap_extend h_pref install.numq }
+
+/-! ### Fuel split helpers
+
+For the `fuel < 2` cases of `CE_weak_strong`, we need to show that
+`callAsBaseApply fuel .builtinBaseApply op operands T = some (r, T')`
+is either vacuous or admits a "bump" to fuel ≥ 2 with the same result. -/
+
+/-- `applyDirect` on a `.prim` operator is fuel-independent (the
+    primitive is dispatched by `applyPrim`, which doesn't consume
+    fuel). So if `applyDirect 1` succeeds, `applyDirect 2` gives the
+    same result. -/
+theorem applyDirect_prim_fuel_bump
+    {p : String} {operands : List Val} {T : TowerState}
+    {ptable : PolicyTable} {level : Nat} {r : Val} {T' : TowerState}
+    (h : applyDirect 1 ptable level (.prim p) operands T = some (r, T')) :
+    applyDirect 2 ptable level (.prim p) operands T = some (r, T') := by
+  simp only [applyDirect] at h ⊢
+  exact h
+
+/-- `callAsBaseApply` at `fuel = 1` with `oldVal = .builtinBaseApply`:
+    by case analysis on `op`, the call succeeds **only when** `op` is
+    a `.prim`. (All other ops give `none` at fuel 1 via applyDirect.) -/
+theorem callAsBaseApply_one_builtin_succeeds_implies_prim
+    {ptable : PolicyTable} {level : Nat} {op : Val} {operands : List Val}
+    {T : TowerState} {r : Val} {T' : TowerState}
+    (h : callAsBaseApply 1 ptable level .builtinBaseApply op operands T
+         = some (r, T')) :
+    ∃ p, op = .prim p := by
+  unfold callAsBaseApply at h
+  simp only [applyDirect] at h
+  cases op with
+  | num _ => exact absurd h (by simp [applyDirect])
+  | bool _ => exact absurd h (by simp [applyDirect])
+  | nilV => exact absurd h (by simp [applyDirect])
+  | sym _ => exact absurd h (by simp [applyDirect])
+  | cons _ _ => exact absurd h (by simp [applyDirect])
+  | closure _ _ _ =>
+      -- applyDirect 1 with closure evaluates body with fuel 0 = none
+      simp only [applyDirect] at h
+      split at h <;> simp [eval] at h
+  | prim p => exact ⟨p, rfl⟩
+  | builtinBaseApply =>
+      -- applyDirect 1 with .builtinBaseApply: match args = [op,opList],
+      -- then recursive applyDirect 0 = none.
+      cases operands with
+      | nil       => simp [applyDirect] at h
+      | cons _ tl =>
+          cases tl with
+          | nil       => simp [applyDirect] at h
+          | cons opList tl2 =>
+              cases tl2 with
+              | nil       =>
+                  simp only [applyDirect] at h
+                  cases h_vtl : valToList opList with
+                  | none   => rw [h_vtl] at h; simp at h
+                  | some _ => rw [h_vtl] at h; simp [applyDirect] at h
+              | cons _ _  => simp [applyDirect] at h
+
+/-! ### The multn approval
+
+Given the multn-shape admission fact at the admission heap, plus
+shift-respect for the verified table, construct an
+`ApprovedModification` whose `proof` field invokes
+`multnExact_soundForCE_first_install_tower` (after handling the
+`fuel < 2` cases).
+
+The admission point: `multnExactPolicy` admits `.builtinBaseApply →
+newClosure` at the snapshot heap `heap`. This is verified by
+`multnExactPolicy_implies_InstallFacts`, giving install facts on
+`heap`. Inside the proof, those facts transport to any test state's
+heap via `InstallFacts_heap_extend` + the `HeapPrefix` premise. -/
+
+/-- The multn approval. Construction needs:
+
+    - The shape-admission fact at a chosen admission heap.
+    - A shift-respect fact for the policy table consumed at runtime,
+      stated at the admission heap (transported to test states via
+      this proof's prefix-extension premise).
+
+    The runner constructs both at the admission moment from the
+    runtime state; see `multnExactPolicy_implies_InstallFacts` and
+    `verifiedTable_respects_shift` (the latter in `Policies.lean`'s
+    follow-up section, not used directly here — we take the shift
+    facts as input parameters). -/
+def multnApproval
+    (level : Nat) (heap : Heap) (env metaEnv : Env) (index : Nat)
+    (newClosure : Val)
+    (h_admit : multnExactPolicy
+                 { target := "base-apply", heap := heap, env := env,
+                   metaEnv := metaEnv, index := index, level := level }
+                 .builtinBaseApply newClosure = true) :
+    ApprovedModification :=
+{ level   := level
+  heap    := heap
+  oldVal  := .builtinBaseApply
+  newVal  := newClosure
+  proof   := by
+    intro fuel ptable op operands T r T'
+      h_prefix h_heap h_op h_operands h_old h_new
+      h_ptable h_lvl_pol h_env h_pol h_env_bisim
+      h_heap_deep h_op_deep h_operands_deep h_env_deep
+      h_pt_shift h_pol_shift h_call
+    -- Get install facts on the admission heap, then transport to T.heap.
+    have ⟨_, install_heap⟩ := multnExactPolicy_implies_InstallFacts h_admit
+    have install_T : InstallFacts .builtinBaseApply newClosure T.heap :=
+      InstallFacts_heap_extend h_prefix install_heap
+    -- Build RuntimeWF from the strong-CE hypotheses. `ev_cenv` uses
+    -- `ValValid newClosure T.heap`, which on a closure unfolds to the
+    -- captured env's EnvValid in T.heap.
+    have wf : RuntimeWF newClosure op operands T := {
+      hv_heap     := h_heap
+      ev_levels   := h_env
+      ev_cenv     := fun ps body cenv' h_eq => by
+        have h_vv : ValValid (.closure ps body cenv') T.heap := h_eq ▸ h_new
+        exact h_vv
+      vv_op       := h_op
+      lvv_operands := h_operands }
+    -- Fuel split.
+    match fuel, h_call with
+    | 0,     h_call =>
+        -- callAsBaseApply 0 .builtinBaseApply = applyDirect 0 = none.
+        exact absurd h_call (by simp [callAsBaseApply, applyDirect])
+    | 1,     h_call =>
+        -- fuel = 1 + h_old succeeds ⇒ op = .prim p. Bump to fuel 2,
+        -- then invoke the multn theorem.
+        obtain ⟨p, h_op_eq⟩ :=
+          callAsBaseApply_one_builtin_succeeds_implies_prim h_call
+        subst h_op_eq
+        have h_call_2 : callAsBaseApply 2 ptable level .builtinBaseApply
+                          (.prim p) operands T = some (r, T') := by
+          simp only [callAsBaseApply] at h_call ⊢
+          exact applyDirect_prim_fuel_bump h_call
+        obtain ⟨fuel', T'', r', h_call', h_vv, h_pol_all, h_heap_v, h_mono⟩ :=
+          multnExact_soundForCE_first_install_tower h_admit (by omega) h_ptable
+            h_call_2 install_T wf h_heap_deep h_op_deep h_operands_deep
+            h_env_deep h_pol h_pt_shift h_pol_shift
+        exact ⟨fuel', T'', r', h_call', h_vv, h_pol_all level, h_heap_v, h_mono⟩
+    | n + 2, h_call =>
+        -- fuel ≥ 2: invoke multn theorem directly.
+        obtain ⟨fuel', T'', r', h_call', h_vv, h_pol_all, h_heap_v, h_mono⟩ :=
+          multnExact_soundForCE_first_install_tower h_admit (by omega) h_ptable
+            h_call install_T wf h_heap_deep h_op_deep h_operands_deep
+            h_env_deep h_pol h_pt_shift h_pol_shift
+        exact ⟨fuel', T'', r', h_call', h_vv, h_pol_all level, h_heap_v, h_mono⟩ }
 
 end LeanBlack

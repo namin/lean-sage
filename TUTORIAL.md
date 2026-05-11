@@ -21,7 +21,7 @@ If you want the architectural rationale instead, read
 lake build                    # builds the library + all three exes
 lake exe smoke                # 8/8  — structural-policy smoke
 lake exe demos                # 29/29 — reflection demos
-lake exe proofBasedSmoke      # 4/4  — proof-based integration scenes
+lake exe proofBasedSmoke      # 6/6  — proof-based integration scenes
 ```
 
 Proof-based admission lives in two files:
@@ -329,22 +329,59 @@ so `ProofBased.lean` builds the instance manually from the existing
 `Val.beq` + `val_beq_eq` (in `Black.lean`) plus a freshly-proved
 mutual reflexivity (`val_beq_self`, `expr_beq_self`, `env_beq_self`).
 
-## 7. What's still open
+## 7. The multn approval
 
-The two nearest-term open items, with concrete blockers documented
-inline in `LeanBlack/ProofBased.lean`:
+The headline worked example: an `ApprovedModification` for the multn
+closure, constructed by invoking
+`multnExact_soundForCE_first_install_tower` inside the
+`CE_weak_strong` proof.
 
-**The multn approval.** A worked
-`ApprovedModification` for the multn closure, constructed via
-`multnExact_soundForCE_first_install_tower`. Two concrete blockers:
+```lean
+def multnApproval
+    (level : Nat) (heap : Heap) (env metaEnv : Env) (index : Nat)
+    (newClosure : Val)
+    (h_admit : multnExactPolicy
+                 { target := "base-apply", heap := heap, env := env,
+                   metaEnv := metaEnv, index := index, level := level }
+                 .builtinBaseApply newClosure = true) :
+    ApprovedModification := ...
+```
 
-1. **Fuel split** — the multn theorem requires `fuel ≥ 2`, but
-   `CE_weak_strong` universally quantifies over `fuel`. Need to handle
-   the `fuel ∈ {0, 1}` cases (vacuous for fuel=0; needs hand proof for
-   fuel=1 with `.prim` operator).
-2. **`InstallFacts.heap_extend`** — `OrigBoundIn` /
-   `NumQBoundIn` preservation across heap prefix-extensions. New
-   lemma, ~½ day.
+Two pieces of machinery made this work:
+
+1. **`InstallFacts.heap_extend`** — `OrigBoundIn` and `NumQBoundIn`
+   are about specific heap-cell lookups, so they transport across a
+   content-preserving `HeapPrefix` extension. This is why
+   `ApprovedModification.matches` checks **content-prefix** (not just
+   length) and `CE_weak_strong` carries `HeapPrefix h_ref T.heap`.
+2. **Fuel split.** `multnExact_soundForCE_first_install_tower`
+   requires `fuel ≥ 2`. `CE_weak_strong` quantifies over arbitrary
+   `fuel`. The proof case-analyzes:
+   - `fuel = 0`: `applyDirect 0` returns `none`, vacuous.
+   - `fuel = 1`: by case on `op`, the call succeeds only for
+     `op = .prim p` (other constructors give `none`). For the prim
+     subcase, we "bump" fuel to 2 (`applyDirect_prim_fuel_bump` —
+     `applyDirect ≥ 1` on `.prim` is fuel-independent), then invoke
+     the multn theorem.
+   - `fuel ≥ 2`: invoke directly.
+
+[`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) Scene 3 builds a
+sample admission state (`sampleAdmitHeap`, `sampleAdmitCenv`,
+`sampleMultnClosure`), constructs the approval via `multnApproval`,
+and verifies `approvedPolicy` admits/refuses correctly:
+
+```
+Scene 3: multn approval constructs + matches
+  OK  multnApproval admits multn ctx: expected true, got true
+  OK  multnApproval refuses non-multn newVal: expected false, got false
+```
+
+The "admits" line is the keynote-grade evidence: the kernel
+type-checked the `CE_weak_strong` proof (which threads through
+fuel splits and the existing multn soundness theorem), and the
+runtime gate accepts the admission.
+
+## 8. What's still open
 
 **Parameterized W1.** Strengthen `wand_defeated_existential` to use
 `[approvedPolicy approvals]` instead of `[acceptAllPolicy]` in the
@@ -360,29 +397,45 @@ lemma eval_ptable_indep
 
 By structural induction on `Expr` (or fuel). ~80 LOC.
 
-## 8. Reading order for the source
+**Scene A (full end-to-end).** Wire `multnApproval` into a runner
+that actually executes `(em (let ((orig base-apply)) (set! base-apply
+multnWrapper)))` with `approvedPolicy [multnApproval]` as the level-1
+gate, observes the admission, and checks that subsequent `(2 3 4)`
+returns `24`. The blocker isn't the proof side (already done) — it's
+runtime-state construction: the admission heap and closure value must
+match the runtime state's heap and the elaborated wrapper value
+exactly, which means computing them from `evalProgram`'s state.
+
+## 9. Reading order for the source
 
 If you want to dig into `LeanBlack/ProofBased.lean`, the file is
 already structured top-to-bottom for sequential reading:
 
 1. `DecidableEq` machinery (mutual `*_beq_self` + instances).
-2. `CE_weak_strong` predicate + `CE_weak_to_strong` weakening.
-3. `BlackPolicy.SoundForCE_weak_strong` abbrev.
-4. `ApprovedModification` structure.
-5. `ApprovedModification.matches` + `approvedPolicy` runtime gate.
-6. `structural_policy_yields_approval` (bridge from existing
+2. `HeapPrefix` + helpers (`length_le`, `refl`, `trans`, `getElem?`).
+3. `CE_weak_strong` predicate + `CE_weak_to_strong` weakening.
+4. `BlackPolicy.SoundForCE_weak_strong` abbrev.
+5. `ApprovedModification` structure.
+6. `ApprovedModification.matches` (content-prefix check) +
+   `approvedPolicy` runtime gate.
+7. `structural_policy_yields_approval` (bridge from existing
    `SoundForCE_weak` to the new predicate).
-7. `CE_weak_strong_heap_mono` + `approvedPolicy_soundForCE_weak_strong`
+8. `CE_weak_strong_heap_mono` + `approvedPolicy_soundForCE_weak_strong`
    (the headline soundness).
-8. `CE_weak_num_identity` + `numIdentityApproval` (vacuous identity).
-9. Plumbing smoke (`smokeIdentityCtx`, `smokeIdentityApprovals`, the
-   `example`s).
-10. `callAsBaseApply_preserves` + `CE_weak_refl` + `identityApproval`
+9. `CE_weak_num_identity` + `numIdentityApproval` (vacuous identity).
+10. Plumbing smoke (`smokeIdentityCtx`, `smokeIdentityApprovals`, the
+    `example`s).
+11. `callAsBaseApply_preserves` + `CE_weak_refl` + `identityApproval`
     (closure-identity).
-11. Closure-identity demo (`trivialClosure`, `smokeClosureApprovals`).
-12. `ObsEquivConverges` + `wand_defeated_existential` (W1).
-13. Worked-example placeholder for multn (commented-out sample).
+12. Closure-identity demo (`trivialClosure`, `smokeClosureApprovals`).
+13. `ObsEquivConverges` + `wand_defeated_existential` (W1).
+14. **Multn approval**: `InstallFacts.heap_extend` (via
+    `OrigBoundIn_heap_extend` and `NumQBoundIn_heap_extend`),
+    `applyDirect_prim_fuel_bump`,
+    `callAsBaseApply_one_builtin_succeeds_implies_prim`, and
+    `multnApproval` itself. Exercised in
+    `ProofBasedSmoke.lean` Scene 3.
 
 Cross-references to `Policies.lean` are throughout — they show how the
-existing structural-policy machinery feeds into the proof-bearing
+existing structural-policy machinery feeds into the proof-based
 reading.
