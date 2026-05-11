@@ -146,36 +146,94 @@ theorem approvedPolicy_soundForCE_weak
   subst h_level
   exact CE_weak_heap_mono h_heap_len am.proof
 
-/-! ## A trivially-CE_weak identity case
+/-! ## CE_weak reflexivity (identity modifications)
 
-The cleanest hand-built `CE_weak` proof: the identity modification at
-a `.num n` value. `callAsBaseApply` on a non-builtin, non-closure
-`baseApply` reduces to `applyDirect ... [op, listToVal operands] T`
-with `baseApply` in the operator slot; for `baseApply = .num n` that
-returns `none` by `applyDirect_num_returns_none`. So the premise of
-`CE_weak` is unsatisfiable, and the conclusion follows vacuously.
+The first non-trivial reusable proof template: every value is its own
+CE_weak-conservative extension. Useful for approving "no-op"
+modifications — e.g., re-setting `base-apply` to itself, or installing
+a copy of an existing closure.
 
-This isn't load-bearing for any real demo, but it validates the
-plumbing: the kernel really does accept a hand-built `CE_weak` term
-and pipe it through `ApprovedModification` and `approvedPolicy`. -/
+Builds on `applyDirect_preserves_self_invariants` (the public
+preservation lemma) wrapped over both branches of `callAsBaseApply`. -/
 
-theorem CE_weak_num_identity (level : Nat) (h_ref : Heap) (n : Int) :
-    CE_weak level h_ref (.num n) (.num n) := by
-  intro fuel ptable op operands T r T'
-    _h_T_len _h_heap _h_op _h_operands _h_old _h_new
-    _h_ptable _h_lvl_pol _h_env _h_pol _h_env_bisim h_call
+/-- `callAsBaseApply` preserves heap-validity, result-validity, and
+    monotonicity. Wraps `applyDirect_preserves_self_invariants` to
+    cover both the `.builtinBaseApply` branch (direct dispatch) and
+    the "other" branch (operator-wrap dispatch). -/
+theorem callAsBaseApply_preserves
+    {fuel : Nat} {ptable : PolicyTable} {level : Nat}
+    {baseApply op : Val} {operands : List Val} {T : TowerState}
+    {r : Val} {T' : TowerState}
+    (hh : HeapValid T.heap)
+    (h_levs : ∀ n e, T.envAt? n = some e → EnvValid e T.heap)
+    (h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+    (h_bisim : ∀ n e, T.envAt? n = some e → EnvVis e e T.heap T.heap)
+    (h_pt : PolicyTableRespectsBisimT ptable)
+    (h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
+    (hv_base : ValValid baseApply T.heap)
+    (hv_op : ValValid op T.heap)
+    (hv_operands : ListValValid operands T.heap)
+    (h_call :
+      callAsBaseApply fuel ptable level baseApply op operands T = some (r, T')) :
+    HeapValid T'.heap ∧ ValValid r T'.heap ∧ T.heap.length ≤ T'.heap.length := by
   unfold callAsBaseApply at h_call
-  rw [applyDirect_num_returns_none] at h_call
-  exact Option.noConfusion h_call
+  split at h_call
+  · -- baseApply = .builtinBaseApply
+    obtain ⟨h_heap', _, _, _, h_r, h_mono⟩ :=
+      applyDirect_preserves_self_invariants fuel ptable level op operands T r T'
+        hh h_levs h_resp_all h_bisim h_pt h_pol_resp_at hv_op hv_operands h_call
+    exact ⟨h_heap', h_r, h_mono⟩
+  · -- baseApply is anything else; dispatch wraps args = [op, listToVal operands]
+    have hv_args : ListValValid [op, listToVal operands] T.heap :=
+      ⟨hv_op, ValValid_listToVal hv_operands, trivial⟩
+    obtain ⟨h_heap', _, _, _, h_r, h_mono⟩ :=
+      applyDirect_preserves_self_invariants fuel ptable level
+        baseApply [op, listToVal operands] T r T'
+        hh h_levs h_resp_all h_bisim h_pt h_pol_resp_at hv_base hv_args h_call
+    exact ⟨h_heap', h_r, h_mono⟩
 
-/-- An `ApprovedModification` for the vacuous identity case. -/
-def numIdentityApproval (level : Nat) (heap : Heap) (n : Int) :
+/-- Reflexivity of `CE_weak`: every value is conservatively extended
+    by itself. The proof picks `fuel' = fuel`, `T'' = T'`, `r' = r`;
+    the equation premise is reused; `ValVis_weak r r T'.heap T'.heap`
+    follows from `ValVis_aux_self_extend` with empty extras, given
+    heap-validity and result-validity from `callAsBaseApply_preserves`. -/
+theorem CE_weak_refl (level : Nat) (h_ref : Heap) (v : Val) :
+    CE_weak level h_ref v v := by
+  intro fuel ptable op operands T r T'
+    _h_T_len h_heap h_op h_operands h_old _h_new
+    h_ptable h_lvl_pol h_env h_pol h_env_bisim h_call
+  obtain ⟨h_heap', h_r', h_mono⟩ :=
+    callAsBaseApply_preserves
+      (hh := h_heap) (h_levs := h_env) (h_resp_all := h_pol)
+      (h_bisim := h_env_bisim) (h_pt := h_ptable) (h_pol_resp_at := h_lvl_pol)
+      (hv_base := h_old) (hv_op := h_op) (hv_operands := h_operands)
+      (h_call := h_call)
+  refine ⟨fuel, T', r, h_call, ?_, rfl, h_heap', h_mono⟩
+  intro n
+  have h_strong := ValVis_aux_self_extend n r T'.heap [] h_heap' h_r'
+  have h_strong' : ValVis_aux n r r T'.heap T'.heap := by simpa using h_strong
+  exact ValVis_aux_to_weak n r r T'.heap T'.heap h_strong'
+
+/-- An `ApprovedModification` for the identity case at any `v` that
+    is `ValValid` in the admission heap. The proof field is
+    `CE_weak_refl`. The `ValValid` precondition isn't needed by
+    `CE_weak_refl` itself (which is universally quantified over `T`)
+    — only for documentation that the approval is meaningful at
+    `am.heap`. -/
+def identityApproval (level : Nat) (heap : Heap) (v : Val) :
     ApprovedModification :=
   { level   := level
     heap    := heap
-    oldVal  := .num n
-    newVal  := .num n
-    proof   := CE_weak_num_identity level heap n }
+    oldVal  := v
+    newVal  := v
+    proof   := CE_weak_refl level heap v }
+
+/-- The narrower numerical identity. Kept as a convenience (and a
+    sanity-check that the more general `identityApproval` agrees on
+    the `.num` case). -/
+def numIdentityApproval (level : Nat) (heap : Heap) (n : Int) :
+    ApprovedModification :=
+  identityApproval level heap (.num n)
 
 /-! ## End-to-end plumbing smoke
 
@@ -198,9 +256,7 @@ def smokeIdentityCtx : MutationCtx :=
 def smokeIdentityApprovals : List ApprovedModification :=
   [numIdentityApproval 0 [] 42]
 
-/-- The policy admits the matching mutation. Decidable boolean check;
-    the proof is `rfl` (or `by decide` if `rfl` doesn't quite close
-    the `Val.beq` reduction). -/
+/-- The policy admits the matching mutation. -/
 example :
     approvedPolicy smokeIdentityApprovals
         smokeIdentityCtx (.num 42) (.num 42) = true := by
@@ -218,7 +274,35 @@ example :
 example : (approvedPolicy smokeIdentityApprovals).SoundForCE_weak 0 :=
   approvedPolicy_soundForCE_weak smokeIdentityApprovals 0
     (by intro am h_mem
-        simp [smokeIdentityApprovals, numIdentityApproval] at h_mem
+        simp [smokeIdentityApprovals, numIdentityApproval, identityApproval]
+          at h_mem
+        subst h_mem; rfl)
+
+/-! ## Closure-identity demo
+
+A more substantive instance: approving the identity modification on a
+*closure* value. Same `CE_weak_refl` proof, but exercises the
+`callAsBaseApply_preserves` "other" branch (operator-wrap dispatch),
+where `applyDirect`'s arity check, foldl alloc, and body eval all
+happen — yet the new value equals the old, so the conclusion holds. -/
+
+/-- A trivial closure: `(λ (op args). op)` — returns the operator
+    unchanged. Captures no environment. -/
+def trivialClosure : Val :=
+  .closure ["op", "args"] (.var "op") .nil
+
+def smokeClosureApprovals : List ApprovedModification :=
+  [identityApproval 0 [] trivialClosure]
+
+example :
+    approvedPolicy smokeClosureApprovals
+        smokeIdentityCtx trivialClosure trivialClosure = true := by
+  decide
+
+example : (approvedPolicy smokeClosureApprovals).SoundForCE_weak 0 :=
+  approvedPolicy_soundForCE_weak smokeClosureApprovals 0
+    (by intro am h_mem
+        simp [smokeClosureApprovals, identityApproval] at h_mem
         subst h_mem; rfl)
 
 /-! ## Worked example placeholder (multn)

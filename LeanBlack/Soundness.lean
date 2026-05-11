@@ -593,7 +593,7 @@ private theorem applyVia_preserves_self_invariants
 
 /-- `applyDirect` preserves the self-invariants. Mirrors
     `eval_preserves_self_invariants` via `frame_tower`'s applyDirect clause. -/
-private theorem applyDirect_preserves_self_invariants
+theorem applyDirect_preserves_self_invariants
     (fuel : Nat) (ptable : PolicyTable) (level : Nat) (op : Val)
     (args : List Val) (T : TowerState) (r : Val) (T' : TowerState)
     (hh : HeapValid T.heap)
