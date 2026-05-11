@@ -510,6 +510,132 @@ def test_crosslevel_level2_admits : Bool :=
   approvedPolicy sampleMultnApprovalsLevel2 sampleAdmitCtxLevel2
     .builtinBaseApply sampleMultnClosure
 
+/-! ## Scene 8: end-to-end multn under proof-based admission (level 1)
+
+    Where Scene 3 verifies the gate function on a hand-crafted ctx,
+    this scene runs the full pipeline through `evalProgram`:
+
+      (seq (em (installPolicy 0))                   -- install gate at level 1
+           (em (let ((orig base-apply))
+                 (set! base-apply <multn>)))         -- gated set! at level 1
+           (2 3 4))                                  -- post-admission, level 0
+
+    For the gate to admit the runtime-produced `.set`, the approval's
+    `newVal` must `Val.beq`-equal what eval actually constructs at the
+    `.lam` rule. Since `freshLevelEnv` is a deterministic Lean function,
+    we just re-run it here in pure code to obtain the same cenv that
+    the evaluator captures — no instrumentation needed. -/
+
+/-- Body of the multn wrapper — identical to `Smoke.lean`'s. -/
+def multnWrapperBody : Expr :=
+  .ifte (.primApp (.var "num?") [.var "op"])
+    (.primApp (.var "mul-list")
+      [.primApp (.var "cons") [.var "op", .var "args"]])
+    (.primApp (.var "orig") [.var "op", .var "args"])
+
+def multnWrapper : Expr := .lam ["op", "args"] multnWrapperBody
+
+def installMultnOneUp : Expr :=
+  .em <|
+    .letE "orig" (.var "base-apply") <|
+      .set "base-apply" multnWrapper
+
+def installMultnTwoUp : Expr := .em installMultnOneUp
+
+def installApprovedAt2 : Expr := .em (.em (.installPolicy 0))
+
+/-- Re-derive runtime state by re-running `freshLevelEnv`. -/
+def level0Heap : Heap := (freshLevelEnv []).1
+def level1Heap : Heap := (freshLevelEnv level0Heap).1
+def level1Env  : Env  := (freshLevelEnv level0Heap).2
+def level2Heap : Heap := (freshLevelEnv level1Heap).1
+def level2Env  : Env  := (freshLevelEnv level1Heap).2
+
+/-- Heap after the level-1 `letE` alloc'd a `.builtinBaseApply` cell
+    for `orig`. The cell sits at `level1Heap.length` (= 28). -/
+def runtimeHeapLevel1 : Heap := level1Heap ++ [.builtinBaseApply]
+
+/-- The cenv captured by the multn lambda at level 1: `orig` →
+    `level1Heap.length`, then the rest of level 1's env. -/
+def runtimeCenvLevel1 : Env := .cons "orig" level1Heap.length level1Env
+
+/-- The runtime-elaborated multn closure at level 1, byte-identical
+    to what `eval` produces. -/
+def runtimeMultnClosureLevel1 : Val :=
+  .closure ["op", "args"] multnWrapperBody runtimeCenvLevel1
+
+theorem h_admit_multn_level1 :
+    multnExactPolicy
+        { target := "base-apply", heap := runtimeHeapLevel1, env := .nil,
+          metaEnv := .nil, index := 27, level := 1 }
+        .builtinBaseApply runtimeMultnClosureLevel1 = true := by
+  native_decide
+
+def runtimeMultnApprovalLevel1 : ApprovedModification :=
+  multnApproval 1 runtimeHeapLevel1 .nil .nil 27
+    runtimeMultnClosureLevel1 h_admit_multn_level1
+
+def proofBasedMultnTableLevel1 : PolicyTable :=
+  [approvedPolicy [runtimeMultnApprovalLevel1]]
+
+def test_sceneA_admit : Option Val :=
+  evalProgram fuel proofBasedMultnTableLevel1 <|
+    .seq [installApprovedAt1, installMultnOneUp]
+
+def test_sceneA_compute : Option Val :=
+  evalProgram fuel proofBasedMultnTableLevel1 <|
+    .seq [installApprovedAt1, installMultnOneUp,
+          .app [.num 2, .num 3, .num 4]]
+
+def test_sceneA_preserves_plus : Option Val :=
+  evalProgram fuel proofBasedMultnTableLevel1 <|
+    .seq [installApprovedAt1, installMultnOneUp,
+          .app [.var "+", .num 1, .num 2]]
+
+/-! ## Scene 9: end-to-end multn under proof-based admission (level 2)
+
+    Same shape as Scene 8, but the `set!` happens at level 2 (via
+    `(em (em ...))`). The modification at level 2 affects how level 1
+    dispatches; we observe this by evaluating `(em (2 3 4))`, which
+    triggers a level-1 application that routes through level 2's
+    (now-multn) base-apply, returning `24`. -/
+
+/-- Heap after letE alloc at level 2: cell at `level2Heap.length` (= 42). -/
+def runtimeHeapLevel2 : Heap := level2Heap ++ [.builtinBaseApply]
+
+def runtimeCenvLevel2 : Env := .cons "orig" level2Heap.length level2Env
+
+def runtimeMultnClosureLevel2 : Val :=
+  .closure ["op", "args"] multnWrapperBody runtimeCenvLevel2
+
+theorem h_admit_multn_level2 :
+    multnExactPolicy
+        { target := "base-apply", heap := runtimeHeapLevel2, env := .nil,
+          metaEnv := .nil, index := 41, level := 2 }
+        .builtinBaseApply runtimeMultnClosureLevel2 = true := by
+  native_decide
+
+def runtimeMultnApprovalLevel2 : ApprovedModification :=
+  multnApproval 2 runtimeHeapLevel2 .nil .nil 41
+    runtimeMultnClosureLevel2 h_admit_multn_level2
+
+def proofBasedMultnTableLevel2 : PolicyTable :=
+  [approvedPolicy [runtimeMultnApprovalLevel2]]
+
+def test_sceneB_admit : Option Val :=
+  evalProgram fuel proofBasedMultnTableLevel2 <|
+    .seq [installApprovedAt2, installMultnTwoUp]
+
+def test_sceneB_compute : Option Val :=
+  evalProgram fuel proofBasedMultnTableLevel2 <|
+    .seq [installApprovedAt2, installMultnTwoUp,
+          .em (.app [.num 2, .num 3, .num 4])]
+
+def test_sceneB_preserves_level0 : Option Val :=
+  evalProgram fuel proofBasedMultnTableLevel2 <|
+    .seq [installApprovedAt2, installMultnTwoUp,
+          .app [.num 2, .num 3, .num 4]]
+
 def main : IO Unit := do
   IO.println "Scene 1: proof-bearing admission — identity mod ADMITTED"
   runOne "(em (set! base-apply base-apply)) ⇒ bool(true)"
@@ -549,3 +675,19 @@ def main : IO Unit := do
   IO.println s!"  {if test_level2_approval_refuses_level1_ctx then "XX " else "OK "} level-2 approval REFUSES level-1 ctx (level mismatch): expected false, got {test_level2_approval_refuses_level1_ctx}"
   IO.println s!"  {if test_crosslevel_level1_admits then "OK " else "XX "} multi-level table index 0 admits at level 1: expected true, got {test_crosslevel_level1_admits}"
   IO.println s!"  {if test_crosslevel_level2_admits then "OK " else "XX "} multi-level table index 1 admits at level 2: expected true, got {test_crosslevel_level2_admits}"
+  IO.println ""
+  IO.println "Scene 8: end-to-end multn at level 1 (gate fires, (2 3 4) ⇒ 24)"
+  runOne "(em (set! base-apply <multn>)) ⇒ bool(true)"
+         "bool(true)" test_sceneA_admit
+  runOne "post-admit, (2 3 4) ⇒ num(24)"
+         "num(24)"    test_sceneA_compute
+  runOne "post-admit, (+ 1 2) still num(3)"
+         "num(3)"     test_sceneA_preserves_plus
+  IO.println ""
+  IO.println "Scene 9: end-to-end multn at level 2 (gate fires, (em (2 3 4)) ⇒ 24)"
+  runOne "(em (em (set! base-apply <multn>))) ⇒ bool(true)"
+         "bool(true)" test_sceneB_admit
+  runOne "post-admit, (em (2 3 4)) ⇒ num(24) via level-1 dispatch"
+         "num(24)"    test_sceneB_compute
+  runOne "post-admit, level-0 (2 3 4) still <none> (unchanged)"
+         "<none>"     test_sceneB_preserves_level0

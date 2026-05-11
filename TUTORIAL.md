@@ -385,6 +385,10 @@ type-checked the `CE_weak_strong` proof (which threads through
 fuel splits and the existing multn soundness theorem), and the
 runtime gate accepts the admission.
 
+For the end-to-end runtime — actually firing this approval through
+`evalProgram` and observing `(2 3 4) ⇒ 24` — see Scenes 8 (level 1)
+and 9 (level 2) below.
+
 ## 9. The `Pure` policy-independence lemma + strengthened β-redex W1
 
 The `AllPureIndep` lemma — proved sorry-free — establishes that
@@ -427,7 +431,21 @@ same value under any gated policy table, proved sorry-free. The
 full contextual lift (∀ context C, evalProgram (C[M]) = evalProgram
 (C[N])) is not formalized — see "What's still open".
 
-## 10. What's still open
+## 10. End-to-end multn through the proof-based gate
+
+Scenes 8 and 9 in [`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) run
+the full pipeline through `evalProgram`: gate installed, gated
+`set!` fires and is admitted by the kernel-checked approval, and
+the post-admission application returns `24` (level 1 directly,
+level 2 via `(em (2 3 4))` dispatched through level-2's now-multn
+base-apply). The trick is making the approval's `newVal` byte-equal
+what `eval` constructs at the `.lam` rule: since `freshLevelEnv` is
+a deterministic Lean function, re-running it in pure code yields
+the same cenv the evaluator captures, so `Val.beq` byte-equality
+falls out of definitional equality — no runtime instrumentation
+needed.
+
+## 11. What's still open
 
 **The contextual obs-equivalence lift.** The W1 statements in §7 and
 §9 are about convergent obs-equivalence (M and N evaluate to the
@@ -438,17 +456,7 @@ modification preserves call-trace bisim, so no context can
 distinguish β-equivalent pairs through the gated runtime), but the
 universal quantification over `C` is not yet a theorem.
 
-**Scene A (full end-to-end multn run).** Wire `multnApproval` into
-a runner that actually executes `(em (let ((orig base-apply))
-(set! base-apply multnWrapper)))` with `approvedPolicy [multnApproval]`
-as the level-1 gate, observes the admission, and checks that
-subsequent `(2 3 4)` returns `24`. The blocker isn't the proof
-side (already done) — it's runtime-state construction: the
-admission heap and closure value must match the runtime state's
-heap and the elaborated wrapper value exactly, which means
-computing them from `evalProgram`'s state.
-
-## 11. Reading order for the source
+## 12. Reading order for the source
 
 If you want to dig into `LeanBlack/ProofBased.lean`, the file is
 already structured top-to-bottom for sequential reading:
