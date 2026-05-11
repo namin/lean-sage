@@ -31,6 +31,8 @@ a hands-on walkthrough.
 | **Scene C (compile-time refusal)** | **shipped** — `ProofBasedSmoke.lean` Scene 4: doubling wrapper refused at runtime, documented compile-time-failure block |
 | **Verified compose** | **shipped** — `ProofBasedSmoke.lean` Scene 5: `[identity, multn]` coexist, soundness proved |
 | **Cross-level approval (level 2)** | **shipped** — `ProofBasedSmoke.lean` Scene 7: `multnApproval` at level 2, multi-level policy table with per-level soundness |
+| **NoSet/Pure policy-independence lemma** | **proved sorry-free** — `AllPureIndep` fully proved by joint induction on fuel across eval/evalList/applyVia/applyDirect (all 13 Expr cases × 2 clauses, all Val cases for applyVia/applyDirect, plus auxiliary preservation lemmas for materialize/alloc/applyPrim/valToList). |
+| **Parameterized W1 (β-redex witness)** | **proved** — `wand_defeated_existential_gated_beta` uses the β-redex `((λx.x) 0)` vs `.num 0` under `[approvedPolicy approvals]`. Bridges through `evalProgram_pure_indep` (the application of `AllPureIndep` at the program level) and `native_decide` on the closed baseline case. |
 | W2 / W3 | out of scope; future work |
 
 All deferred items have file/line pointers and effort estimates in

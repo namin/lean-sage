@@ -4,7 +4,7 @@ A synthesis of [`lean-grey`](../lean-grey/) (abstract infinite tower with
 proved governance coherence) and [`lean-green`](../lean-green/) (Black-faithful
 heap+closure+`set!` interpreter with CakeML-style value bisimulation).
 
-**Status: 0 sorries.** ~14.5k LOC of library (8 files in `LeanBlack/`)
+**Status: 0 sorries.** ~15k LOC of library (8 files in `LeanBlack/`)
 + ~1200 LOC of demo executables. Smoke 8/8 passing. Demos 29/29
 passing across 12 scenes. `proofBasedSmoke` 18/18 passing across 7
 scenes (identity admit, identity refuse, multn approval, disaster

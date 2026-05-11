@@ -611,6 +611,1076 @@ theorem wand_defeated_existential_gated
     · simp [evalProgram, eval]; rfl
     · simp [evalProgram, eval]; rfl
 
+/-! ## `Pure` policy-independence
+
+An `Expr` is `Pure` if it contains no `.set` and no `.installPolicy`
+(neither at its top level nor nested in any subexpression, closure
+body, or `.quote v`-quoted value). The mutually-defined `PureVal`
+predicate on `Val` requires any embedded closure body to be `Pure`.
+
+The headline claim, proved below: for `Pure` `Expr`s with a `Pure`-
+heap context, `eval` (and the mutually-recursive
+`evalList`/`applyVia`/`applyDirect`) is policy-independent — the
+final result depends only on the inputs, never on the `PolicyTable`
+argument.
+
+Why we want it: lets us upgrade `wand_defeated_existential` to use
+the gated policy table `[approvedPolicy approvals]` while keeping
+the β-redex witness `((λx. x) 0)`. -/
+
+mutual
+  def Pure : Expr → Bool
+    | .num _           => true
+    | .bool _          => true
+    | .quote v         => PureVal v
+    | .var _           => true
+    | .ifte c t e      => Pure c && Pure t && Pure e
+    | .lam _ b         => Pure b
+    | .app es          => PureList es
+    | .set _ _         => false
+    | .em b            => Pure b
+    | .primApp f as    => Pure f && PureList as
+    | .letE _ e b      => Pure e && Pure b
+    | .seq es          => PureList es
+    | .installPolicy _ => false
+
+  def PureList : List Expr → Bool
+    | []      => true
+    | x :: xs => Pure x && PureList xs
+
+  def PureVal : Val → Bool
+    | .closure _ body _ => Pure body
+    | .cons x y         => PureVal x && PureVal y
+    | _                 => true
+end
+
+def PureValList : List Val → Bool
+  | []      => true
+  | x :: xs => PureVal x && PureValList xs
+
+/-- A heap is `Pure` if every cell holds a `PureVal`. -/
+def PureHeap (h : Heap) : Prop :=
+  ∀ (i : Nat) (v : Val), h[i]? = some v → PureVal v = true
+
+/-! ### Proof structure
+
+The joint claim with preservation. The four mutual functions
+preserve `PureVal`/`PureHeap` and are policy-independent. -/
+
+def AllPureIndep (fuel : Nat) : Prop :=
+  (∀ (level : Nat) (M : Expr) (env : Env) (T : TowerState),
+       Pure M = true → PureHeap T.heap →
+       (∀ (p₁ p₂ : PolicyTable),
+         eval fuel p₁ level M env T = eval fuel p₂ level M env T) ∧
+       (∀ (p : PolicyTable) (v : Val) (T' : TowerState),
+         eval fuel p level M env T = some (v, T') →
+         PureVal v = true ∧ PureHeap T'.heap)) ∧
+  (∀ (level : Nat) (Ms : List Expr) (env : Env) (T : TowerState),
+       PureList Ms = true → PureHeap T.heap →
+       (∀ (p₁ p₂ : PolicyTable),
+         evalList fuel p₁ level Ms env T = evalList fuel p₂ level Ms env T) ∧
+       (∀ (p : PolicyTable) (vs : List Val) (T' : TowerState),
+         evalList fuel p level Ms env T = some (vs, T') →
+         PureValList vs = true ∧ PureHeap T'.heap)) ∧
+  (∀ (level : Nat) (op : Val) (args : List Val) (T : TowerState),
+       PureVal op = true → PureValList args = true → PureHeap T.heap →
+       (∀ (p₁ p₂ : PolicyTable),
+         applyVia fuel p₁ level op args T = applyVia fuel p₂ level op args T) ∧
+       (∀ (p : PolicyTable) (v : Val) (T' : TowerState),
+         applyVia fuel p level op args T = some (v, T') →
+         PureVal v = true ∧ PureHeap T'.heap)) ∧
+  (∀ (level : Nat) (op : Val) (args : List Val) (T : TowerState),
+       PureVal op = true → PureValList args = true → PureHeap T.heap →
+       (∀ (p₁ p₂ : PolicyTable),
+         applyDirect fuel p₁ level op args T = applyDirect fuel p₂ level op args T) ∧
+       (∀ (p : PolicyTable) (v : Val) (T' : TowerState),
+         applyDirect fuel p level op args T = some (v, T') →
+         PureVal v = true ∧ PureHeap T'.heap))
+
+/-! ### The proof
+
+Joint induction on `fuel` with extensive case analysis on the
+`Expr`/`Val` constructor at each function. The auxiliary lemmas
+(below) handle preservation of `PureHeap` across `materialize` and
+`alloc`, and preservation of `PureVal` through `applyPrim`,
+`listToVal`, `valToList`. -/
+
+theorem allPureIndep_zero : AllPureIndep 0 := by
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · intro level M env T _h_M _h_T
+    refine ⟨?_, ?_⟩
+    · intro _ _; simp [eval]
+    · intro _ _ _ h; simp [eval] at h
+  · intro level Ms env T _h_Ms _h_T
+    refine ⟨?_, ?_⟩
+    · intro _ _; simp [evalList]
+    · intro _ _ _ h; simp [evalList] at h
+  · intro level op args T _h_op _h_args _h_T
+    refine ⟨?_, ?_⟩
+    · intro _ _; simp [applyVia]
+    · intro _ _ _ h; simp [applyVia] at h
+  · intro level op args T _h_op _h_args _h_T
+    refine ⟨?_, ?_⟩
+    · intro _ _; simp [applyDirect]
+    · intro _ _ _ h; simp [applyDirect] at h
+
+/-! Inductive step — auxiliary preservation lemmas + the main 4-way
+mutual induction. All cases proved. -/
+
+-- The auxiliary lemma: PureHeap heap → heap[i]? = some v → PureVal v
+theorem PureHeap_getElem? {h : Heap} (h_pure : PureHeap h)
+    {i : Nat} {v : Val} (h_some : h[i]? = some v) : PureVal v = true :=
+  h_pure i v h_some
+
+/-- Appending PureVal cells to a `PureHeap` preserves `PureHeap`. -/
+theorem PureHeap_append (h extras : Heap)
+    (h_h : PureHeap h) (h_ext : ∀ v ∈ extras, PureVal v = true) :
+    PureHeap (h ++ extras) := by
+  intro i v h_some
+  by_cases h_lt : i < h.length
+  · rw [List.getElem?_append_left h_lt] at h_some
+    exact h_h i v h_some
+  · have h_ge : h.length ≤ i := Nat.le_of_not_lt h_lt
+    rw [List.getElem?_append_right h_ge] at h_some
+    exact h_ext v (List.mem_of_getElem? h_some)
+
+theorem primPairs_values_PureVal :
+    ∀ v ∈ primPairs.map (·.2), PureVal v = true := by
+  intro v hv
+  unfold primPairs at hv
+  simp [List.map] at hv
+  rcases hv with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
+  all_goals rfl
+
+theorem freshLevelEnv_preserves_PureHeap (h : Heap) (h_pure : PureHeap h) :
+    PureHeap (freshLevelEnv h).1 := by
+  rw [freshLevelEnv_heap_eq]
+  apply PureHeap_append
+  · exact PureHeap_append h _ h_pure primPairs_values_PureVal
+  · intro v hv
+    simp at hv
+    subst hv; rfl
+
+theorem materializeStep_preserves_PureHeap {T : TowerState}
+    (h_T : PureHeap T.heap) : PureHeap (materializeStep T).heap := by
+  unfold materializeStep
+  exact freshLevelEnv_preserves_PureHeap T.heap h_T
+
+theorem materialize_fold_preserves_PureHeap (T : TowerState) (k : Nat)
+    (h_T : PureHeap T.heap) :
+    PureHeap (Nat.fold k (fun _ _ T' => materializeStep T') T).heap := by
+  induction k with
+  | zero => simpa using h_T
+  | succ m IH =>
+      rw [Nat.fold_succ]
+      exact materializeStep_preserves_PureHeap IH
+
+theorem materialize_preserves_PureHeap {T T' : TowerState} {n : Nat}
+    (h_mat : T.materialize n = some T') (h_T : PureHeap T.heap) :
+    PureHeap T'.heap := by
+  unfold TowerState.materialize at h_mat
+  split at h_mat
+  · exact (Option.noConfusion h_mat)
+  · split at h_mat
+    · injection h_mat with h_eq
+      subst h_eq; exact h_T
+    · injection h_mat with h_eq
+      subst h_eq
+      exact materialize_fold_preserves_PureHeap T _ h_T
+
+theorem Heap_alloc_preserves_PureHeap (h : Heap) (v : Val)
+    (h_h : PureHeap h) (h_v : PureVal v = true) :
+    PureHeap (h.alloc v).1 := by
+  unfold Heap.alloc
+  apply PureHeap_append _ _ h_h
+  intro v' hv'
+  simp at hv'; subst hv'; exact h_v
+
+theorem TowerState_alloc_preserves_PureHeap {T : TowerState} {v : Val}
+    (h_T : PureHeap T.heap) (h_v : PureVal v = true) :
+    PureHeap (T.alloc v).1.heap := by
+  unfold TowerState.alloc
+  exact Heap_alloc_preserves_PureHeap T.heap v h_T h_v
+
+/-- `foldl allocStep` preserves `PureHeap` if every value being
+    allocated is `PureVal`. -/
+theorem foldl_allocStep_preserves_PureHeap (pairs : List (Val × String))
+    (h : Heap) (env : Env) (h_pure : PureHeap h)
+    (h_pairs : ∀ p ∈ pairs, PureVal p.1 = true) :
+    PureHeap (pairs.foldl allocStep (h, env)).1 := by
+  induction pairs generalizing h env with
+  | nil => exact h_pure
+  | cons p ps IH =>
+      simp only [List.foldl]
+      apply IH
+      · -- PureHeap of intermediate (allocStep applied once)
+        show PureHeap (allocStep (h, env) p).1
+        unfold allocStep
+        exact Heap_alloc_preserves_PureHeap h p.1 h_pure (h_pairs p (by simp))
+      · intro p' hp'
+        exact h_pairs p' (by simp [hp'])
+
+/-- `listToVal` on a `PureValList` produces a `PureVal`. -/
+theorem PureVal_listToVal : ∀ {args : List Val},
+    PureValList args = true → PureVal (listToVal args) = true
+  | [], _ => rfl
+  | _ :: _, h => by
+      simp only [PureValList, Bool.and_eq_true] at h
+      simp only [listToVal, PureVal, Bool.and_eq_true]
+      exact ⟨h.1, PureVal_listToVal h.2⟩
+
+/-- `valToList` on a `PureVal` cons-list produces a `PureValList`. -/
+theorem valToList_PureValList : ∀ {v : Val} {operands : List Val},
+    PureVal v = true → valToList v = some operands → PureValList operands = true
+  | .nilV, _, _, h => by simp [valToList] at h; subst h; rfl
+  | .cons x xs, _, h_pure, h => by
+      simp [valToList] at h
+      cases h_rec : valToList xs with
+      | none => simp [h_rec] at h
+      | some xs_l =>
+          simp [h_rec] at h
+          subst h
+          simp only [PureVal, Bool.and_eq_true] at h_pure
+          have h_xs_pure := valToList_PureValList h_pure.2 h_rec
+          simp [PureValList]
+          exact ⟨h_pure.1, h_xs_pure⟩
+
+/-- Values in a zip with a `PureValList` first component are `PureVal`. -/
+theorem PureValList_zip_left {args : List Val} {ps : List String}
+    (h_args : PureValList args = true) :
+    ∀ p ∈ args.zip ps, PureVal p.1 = true := by
+  intro p hp
+  induction args generalizing ps with
+  | nil => simp [List.zip, List.zipWith] at hp
+  | cons a as IH =>
+      cases ps with
+      | nil => simp [List.zip, List.zipWith] at hp
+      | cons s ss =>
+          simp [List.zip, List.zipWith] at hp
+          simp only [PureValList, Bool.and_eq_true] at h_args
+          rcases hp with ⟨rfl, rfl⟩ | h_rest
+          · exact h_args.1
+          · exact IH h_args.2 h_rest
+
+/-- `applyPrim` preserves `PureVal`: if args are `PureValList`, the
+    result is `PureVal`. -/
+theorem applyPrim_PureVal {name : String} {args : List Val} {v : Val}
+    (h_args : PureValList args = true) (h : applyPrim name args = some v) :
+    PureVal v = true := by
+  unfold applyPrim at h
+  -- 13 name branches. Each unfolds to a specific applyPrim_* call.
+  -- For each, the result is either a constructor-fixed Val (trivially
+  -- PureVal in most cases) or a sub-Val from args (PureVal by precond).
+  by_cases h₁ : name = "+"
+  · rw [if_pos h₁] at h
+    unfold applyPrim_plus at h
+    match args, h with
+    | [.num _, .num _], h => obtain rfl := Option.some.inj h; rfl
+  · rw [if_neg h₁] at h
+    by_cases h₂ : name = "-"
+    · rw [if_pos h₂] at h
+      unfold applyPrim_minus at h
+      match args, h with
+      | [.num _, .num _], h => obtain rfl := Option.some.inj h; rfl
+    · rw [if_neg h₂] at h
+      by_cases h₃ : name = "*"
+      · rw [if_pos h₃] at h
+        unfold applyPrim_times at h
+        match args, h with
+        | [.num _, .num _], h => obtain rfl := Option.some.inj h; rfl
+      · rw [if_neg h₃] at h
+        by_cases h₄ : name = "mul-list"
+        · rw [if_pos h₄] at h
+          unfold applyPrim_mulList at h
+          match args, h with
+          | [w], h =>
+              simp at h
+              obtain ⟨k, _, rfl⟩ := h
+              rfl
+        · rw [if_neg h₄] at h
+          by_cases h₅ : name = "="
+          · rw [if_pos h₅] at h
+            unfold applyPrim_eq at h
+            match args, h with
+            | [.num _, .num _], h => obtain rfl := Option.some.inj h; rfl
+          · rw [if_neg h₅] at h
+            by_cases h₆ : name = "num?"
+            · rw [if_pos h₆] at h
+              unfold applyPrim_numQ at h
+              match args, h with
+              | [.num _], h | [.bool _], h | [.nilV], h | [.cons _ _], h
+              | [.sym _], h | [.closure _ _ _], h | [.prim _], h
+              | [.builtinBaseApply], h =>
+                obtain rfl := Option.some.inj h; rfl
+            · rw [if_neg h₆] at h
+              by_cases h₇ : name = "bool?"
+              · rw [if_pos h₇] at h
+                unfold applyPrim_boolQ at h
+                match args, h with
+                | [.num _], h | [.bool _], h | [.nilV], h | [.cons _ _], h
+                | [.sym _], h | [.closure _ _ _], h | [.prim _], h
+                | [.builtinBaseApply], h =>
+                  obtain rfl := Option.some.inj h; rfl
+              · rw [if_neg h₇] at h
+                by_cases h₈ : name = "closure?"
+                · rw [if_pos h₈] at h
+                  unfold applyPrim_closureQ at h
+                  match args, h with
+                  | [.num _], h | [.bool _], h | [.nilV], h | [.cons _ _], h
+                  | [.sym _], h | [.closure _ _ _], h | [.prim _], h
+                  | [.builtinBaseApply], h =>
+                    obtain rfl := Option.some.inj h; rfl
+                · rw [if_neg h₈] at h
+                  by_cases h₉ : name = "prim?"
+                  · rw [if_pos h₉] at h
+                    unfold applyPrim_primQ at h
+                    match args, h with
+                    | [.num _], h | [.bool _], h | [.nilV], h | [.cons _ _], h
+                    | [.sym _], h | [.closure _ _ _], h | [.prim _], h
+                    | [.builtinBaseApply], h =>
+                      obtain rfl := Option.some.inj h; rfl
+                  · rw [if_neg h₉] at h
+                    by_cases h₁₀ : name = "cons"
+                    · rw [if_pos h₁₀] at h
+                      unfold applyPrim_cons at h
+                      match args, h with
+                      | [a, b], h =>
+                          obtain rfl := Option.some.inj h
+                          simp only [PureValList, Bool.and_eq_true] at h_args
+                          simp [PureVal]
+                          exact ⟨h_args.1, h_args.2.1⟩
+                    · rw [if_neg h₁₀] at h
+                      by_cases h₁₁ : name = "car"
+                      · rw [if_pos h₁₁] at h
+                        unfold applyPrim_car at h
+                        match args, h with
+                        | [.cons a b], h =>
+                            obtain rfl := Option.some.inj h
+                            simp only [PureValList, Bool.and_eq_true,
+                                       PureVal] at h_args
+                            exact h_args.1.1
+                      · rw [if_neg h₁₁] at h
+                        by_cases h₁₂ : name = "cdr"
+                        · rw [if_pos h₁₂] at h
+                          unfold applyPrim_cdr at h
+                          match args, h with
+                          | [.cons a b], h =>
+                              obtain rfl := Option.some.inj h
+                              simp only [PureValList, Bool.and_eq_true,
+                                         PureVal] at h_args
+                              exact h_args.1.2
+                        · rw [if_neg h₁₂] at h
+                          by_cases h₁₃ : name = "null?"
+                          · rw [if_pos h₁₃] at h
+                            unfold applyPrim_nullQ at h
+                            match args, h with
+                            | [.num _], h | [.bool _], h | [.nilV], h
+                            | [.cons _ _], h | [.sym _], h
+                            | [.closure _ _ _], h | [.prim _], h
+                            | [.builtinBaseApply], h =>
+                              obtain rfl := Option.some.inj h; rfl
+                          · rw [if_neg h₁₃] at h
+                            exact Option.noConfusion h
+
+/-! ### Inductive step
+
+The full proof of `AllPureIndep (n+1)` assuming `AllPureIndep n`.
+Leaf eval cases (.num, .bool, .lam, .var, .quote) close mechanically;
+recursive cases (.ifte, .app, .em, .primApp, .letE, .seq) thread the
+IH; vacuous cases (.set, .installPolicy) use `Pure = false`. Each
+function (eval, evalList, applyVia, applyDirect) gets both
+policy-independence and the preservation clauses
+(PureVal of result, PureHeap of post-state). -/
+
+theorem allPureIndep_succ (n : Nat) (IH : AllPureIndep n) :
+    AllPureIndep (n + 1) := by
+  obtain ⟨IH_eval, IH_evalList, IH_applyVia, IH_applyDirect⟩ := IH
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · -- eval clause
+    intro level M env T h_M h_T
+    refine ⟨?_, ?_⟩
+    · -- Policy-independence: ∀ p₁ p₂, eval ... p₁ = eval ... p₂.
+      intro p₁ p₂
+      cases M with
+      | num i => simp [eval]
+      | bool b => simp [eval]
+      | quote v => simp [eval]
+      | var x => simp [eval]
+      | lam ps b => simp [eval]
+      | ifte c t e =>
+          simp only [Pure, Bool.and_eq_true] at h_M
+          obtain ⟨⟨h_c, h_t⟩, h_e⟩ := h_M
+          show eval (n+1) p₁ level (.ifte c t e) env T
+                = eval (n+1) p₂ level (.ifte c t e) env T
+          simp only [eval]
+          rw [(IH_eval level c env T h_c h_T).1 p₁ p₂]
+          generalize h_ec : eval n p₂ level c env T = ec
+          match ec with
+          | none => rfl
+          | some (.bool false, T') =>
+              have ⟨_, h_T'⟩ := (IH_eval level c env T h_c h_T).2 p₂ _ T' h_ec
+              exact (IH_eval level e env T' h_e h_T').1 p₁ p₂
+          | some (.bool true, T') =>
+              have ⟨_, h_T'⟩ := (IH_eval level c env T h_c h_T).2 p₂ _ T' h_ec
+              exact (IH_eval level t env T' h_t h_T').1 p₁ p₂
+          | some (.num _, T') =>
+              have ⟨_, h_T'⟩ := (IH_eval level c env T h_c h_T).2 p₂ _ T' h_ec
+              exact (IH_eval level t env T' h_t h_T').1 p₁ p₂
+          | some (.nilV, T') =>
+              have ⟨_, h_T'⟩ := (IH_eval level c env T h_c h_T).2 p₂ _ T' h_ec
+              exact (IH_eval level t env T' h_t h_T').1 p₁ p₂
+          | some (.sym _, T') =>
+              have ⟨_, h_T'⟩ := (IH_eval level c env T h_c h_T).2 p₂ _ T' h_ec
+              exact (IH_eval level t env T' h_t h_T').1 p₁ p₂
+          | some (.cons _ _, T') =>
+              have ⟨_, h_T'⟩ := (IH_eval level c env T h_c h_T).2 p₂ _ T' h_ec
+              exact (IH_eval level t env T' h_t h_T').1 p₁ p₂
+          | some (.closure _ _ _, T') =>
+              have ⟨_, h_T'⟩ := (IH_eval level c env T h_c h_T).2 p₂ _ T' h_ec
+              exact (IH_eval level t env T' h_t h_T').1 p₁ p₂
+          | some (.prim _, T') =>
+              have ⟨_, h_T'⟩ := (IH_eval level c env T h_c h_T).2 p₂ _ T' h_ec
+              exact (IH_eval level t env T' h_t h_T').1 p₁ p₂
+          | some (.builtinBaseApply, T') =>
+              have ⟨_, h_T'⟩ := (IH_eval level c env T h_c h_T).2 p₂ _ T' h_ec
+              exact (IH_eval level t env T' h_t h_T').1 p₁ p₂
+      | app exps =>
+          cases exps with
+          | nil => simp [eval]
+          | cons f args =>
+              simp only [Pure, PureList, Bool.and_eq_true] at h_M
+              obtain ⟨h_f, h_args⟩ := h_M
+              show eval (n+1) p₁ level (.app (f :: args)) env T
+                    = eval (n+1) p₂ level (.app (f :: args)) env T
+              simp only [eval]
+              rw [(IH_eval level f env T h_f h_T).1 p₁ p₂]
+              generalize h_ef : eval n p₂ level f env T = ef
+              cases ef with
+              | none => rfl
+              | some result =>
+                  obtain ⟨fv, T'⟩ := result
+                  have ⟨h_fv, h_T'⟩ :=
+                    (IH_eval level f env T h_f h_T).2 p₂ fv T' h_ef
+                  show (match evalList n p₁ level args env T' with
+                        | none => none
+                        | some (avs, T'') => applyVia n p₁ level fv avs T'')
+                      = (match evalList n p₂ level args env T' with
+                          | none => none
+                          | some (avs, T'') => applyVia n p₂ level fv avs T'')
+                  rw [(IH_evalList level args env T' h_args h_T').1 p₁ p₂]
+                  generalize h_el : evalList n p₂ level args env T' = el
+                  cases el with
+                  | none => rfl
+                  | some result' =>
+                      obtain ⟨avs, T''⟩ := result'
+                      have ⟨h_avs, h_T''⟩ :=
+                        (IH_evalList level args env T' h_args h_T').2 p₂ avs T'' h_el
+                      show applyVia n p₁ level fv avs T''
+                            = applyVia n p₂ level fv avs T''
+                      exact (IH_applyVia level fv avs T'' h_fv h_avs h_T'').1 p₁ p₂
+      | set x e => simp [Pure] at h_M
+      | em b =>
+          simp only [Pure] at h_M
+          show eval (n+1) p₁ level (.em b) env T = eval (n+1) p₂ level (.em b) env T
+          simp only [eval]
+          cases h_mat : T.materialize (level + 1) with
+          | none => simp [h_mat]
+          | some T' =>
+              simp [h_mat]
+              have h_T' := materialize_preserves_PureHeap h_mat h_T
+              cases h_env : T'.envAt? (level + 1) with
+              | none => simp [h_env]
+              | some upEnv =>
+                  simp [h_env]
+                  exact (IH_eval (level + 1) b upEnv T' h_M h_T').1 p₁ p₂
+      | primApp f args =>
+          simp only [Pure, Bool.and_eq_true] at h_M
+          obtain ⟨h_f, h_args⟩ := h_M
+          show eval (n+1) p₁ level (.primApp f args) env T
+                = eval (n+1) p₂ level (.primApp f args) env T
+          simp only [eval]
+          rw [(IH_eval level f env T h_f h_T).1 p₁ p₂]
+          generalize h_ef : eval n p₂ level f env T = ef
+          cases ef with
+          | none => rfl
+          | some result =>
+              obtain ⟨fv, T'⟩ := result
+              have ⟨h_fv, h_T'⟩ :=
+                (IH_eval level f env T h_f h_T).2 p₂ fv T' h_ef
+              show (match evalList n p₁ level args env T' with
+                    | none => none
+                    | some (avs, T'') => applyDirect n p₁ level fv avs T'')
+                  = (match evalList n p₂ level args env T' with
+                      | none => none
+                      | some (avs, T'') => applyDirect n p₂ level fv avs T'')
+              rw [(IH_evalList level args env T' h_args h_T').1 p₁ p₂]
+              generalize h_el : evalList n p₂ level args env T' = el
+              cases el with
+              | none => rfl
+              | some result' =>
+                  obtain ⟨avs, T''⟩ := result'
+                  have ⟨h_avs, h_T''⟩ :=
+                    (IH_evalList level args env T' h_args h_T').2 p₂ avs T'' h_el
+                  show applyDirect n p₁ level fv avs T''
+                        = applyDirect n p₂ level fv avs T''
+                  exact (IH_applyDirect level fv avs T'' h_fv h_avs h_T'').1 p₁ p₂
+      | letE x e body =>
+          simp only [Pure, Bool.and_eq_true] at h_M
+          obtain ⟨h_e, h_body⟩ := h_M
+          show eval (n+1) p₁ level (.letE x e body) env T
+                = eval (n+1) p₂ level (.letE x e body) env T
+          simp only [eval]
+          rw [(IH_eval level e env T h_e h_T).1 p₁ p₂]
+          generalize h_ee : eval n p₂ level e env T = ee
+          cases ee with
+          | none => rfl
+          | some result =>
+              obtain ⟨v_e, T'⟩ := result
+              have ⟨h_v_e, h_T'⟩ :=
+                (IH_eval level e env T h_e h_T).2 p₂ v_e T' h_ee
+              have h_T_alloc :=
+                TowerState_alloc_preserves_PureHeap h_T' h_v_e
+              exact (IH_eval level body _ _ h_body h_T_alloc).1 p₁ p₂
+      | seq exps =>
+          cases exps with
+          | nil => simp [eval]
+          | cons e rest =>
+              cases rest with
+              | nil =>
+                  simp only [Pure, PureList, Bool.and_eq_true] at h_M
+                  obtain ⟨h_e, _⟩ := h_M
+                  show eval (n+1) p₁ level (.seq [e]) env T
+                        = eval (n+1) p₂ level (.seq [e]) env T
+                  simp only [eval]
+                  exact (IH_eval level e env T h_e h_T).1 p₁ p₂
+              | cons e2 rest2 =>
+                  simp only [Pure, PureList, Bool.and_eq_true] at h_M
+                  obtain ⟨h_e, h_rest⟩ := h_M
+                  show eval (n+1) p₁ level (.seq (e :: e2 :: rest2)) env T
+                        = eval (n+1) p₂ level (.seq (e :: e2 :: rest2)) env T
+                  simp only [eval]
+                  rw [(IH_eval level e env T h_e h_T).1 p₁ p₂]
+                  generalize h_ee : eval n p₂ level e env T = ee
+                  cases ee with
+                  | none => rfl
+                  | some result =>
+                      obtain ⟨_, T'⟩ := result
+                      have ⟨_, h_T'⟩ :=
+                        (IH_eval level e env T h_e h_T).2 p₂ _ T' h_ee
+                      have h_seq_pure : Pure (.seq (e2 :: rest2)) = true := by
+                        simp [Pure, PureList]; exact h_rest
+                      exact (IH_eval level (.seq (e2 :: rest2)) env T'
+                              h_seq_pure h_T').1 p₁ p₂
+      | installPolicy idx => simp [Pure] at h_M
+    · -- Preservation.
+      intro p v T' h_some
+      cases M with
+      | num i =>
+          simp [eval] at h_some
+          obtain ⟨rfl, rfl⟩ := h_some
+          exact ⟨by simp [PureVal], h_T⟩
+      | bool b =>
+          simp [eval] at h_some
+          obtain ⟨rfl, rfl⟩ := h_some
+          exact ⟨by simp [PureVal], h_T⟩
+      | quote v_q =>
+          simp [eval] at h_some
+          cases h_cl : closedValB v_q
+          · simp [h_cl] at h_some
+          · simp [h_cl] at h_some
+            obtain ⟨rfl, rfl⟩ := h_some
+            refine ⟨?_, h_T⟩
+            simp [Pure] at h_M; exact h_M
+      | var x =>
+          simp [eval] at h_some
+          split at h_some
+          · split at h_some
+            · obtain ⟨rfl, rfl⟩ := h_some
+              refine ⟨?_, h_T⟩
+              exact PureHeap_getElem? h_T (by assumption)
+            · exact Option.noConfusion h_some
+          · exact Option.noConfusion h_some
+      | lam ps body =>
+          simp [eval] at h_some
+          obtain ⟨rfl, rfl⟩ := h_some
+          refine ⟨?_, h_T⟩
+          simp [Pure] at h_M
+          simp [PureVal]; exact h_M
+      | ifte c t e =>
+          simp only [Pure, Bool.and_eq_true] at h_M
+          obtain ⟨⟨h_c, h_t⟩, h_e⟩ := h_M
+          simp only [eval] at h_some
+          match h_ec : eval n p level c env T, h_some with
+          | none, h_s => simp [h_ec] at h_s
+          | some (.bool false, T''), h_s =>
+              simp [h_ec] at h_s
+              have ⟨_, h_T''⟩ := (IH_eval level c env T h_c h_T).2 p _ T'' h_ec
+              exact (IH_eval level e env T'' h_e h_T'').2 p v T' h_s
+          | some (.bool true, T''), h_s =>
+              simp [h_ec] at h_s
+              have ⟨_, h_T''⟩ := (IH_eval level c env T h_c h_T).2 p _ T'' h_ec
+              exact (IH_eval level t env T'' h_t h_T'').2 p v T' h_s
+          | some (.num _, T''), h_s =>
+              simp [h_ec] at h_s
+              have ⟨_, h_T''⟩ := (IH_eval level c env T h_c h_T).2 p _ T'' h_ec
+              exact (IH_eval level t env T'' h_t h_T'').2 p v T' h_s
+          | some (.nilV, T''), h_s =>
+              simp [h_ec] at h_s
+              have ⟨_, h_T''⟩ := (IH_eval level c env T h_c h_T).2 p _ T'' h_ec
+              exact (IH_eval level t env T'' h_t h_T'').2 p v T' h_s
+          | some (.sym _, T''), h_s =>
+              simp [h_ec] at h_s
+              have ⟨_, h_T''⟩ := (IH_eval level c env T h_c h_T).2 p _ T'' h_ec
+              exact (IH_eval level t env T'' h_t h_T'').2 p v T' h_s
+          | some (.cons _ _, T''), h_s =>
+              simp [h_ec] at h_s
+              have ⟨_, h_T''⟩ := (IH_eval level c env T h_c h_T).2 p _ T'' h_ec
+              exact (IH_eval level t env T'' h_t h_T'').2 p v T' h_s
+          | some (.closure _ _ _, T''), h_s =>
+              simp [h_ec] at h_s
+              have ⟨_, h_T''⟩ := (IH_eval level c env T h_c h_T).2 p _ T'' h_ec
+              exact (IH_eval level t env T'' h_t h_T'').2 p v T' h_s
+          | some (.prim _, T''), h_s =>
+              simp [h_ec] at h_s
+              have ⟨_, h_T''⟩ := (IH_eval level c env T h_c h_T).2 p _ T'' h_ec
+              exact (IH_eval level t env T'' h_t h_T'').2 p v T' h_s
+          | some (.builtinBaseApply, T''), h_s =>
+              simp [h_ec] at h_s
+              have ⟨_, h_T''⟩ := (IH_eval level c env T h_c h_T).2 p _ T'' h_ec
+              exact (IH_eval level t env T'' h_t h_T'').2 p v T' h_s
+      | app exps =>
+          cases exps with
+          | nil => simp [eval] at h_some
+          | cons f args =>
+              simp only [Pure, PureList, Bool.and_eq_true] at h_M
+              obtain ⟨h_f, h_args⟩ := h_M
+              simp only [eval] at h_some
+              match h_ef : eval n p level f env T, h_some with
+              | none, h_s => simp [h_ef] at h_s
+              | some (fv, T''), h_s =>
+                  simp [h_ef] at h_s
+                  have ⟨h_fv, h_T''⟩ :=
+                    (IH_eval level f env T h_f h_T).2 p fv T'' h_ef
+                  match h_el : evalList n p level args env T'', h_s with
+                  | none, h_s' => simp [h_el] at h_s'
+                  | some (avs, T'''), h_s' =>
+                      simp [h_el] at h_s'
+                      have ⟨h_avs, h_T'''⟩ :=
+                        (IH_evalList level args env T'' h_args h_T'').2 p avs T''' h_el
+                      exact (IH_applyVia level fv avs T''' h_fv h_avs h_T''').2 p v T' h_s'
+      | set x e => simp [Pure] at h_M
+      | em b =>
+          simp only [Pure] at h_M
+          simp only [eval] at h_some
+          match h_mat : T.materialize (level + 1), h_some with
+          | none, h_s => simp [h_mat] at h_s
+          | some T'', h_s =>
+              simp [h_mat] at h_s
+              have h_T'' := materialize_preserves_PureHeap h_mat h_T
+              match h_env : T''.envAt? (level + 1), h_s with
+              | none, h_s' => simp [h_env] at h_s'
+              | some upEnv, h_s' =>
+                  simp [h_env] at h_s'
+                  exact (IH_eval (level + 1) b upEnv T'' h_M h_T'').2 p v T' h_s'
+      | primApp f args =>
+          simp only [Pure, Bool.and_eq_true] at h_M
+          obtain ⟨h_f, h_args⟩ := h_M
+          simp only [eval] at h_some
+          match h_ef : eval n p level f env T, h_some with
+          | none, h_s => simp [h_ef] at h_s
+          | some (fv, T''), h_s =>
+              simp [h_ef] at h_s
+              have ⟨h_fv, h_T''⟩ :=
+                (IH_eval level f env T h_f h_T).2 p fv T'' h_ef
+              match h_el : evalList n p level args env T'', h_s with
+              | none, h_s' => simp [h_el] at h_s'
+              | some (avs, T'''), h_s' =>
+                  simp [h_el] at h_s'
+                  have ⟨h_avs, h_T'''⟩ :=
+                    (IH_evalList level args env T'' h_args h_T'').2 p avs T''' h_el
+                  exact (IH_applyDirect level fv avs T''' h_fv h_avs h_T''').2 p v T' h_s'
+      | letE x e body =>
+          simp only [Pure, Bool.and_eq_true] at h_M
+          obtain ⟨h_e, h_body⟩ := h_M
+          simp only [eval] at h_some
+          match h_ee : eval n p level e env T, h_some with
+          | none, h_s => simp [h_ee] at h_s
+          | some (v_e, T''), h_s =>
+              simp [h_ee] at h_s
+              have ⟨h_v_e, h_T''⟩ :=
+                (IH_eval level e env T h_e h_T).2 p v_e T'' h_ee
+              have h_T_alloc :=
+                TowerState_alloc_preserves_PureHeap h_T'' h_v_e
+              exact (IH_eval level body _ _ h_body h_T_alloc).2 p v T' h_s
+      | seq exps =>
+          cases exps with
+          | nil =>
+              simp only [eval] at h_some
+              obtain ⟨rfl, rfl⟩ := h_some
+              exact ⟨by simp [PureVal], h_T⟩
+          | cons e rest =>
+              cases rest with
+              | nil =>
+                  simp only [Pure, PureList, Bool.and_eq_true] at h_M
+                  obtain ⟨h_e, _⟩ := h_M
+                  simp only [eval] at h_some
+                  exact (IH_eval level e env T h_e h_T).2 p v T' h_some
+              | cons e2 rest2 =>
+                  simp only [Pure, PureList, Bool.and_eq_true] at h_M
+                  obtain ⟨h_e, h_rest⟩ := h_M
+                  simp only [eval] at h_some
+                  match h_ee : eval n p level e env T, h_some with
+                  | none, h_s => simp [h_ee] at h_s
+                  | some (_, T''), h_s =>
+                      simp [h_ee] at h_s
+                      have ⟨_, h_T''⟩ :=
+                        (IH_eval level e env T h_e h_T).2 p _ T'' h_ee
+                      have h_seq_pure : Pure (.seq (e2 :: rest2)) = true := by
+                        simp [Pure, PureList]; exact h_rest
+                      exact (IH_eval level (.seq (e2 :: rest2)) env T''
+                              h_seq_pure h_T'').2 p v T' h_s
+      | installPolicy idx => simp [Pure] at h_M
+  · -- evalList clause
+    intro level Ms env T h_Ms h_T
+    refine ⟨?_, ?_⟩
+    · intro p₁ p₂
+      cases Ms with
+      | nil => simp [evalList]
+      | cons hd tl =>
+          simp only [PureList, Bool.and_eq_true] at h_Ms
+          obtain ⟨h_hd, h_tl⟩ := h_Ms
+          show evalList (n+1) p₁ level (hd :: tl) env T
+                = evalList (n+1) p₂ level (hd :: tl) env T
+          simp only [evalList]
+          have h_outer := (IH_eval level hd env T h_hd h_T).1 p₁ p₂
+          rw [h_outer]
+          generalize h_e : eval n p₂ level hd env T = e
+          cases e with
+          | none => rfl
+          | some result =>
+              obtain ⟨v, T'⟩ := result
+              have ⟨_, h_T'⟩ :=
+                (IH_eval level hd env T h_hd h_T).2 p₂ v T' h_e
+              show (match evalList n p₁ level tl env T' with
+                     | none => none
+                     | some (vs, T'') => some (v :: vs, T''))
+                 = (match evalList n p₂ level tl env T' with
+                     | none => none
+                     | some (vs, T'') => some (v :: vs, T''))
+              rw [(IH_evalList level tl env T' h_tl h_T').1 p₁ p₂]
+    · intro p vs T' h_some
+      cases Ms with
+      | nil =>
+          simp [evalList] at h_some
+          obtain ⟨rfl, rfl⟩ := h_some
+          exact ⟨by simp [PureValList], h_T⟩
+      | cons hd tl =>
+          simp only [PureList, Bool.and_eq_true] at h_Ms
+          obtain ⟨h_hd, h_tl⟩ := h_Ms
+          simp only [evalList] at h_some
+          match h_e : eval n p level hd env T, h_some with
+          | none, h_s => simp [h_e] at h_s
+          | some (v, T''), h_s =>
+              simp [h_e] at h_s
+              have ⟨h_v, h_T''⟩ :=
+                (IH_eval level hd env T h_hd h_T).2 p v T'' h_e
+              match h_el : evalList n p level tl env T'', h_s with
+              | none, h_s' => simp [h_el] at h_s'
+              | some (vs', T'''), h_s' =>
+                  simp [h_el] at h_s'
+                  obtain ⟨rfl, rfl⟩ := h_s'
+                  have ⟨h_vs', h_T'''⟩ :=
+                    (IH_evalList level tl env T'' h_tl h_T'').2 p vs' T''' h_el
+                  refine ⟨?_, h_T'''⟩
+                  simp [PureValList]
+                  exact ⟨h_v, h_vs'⟩
+  · -- applyVia clause
+    intro level op args T h_op h_args h_T
+    refine ⟨?_, ?_⟩
+    · -- Policy-independence
+      intro p₁ p₂
+      show applyVia (n+1) p₁ level op args T = applyVia (n+1) p₂ level op args T
+      simp only [applyVia]
+      cases h_mat : T.materialize (level + 1) with
+      | none => simp [h_mat]
+      | some T' =>
+          simp [h_mat]
+          have h_T' := materialize_preserves_PureHeap h_mat h_T
+          cases h_env : T'.envAt? (level + 1) with
+          | none =>
+              simp [h_env]
+              exact (IH_applyDirect level op args T' h_op h_args h_T').1 p₁ p₂
+          | some upEnv =>
+              simp [h_env]
+              cases h_la : upEnv.lookup "base-apply" with
+              | none =>
+                  simp [h_la]
+                  exact (IH_applyDirect level op args T' h_op h_args h_T').1 p₁ p₂
+              | some idx =>
+                  simp [h_la]
+                  cases h_cell : T'.heap[idx]? with
+                  | none => rfl
+                  | some baseApply =>
+                      have h_ba_pure : PureVal baseApply = true :=
+                        PureHeap_getElem? h_T' h_cell
+                      have h_listToVal : ∀ xs, PureValList xs = true →
+                          PureVal (listToVal xs) = true := by
+                        intro xs
+                        induction xs with
+                        | nil => intro _; rfl
+                        | cons x xs IH =>
+                            intro h
+                            simp only [PureValList, Bool.and_eq_true] at h
+                            simp only [listToVal, PureVal, Bool.and_eq_true]
+                            exact ⟨h.1, IH h.2⟩
+                      have h_args' : PureValList [op, listToVal args] = true := by
+                        simp [PureValList]; exact ⟨h_op, h_listToVal args h_args⟩
+                      cases baseApply with
+                      | builtinBaseApply =>
+                          exact (IH_applyDirect level op args T'
+                                   h_op h_args h_T').1 p₁ p₂
+                      | num _ =>
+                          exact (IH_applyDirect level _ [op, listToVal args]
+                                  T' h_ba_pure h_args' h_T').1 p₁ p₂
+                      | bool _ =>
+                          exact (IH_applyDirect level _ [op, listToVal args]
+                                  T' h_ba_pure h_args' h_T').1 p₁ p₂
+                      | nilV =>
+                          exact (IH_applyDirect level _ [op, listToVal args]
+                                  T' h_ba_pure h_args' h_T').1 p₁ p₂
+                      | sym _ =>
+                          exact (IH_applyDirect level _ [op, listToVal args]
+                                  T' h_ba_pure h_args' h_T').1 p₁ p₂
+                      | cons _ _ =>
+                          exact (IH_applyDirect level _ [op, listToVal args]
+                                  T' h_ba_pure h_args' h_T').1 p₁ p₂
+                      | closure _ _ _ =>
+                          exact (IH_applyDirect level _ [op, listToVal args]
+                                  T' h_ba_pure h_args' h_T').1 p₁ p₂
+                      | prim _ =>
+                          exact (IH_applyDirect level _ [op, listToVal args]
+                                  T' h_ba_pure h_args' h_T').1 p₁ p₂
+    · -- Preservation
+      intro p v T' h_some
+      simp only [applyVia] at h_some
+      match h_mat : T.materialize (level + 1), h_some with
+      | none, h_s => simp [h_mat] at h_s
+      | some T'', h_s =>
+          simp [h_mat] at h_s
+          have h_T'' := materialize_preserves_PureHeap h_mat h_T
+          match h_env : T''.envAt? (level + 1), h_s with
+          | none, h_s' =>
+              simp [h_env] at h_s'
+              exact (IH_applyDirect level op args T'' h_op h_args h_T'').2 p v T' h_s'
+          | some upEnv, h_s' =>
+              simp [h_env] at h_s'
+              match h_la : upEnv.lookup "base-apply", h_s' with
+              | none, h_s'' =>
+                  simp [h_la] at h_s''
+                  exact (IH_applyDirect level op args T'' h_op h_args h_T'').2 p v T' h_s''
+              | some idx, h_s'' =>
+                  simp [h_la] at h_s''
+                  match h_cell : T''.heap[idx]?, h_s'' with
+                  | none, h_s''' => simp [h_cell] at h_s'''
+                  | some .builtinBaseApply, h_s''' =>
+                      simp [h_cell] at h_s'''
+                      exact (IH_applyDirect level op args T'' h_op h_args h_T'').2 p v T' h_s'''
+                  | some (.closure ps body cenv), h_s''' =>
+                      simp [h_cell] at h_s'''
+                      have h_ba_pure : PureVal (.closure ps body cenv) = true :=
+                        PureHeap_getElem? h_T'' h_cell
+                      have h_args' : PureValList [op, listToVal args] = true := by
+                        simp [PureValList]
+                        exact ⟨h_op, PureVal_listToVal h_args⟩
+                      exact (IH_applyDirect level _ [op, listToVal args] T''
+                              h_ba_pure h_args' h_T'').2 p v T' h_s'''
+                  | some (.num _), h_s''' =>
+                      simp [h_cell] at h_s'''
+                      have h_args' : PureValList [op, listToVal args] = true := by
+                        simp [PureValList]
+                        exact ⟨h_op, PureVal_listToVal h_args⟩
+                      exact (IH_applyDirect level _ [op, listToVal args] T''
+                              (by simp [PureVal]) h_args' h_T'').2 p v T' h_s'''
+                  | some (.bool _), h_s''' =>
+                      simp [h_cell] at h_s'''
+                      have h_args' : PureValList [op, listToVal args] = true := by
+                        simp [PureValList]
+                        exact ⟨h_op, PureVal_listToVal h_args⟩
+                      exact (IH_applyDirect level _ [op, listToVal args] T''
+                              (by simp [PureVal]) h_args' h_T'').2 p v T' h_s'''
+                  | some .nilV, h_s''' =>
+                      simp [h_cell] at h_s'''
+                      have h_args' : PureValList [op, listToVal args] = true := by
+                        simp [PureValList]
+                        exact ⟨h_op, PureVal_listToVal h_args⟩
+                      exact (IH_applyDirect level _ [op, listToVal args] T''
+                              (by simp [PureVal]) h_args' h_T'').2 p v T' h_s'''
+                  | some (.cons _ _), h_s''' =>
+                      simp [h_cell] at h_s'''
+                      have h_ba_pure : PureVal _ = true :=
+                        PureHeap_getElem? h_T'' h_cell
+                      have h_args' : PureValList [op, listToVal args] = true := by
+                        simp [PureValList]
+                        exact ⟨h_op, PureVal_listToVal h_args⟩
+                      exact (IH_applyDirect level _ [op, listToVal args] T''
+                              h_ba_pure h_args' h_T'').2 p v T' h_s'''
+                  | some (.sym _), h_s''' =>
+                      simp [h_cell] at h_s'''
+                      have h_args' : PureValList [op, listToVal args] = true := by
+                        simp [PureValList]
+                        exact ⟨h_op, PureVal_listToVal h_args⟩
+                      exact (IH_applyDirect level _ [op, listToVal args] T''
+                              (by simp [PureVal]) h_args' h_T'').2 p v T' h_s'''
+                  | some (.prim _), h_s''' =>
+                      simp [h_cell] at h_s'''
+                      have h_args' : PureValList [op, listToVal args] = true := by
+                        simp [PureValList]
+                        exact ⟨h_op, PureVal_listToVal h_args⟩
+                      exact (IH_applyDirect level _ [op, listToVal args] T''
+                              (by simp [PureVal]) h_args' h_T'').2 p v T' h_s'''
+  · -- applyDirect clause
+    intro level op args T h_op h_args h_T
+    refine ⟨?_, ?_⟩
+    · -- Policy-independence
+      intro p₁ p₂
+      show applyDirect (n+1) p₁ level op args T = applyDirect (n+1) p₂ level op args T
+      unfold applyDirect
+      cases op with
+      | num _ => rfl
+      | bool _ => rfl
+      | nilV => rfl
+      | sym _ => rfl
+      | cons _ _ => rfl
+      | builtinBaseApply =>
+          cases args with
+          | nil => rfl
+          | cons _ tl =>
+              cases tl with
+              | nil => rfl
+              | cons opList tl2 =>
+                  cases tl2 with
+                  | nil =>
+                      simp only [PureValList, Bool.and_eq_true] at h_args
+                      cases h_vtl : valToList opList with
+                      | none => simp [h_vtl]
+                      | some operands =>
+                          simp [h_vtl]
+                          have h_ops_pure :=
+                            valToList_PureValList h_args.2.1 h_vtl
+                          exact (IH_applyDirect level _ operands T
+                                  h_args.1 h_ops_pure h_T).1 p₁ p₂
+                  | cons _ _ => rfl
+      | closure ps body cenv =>
+          simp only [PureVal] at h_op
+          by_cases h_len : ps.length = args.length
+          · simp [bne, h_len]
+            have h_pairs := PureValList_zip_left h_args (ps := ps)
+            have h_heap' :=
+              foldl_allocStep_preserves_PureHeap (args.zip ps) T.heap cenv h_T h_pairs
+            exact (IH_eval level body _ _ h_op h_heap').1 p₁ p₂
+          · simp [bne, h_len]
+      | prim _ => rfl
+    · -- Preservation
+      intro p v T' h_some
+      unfold applyDirect at h_some
+      cases op with
+      | num _ => exact Option.noConfusion h_some
+      | bool _ => exact Option.noConfusion h_some
+      | nilV => exact Option.noConfusion h_some
+      | sym _ => exact Option.noConfusion h_some
+      | cons _ _ => exact Option.noConfusion h_some
+      | builtinBaseApply =>
+          match args, h_some with
+          | [], h => exact Option.noConfusion h
+          | [_], h => exact Option.noConfusion h
+          | [actualOp, opList], h_s =>
+              simp only [PureValList, Bool.and_eq_true] at h_args
+              cases h_vtl : valToList opList with
+              | none => simp [h_vtl] at h_s
+              | some operands =>
+                  simp [h_vtl] at h_s
+                  have h_ops_pure :=
+                    valToList_PureValList h_args.2.1 h_vtl
+                  exact (IH_applyDirect level _ operands T
+                          h_args.1 h_ops_pure h_T).2 p v T' h_s
+          | _ :: _ :: _ :: _, h => exact Option.noConfusion h
+      | closure ps body cenv =>
+          simp only [PureVal] at h_op
+          by_cases h_len : ps.length = args.length
+          · simp [bne, h_len] at h_some
+            have h_pairs := PureValList_zip_left h_args (ps := ps)
+            have h_heap' :=
+              foldl_allocStep_preserves_PureHeap (args.zip ps) T.heap cenv h_T h_pairs
+            exact (IH_eval level body _ _ h_op h_heap').2 p v T' h_some
+          · simp [bne, h_len] at h_some
+      | prim name =>
+          cases h_pa : applyPrim name args with
+          | none => simp [h_pa] at h_some
+          | some v' =>
+              simp [h_pa] at h_some
+              obtain ⟨rfl, rfl⟩ := h_some
+              exact ⟨applyPrim_PureVal h_args h_pa, h_T⟩
+
+theorem allPureIndep : ∀ fuel, AllPureIndep fuel
+  | 0     => allPureIndep_zero
+  | n + 1 => allPureIndep_succ n (allPureIndep n)
+
+/-- The empty heap is `PureHeap` (vacuously). -/
+theorem PureHeap_empty : PureHeap [] := by
+  intro i v h; simp at h
+
+/-- `initTower`'s heap is `PureHeap`: it's built by `freshLevelEnv []`
+    (one materializeStep from the empty state), which only adds
+    primitive cells. -/
+theorem PureHeap_initTower : PureHeap initTower.heap := by
+  unfold initTower buildTower
+  simp only [Nat.fold]
+  exact freshLevelEnv_preserves_PureHeap [] PureHeap_empty
+
+/-- `setPolicyAt` doesn't change the heap, so `PureHeap` is preserved. -/
+theorem setPolicyAt_preserves_PureHeap {T : TowerState} {n : Nat} {p : BlackPolicy}
+    (h_T : PureHeap T.heap) : PureHeap (T.setPolicyAt n p).heap := by
+  unfold TowerState.setPolicyAt
+  split <;> exact h_T
+
+/-! ### β-redex W1 under the gated policy table
+
+With `AllPureIndep` in hand, we can upgrade `wand_defeated_existential`
+to use the β-redex witness `((λx. x) 0)` vs `.num 0` under the gated
+policy table `[approvedPolicy approvals]`. The β-redex is `Pure`
+(no `.set`, no `.installPolicy`), so the policy-independence lemma
+applies. -/
+
+/-- Top-level `evalProgram` is policy-independent for `Pure` programs. -/
+theorem evalProgram_pure_indep (M : Expr) (h_M : Pure M = true) (fuel : Nat)
+    (p₁ p₂ : PolicyTable) :
+    evalProgram fuel p₁ M = evalProgram fuel p₂ M := by
+  have h_T_pure : PureHeap (initTower.setPolicyAt 0 acceptAllPolicy).heap :=
+    setPolicyAt_preserves_PureHeap PureHeap_initTower
+  simp only [evalProgram]
+  generalize h_env : (initTower.setPolicyAt 0 acceptAllPolicy).envAt? 0 = e
+  cases e with
+  | none => rfl
+  | some env =>
+      show Option.map Prod.fst
+            (eval fuel p₁ 0 M env (initTower.setPolicyAt 0 acceptAllPolicy))
+          = Option.map Prod.fst
+            (eval fuel p₂ 0 M env (initTower.setPolicyAt 0 acceptAllPolicy))
+      rw [((allPureIndep fuel).1 0 M env _ h_M h_T_pure).1 p₁ p₂]
+
+theorem wand_defeated_existential_gated_beta
+    (approvals : List ApprovedModification) :
+    ∃ M N : Expr, M ≠ N ∧ ObsEquivConvergesGated approvals M N := by
+  refine ⟨.app [.lam ["x"] (.var "x"), .num 0], .num 0, ?_, ?_⟩
+  · intro h; cases h
+  · refine ⟨100, .num 0, ?_, ?_⟩
+    · have h_M_pure : Pure (.app [.lam ["x"] (.var "x"), .num 0]) = true := by
+        decide
+      rw [evalProgram_pure_indep _ h_M_pure 100
+            [approvedPolicy approvals] [acceptAllPolicy]]
+      native_decide
+    · simp [evalProgram, eval]; rfl
+
 /-! ## Multn approval — the worked example
 
 This is the headline construction: an `ApprovedModification` for the
