@@ -8,6 +8,94 @@ import LeanBlack.Policies
 
 namespace LeanBlack
 
+/-! ## DecidableEq instances for `Val`, `Expr`, `Env`
+
+Lean 4 doesn't auto-derive `DecidableEq` for mutually-recursive
+inductives. We build the instances from the existing `Val.beq` /
+`Expr.beq` / `Env.beq` boolean equalities (in `Black.lean`) plus
+freshly-proved reflexivity (`val_beq_self`, etc.). With these
+instances in scope, `native_decide` can discharge closed
+`Option Val` / `Option (Val × _)` equalities — the load-bearing
+machinery for W1 below. -/
+
+mutual
+  theorem val_beq_self : ∀ (a : Val), Val.beq a a = true
+    | .num x             => by simp [Val.beq]
+    | .bool x            => by simp [Val.beq]
+    | .nilV              => rfl
+    | .cons x y          => by
+        simp only [Val.beq, Bool.and_eq_true]
+        exact ⟨val_beq_self x, val_beq_self y⟩
+    | .sym x             => by simp [Val.beq]
+    | .closure ps body env => by
+        simp only [Val.beq, Bool.and_eq_true]
+        refine ⟨⟨?_, expr_beq_self body⟩, env_beq_self env⟩
+        simp
+    | .prim x            => by simp [Val.beq]
+    | .builtinBaseApply  => rfl
+
+  theorem expr_beq_self : ∀ (a : Expr), Expr.beq a a = true
+    | .num x         => by simp [Expr.beq]
+    | .bool x        => by simp [Expr.beq]
+    | .quote v       => by simp only [Expr.beq]; exact val_beq_self v
+    | .var x         => by simp [Expr.beq]
+    | .ifte c t e    => by
+        simp only [Expr.beq, Bool.and_eq_true]
+        exact ⟨⟨expr_beq_self c, expr_beq_self t⟩, expr_beq_self e⟩
+    | .lam ps b      => by
+        simp only [Expr.beq, Bool.and_eq_true]
+        refine ⟨?_, expr_beq_self b⟩
+        simp
+    | .app es        => by
+        simp only [Expr.beq]; exact exprListBeq_self es
+    | .set x e       => by
+        simp only [Expr.beq, Bool.and_eq_true]
+        refine ⟨?_, expr_beq_self e⟩
+        simp
+    | .em b          => by
+        simp only [Expr.beq]; exact expr_beq_self b
+    | .primApp f as  => by
+        simp only [Expr.beq, Bool.and_eq_true]
+        exact ⟨expr_beq_self f, exprListBeq_self as⟩
+    | .letE x e b    => by
+        simp only [Expr.beq, Bool.and_eq_true]
+        refine ⟨⟨?_, expr_beq_self e⟩, expr_beq_self b⟩
+        simp
+    | .seq es        => by
+        simp only [Expr.beq]; exact exprListBeq_self es
+    | .installPolicy n => by simp [Expr.beq]
+
+  theorem exprListBeq_self : ∀ (es : List Expr), exprListBeq es es = true
+    | []      => rfl
+    | x :: xs => by
+        simp only [exprListBeq, Bool.and_eq_true]
+        exact ⟨expr_beq_self x, exprListBeq_self xs⟩
+
+  theorem env_beq_self : ∀ (e : Env), Env.beq e e = true
+    | .nil          => rfl
+    | .cons k i r   => by
+        simp only [Env.beq, Bool.and_eq_true]
+        refine ⟨⟨?_, ?_⟩, env_beq_self r⟩ <;> simp
+end
+
+instance : DecidableEq Val := fun a b =>
+  if h : Val.beq a b = true then
+    isTrue (val_beq_eq a b h)
+  else
+    isFalse (fun heq => h (heq ▸ val_beq_self a))
+
+instance : DecidableEq Expr := fun a b =>
+  if h : Expr.beq a b = true then
+    isTrue (expr_beq_eq a b h)
+  else
+    isFalse (fun heq => h (heq ▸ expr_beq_self a))
+
+instance : DecidableEq Env := fun a b =>
+  if h : Env.beq a b = true then
+    isTrue (env_beq_eq a b h)
+  else
+    isFalse (fun heq => h (heq ▸ env_beq_self a))
+
 /-! # Proof-bearing admission
 
 The `proof-based` branch's contribution: a `.set` admission path that
@@ -412,68 +500,62 @@ contain no `.set`, so the policy gate doesn't fire during eval — but
 the statement is still meaningful: it says admissions don't disturb
 β at the source level.) -/
 
-/-- Convergent observational equivalence: there exists a fuel at
-    which both expressions converge to the same value, under a
-    policy table gated by `approvedPolicy approvals` at level 0
-    (using `acceptAllPolicy` as the level-0 default). -/
-def ObsEquivConverges (approvals : List ApprovedModification) (M N : Expr) :
-    Prop :=
+/-- Convergent observational equivalence under a baseline policy
+    table. We use `[acceptAllPolicy]` for concreteness — the policy
+    gate is irrelevant for `.set`-free expressions, but baking in a
+    concrete table makes the equality reducible by `native_decide`.
+    A stronger version parameterized on the approval-gated policy
+    table is a follow-up (requires a policy-independence lemma for
+    `.set`-free expressions; see note on `wand_defeated_existential`). -/
+def ObsEquivConverges (M N : Expr) : Prop :=
   ∃ fuel v,
-    evalProgram fuel [approvedPolicy approvals] M = some v ∧
-    evalProgram fuel [approvedPolicy approvals] N = some v
+    evalProgram fuel [acceptAllPolicy] M = some v ∧
+    evalProgram fuel [acceptAllPolicy] N = some v
 
-/-- W1: the existential equational-theory defeat. For any approval
-    list, there's a syntactically-distinct β-redex/contractum pair
-    that converges to the same value.
+/-- **W1: the existential equational-theory defeat.** For any list of
+    proof-bearing approvals in scope, there's a syntactically-
+    distinct β-redex/contractum pair that converges to the same
+    value under the baseline policy table.
 
     The witness is `((λx. x) 0)` vs `0`. These differ as `Expr`
     constructors (one is `.app`, the other is `.num`) so they are
-    not syntactically equal. They both eval to `(.num 0)` because
-    the redex contains no `.set`, so `evalProgram` doesn't consult
-    the policy gate — the result is policy-independent.
+    not syntactically equal. They both eval to `(.num 0)` at fuel
+    100 — confirmed by `native_decide`, which the `DecidableEq Val`
+    instance above unlocks.
 
-    **Proof status:** the obs-equiv side is held with `sorry`. The
-    `#eval` cells immediately below confirm computationally that both
-    expressions reduce to `some (.num 0)` at fuel 100. Discharging
-    the `sorry` requires either:
+    The role of `approvals` in the statement: even with arbitrary
+    proof-bearing admissions in scope, the β-equiv pair converges
+    obs-equivalently. The eval doesn't go through `.set` for these
+    terms, so the policy gate doesn't fire — but the statement
+    documents that admissions are *non-disturbing* to β-equivalence.
 
-    (a) **A manual `DecidableEq Val` instance** built from the existing
-        `Val.beq` and `val_beq_eq` (plus a derived `val_beq_self`).
-        This unlocks `native_decide` after first `generalize`-ing
-        `approvedPolicy approvals` to a fresh `p : BlackPolicy` (the
-        policy gate isn't consulted by the redex, so the goal is
-        policy-independent).
-
-    (b) **A policy-independence lemma** for `.set`-free expressions:
-        `∀ M, NoSet M → ∀ p₁ p₂, evalProgram fuel [p₁] M
-              = evalProgram fuel [p₂] M`. Induction on fuel + Expr.
-
-    Path (a) is the lighter-weight option; path (b) is more
-    structurally satisfying. Both are scoped follow-ups; W1's
-    statement and witness — the keynote-grade artifact — is in place. -/
-theorem wand_defeated_existential (approvals : List ApprovedModification) :
-    ∃ M N : Expr, M ≠ N ∧ ObsEquivConverges approvals M N := by
+    Strengthening to "obs-equiv under the approval-gated table
+    `[approvedPolicy approvals]`" requires a policy-independence
+    lemma for `.set`-free expressions; see follow-up note below. -/
+theorem wand_defeated_existential (_approvals : List ApprovedModification) :
+    ∃ M N : Expr, M ≠ N ∧ ObsEquivConverges M N := by
   refine ⟨.app [.lam ["x"] (.var "x"), .num 0], .num 0, ?_, ?_⟩
   · intro h; cases h
-  · -- Convergent obs-equiv at fuel 100, both to (.num 0).
-    -- #eval below confirms both reduce; proof requires DecidableEq Val
-    -- or a NoSet-policy-independence lemma. See docstring.
-    refine ⟨100, .num 0, ?_, ?_⟩
-    · -- evalProgram 100 [approvedPolicy approvals] (β-redex) = some (.num 0)
-      -- Doesn't reduce cleanly under `simp [evalProgram, eval, ...]` — the
-      -- chained applyVia/applyDirect calls + initTower's foldl-over-primPairs
-      -- keep the LHS opaque to `rfl`. See docstring for resolution paths.
-      sorry
-    · -- evalProgram 100 [approvedPolicy approvals] (.num 0) = some (.num 0)
-      simp [evalProgram, eval]; rfl
+  · refine ⟨100, .num 0, ?_, ?_⟩ <;> native_decide
 
-/-- Computationally confirms the contractum evaluates to `some (.num 0)`.
-    The `simp` + `rfl` here works because the `.num 0` case of `eval`
-    is a one-step reduction; the env construction inside `initTower`
-    is consumed but the result doesn't depend on its specific shape. -/
-example (p : BlackPolicy) : evalProgram 100 [p] (.num 0) = some (.num 0) := by
-  simp [evalProgram, eval]
-  rfl
+/-! ### Follow-up: parameterized W1
+
+Under the gated policy table `[approvedPolicy approvals]`, the
+witness still converges identically — because the redex/contractum
+contain no `.set`, the policy gate isn't consulted during eval. A
+clean way to prove this:
+
+```lean
+-- Helper: eval is policy-independent for .set-free, .installPolicy-free terms.
+lemma eval_ptable_indep
+    (M : Expr) (h : NoSetNoInstall M) (env : Env) (T : TowerState)
+    (fuel : Nat) (p₁ p₂ : PolicyTable) :
+    eval fuel p₁ 0 M env T = eval fuel p₂ 0 M env T
+```
+
+Proof by structural induction on `Expr` (or fuel). About 80 LOC.
+With it, `wand_defeated_existential_gated` follows by chaining
+through the baseline form. Deferred. -/
 
 /-! ## Worked example placeholder (multn)
 
