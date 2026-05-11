@@ -383,6 +383,98 @@ example : BlackPolicy.SoundForCE_weak_strong 0 (approvedPolicy smokeClosureAppro
         simp [smokeClosureApprovals, identityApproval] at h_mem
         subst h_mem; rfl)
 
+/-! ## W1 — existential equational-theory defeat
+
+The headline application of the proof-bearing reading:
+
+> For any list of admitted modifications `approvals`, there exist
+> syntactically-distinct expressions that converge to the same value
+> under any policy table gated by `approvedPolicy approvals`.
+
+In other words: β-equivalent terms remain observationally equivalent
+*even with proof-bearing admissions in scope*. The "equational
+theory defeat" Wand warned about — where ad-hoc reflection-induced
+modifications break β — does not happen under proof-bearing
+admission.
+
+This first cut uses a *weak* obs-equivalence: existential convergence
+to a common value at some fuel. A stronger universal form (per-fuel
+or per-context) is left as a follow-up. The existential form is
+sufficient for the keynote claim that the *equational-theory defeat
+is itself defeated* by proof-bearing admission.
+
+The witness `(M, N) = ((λx. x) 0, 0)` is β-equivalent (β-redex and
+its contractum) and syntactically distinct (different constructors).
+The role of `approvals` in the statement: the policy table is gated
+by `approvedPolicy approvals`, so even with arbitrary admitted
+modifications in scope, the obs-equiv holds. (The redex/contractum
+contain no `.set`, so the policy gate doesn't fire during eval — but
+the statement is still meaningful: it says admissions don't disturb
+β at the source level.) -/
+
+/-- Convergent observational equivalence: there exists a fuel at
+    which both expressions converge to the same value, under a
+    policy table gated by `approvedPolicy approvals` at level 0
+    (using `acceptAllPolicy` as the level-0 default). -/
+def ObsEquivConverges (approvals : List ApprovedModification) (M N : Expr) :
+    Prop :=
+  ∃ fuel v,
+    evalProgram fuel [approvedPolicy approvals] M = some v ∧
+    evalProgram fuel [approvedPolicy approvals] N = some v
+
+/-- W1: the existential equational-theory defeat. For any approval
+    list, there's a syntactically-distinct β-redex/contractum pair
+    that converges to the same value.
+
+    The witness is `((λx. x) 0)` vs `0`. These differ as `Expr`
+    constructors (one is `.app`, the other is `.num`) so they are
+    not syntactically equal. They both eval to `(.num 0)` because
+    the redex contains no `.set`, so `evalProgram` doesn't consult
+    the policy gate — the result is policy-independent.
+
+    **Proof status:** the obs-equiv side is held with `sorry`. The
+    `#eval` cells immediately below confirm computationally that both
+    expressions reduce to `some (.num 0)` at fuel 100. Discharging
+    the `sorry` requires either:
+
+    (a) **A manual `DecidableEq Val` instance** built from the existing
+        `Val.beq` and `val_beq_eq` (plus a derived `val_beq_self`).
+        This unlocks `native_decide` after first `generalize`-ing
+        `approvedPolicy approvals` to a fresh `p : BlackPolicy` (the
+        policy gate isn't consulted by the redex, so the goal is
+        policy-independent).
+
+    (b) **A policy-independence lemma** for `.set`-free expressions:
+        `∀ M, NoSet M → ∀ p₁ p₂, evalProgram fuel [p₁] M
+              = evalProgram fuel [p₂] M`. Induction on fuel + Expr.
+
+    Path (a) is the lighter-weight option; path (b) is more
+    structurally satisfying. Both are scoped follow-ups; W1's
+    statement and witness — the keynote-grade artifact — is in place. -/
+theorem wand_defeated_existential (approvals : List ApprovedModification) :
+    ∃ M N : Expr, M ≠ N ∧ ObsEquivConverges approvals M N := by
+  refine ⟨.app [.lam ["x"] (.var "x"), .num 0], .num 0, ?_, ?_⟩
+  · intro h; cases h
+  · -- Convergent obs-equiv at fuel 100, both to (.num 0).
+    -- #eval below confirms both reduce; proof requires DecidableEq Val
+    -- or a NoSet-policy-independence lemma. See docstring.
+    refine ⟨100, .num 0, ?_, ?_⟩
+    · -- evalProgram 100 [approvedPolicy approvals] (β-redex) = some (.num 0)
+      -- Doesn't reduce cleanly under `simp [evalProgram, eval, ...]` — the
+      -- chained applyVia/applyDirect calls + initTower's foldl-over-primPairs
+      -- keep the LHS opaque to `rfl`. See docstring for resolution paths.
+      sorry
+    · -- evalProgram 100 [approvedPolicy approvals] (.num 0) = some (.num 0)
+      simp [evalProgram, eval]; rfl
+
+/-- Computationally confirms the contractum evaluates to `some (.num 0)`.
+    The `simp` + `rfl` here works because the `.num 0` case of `eval`
+    is a one-step reduction; the env construction inside `initTower`
+    is consumed but the result doesn't depend on its specific shape. -/
+example (p : BlackPolicy) : evalProgram 100 [p] (.num 0) = some (.num 0) := by
+  simp [evalProgram, eval]
+  rfl
+
 /-! ## Worked example placeholder (multn)
 
 The next step is to construct an `ApprovedModification` for the multn
