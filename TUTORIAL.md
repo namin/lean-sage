@@ -9,7 +9,7 @@ understand:
   `BlackPolicy` interface.
 - What `CE_weak_strong` is and why we needed it.
 - How to construct an approval (the identity case, two flavors).
-- The keynote-grade W1 theorem and what it actually claims.
+- The W1 convergence statements and what they actually claim.
 - What's still open and where to start.
 
 If you want the architectural rationale instead, read
@@ -91,7 +91,7 @@ runtime gate is sound for `CE_weak_strong` at that level. Every
 admission has a `CE_weak_strong` witness derivable from the matching
 approval's `proof` field.
 
-## 2½. How it slots into the existing runtime
+## 3. How it slots into the existing runtime
 
 This is the part of the story easiest to miss reading
 `ProofBased.lean` in isolation: **`approvedPolicy` is just a
@@ -153,7 +153,7 @@ Scene 2: proof-bearing admission — non-matching mod REFUSED
 That's the full integration. The next sections explain how the proof
 field is constructed.
 
-## 3. Why `CE_weak_strong`?
+## 4. Why `CE_weak_strong`?
 
 `Policies.lean` already defines `CE_weak` — a per-level
 conservative-extension predicate. But it quantifies over test states
@@ -184,7 +184,7 @@ There's a trivial weakening `CE_weak_to_strong : CE_weak → CE_weak_strong`
 structural-policy machinery feed into the new predicate without
 rework.
 
-## 4. Constructing your first approval (vacuous)
+## 5. Constructing your first approval (vacuous)
 
 The simplest possible `CE_weak_strong` proof: the identity modification
 at a `.num n` value. Calling `.num n` as base-apply hits
@@ -231,7 +231,7 @@ example : approvedPolicy smokeIdentityApprovals
 This is the "plumbing smoke" — it validates that the kernel really does
 accept a hand-built `CE_weak` term and pipe it through the policy.
 
-## 5. A more substantive approval (closure identity)
+## 6. A more substantive approval (closure identity)
 
 `CE_weak_refl` generalizes the identity case to any value `v` — but
 the proof is no longer vacuous. The proof picks `(fuel', T'', r') :=
@@ -287,11 +287,15 @@ non-`.builtinBaseApply` case). The arity check, foldl alloc, and body
 eval all run — but since `new = old = v`, the call is its own
 conservative extension.
 
-## 6. The keynote-grade theorem (W1)
+## 7. W1: convergent obs-equivalence under proof-bearing admission
 
-The proof-bearing reading defeats the equational-theory disaster:
-β-equivalent terms remain observationally equivalent even with
-proof-bearing admissions in scope.
+A weak existential observational equivalence: under proof-bearing
+admission, there exist syntactically-distinct expressions that
+converge to the same value. This is a convergent form (same eval
+result at some fuel), not full contextual equivalence over all
+eval contexts. It is the easiest piece of the Wand-defeat story
+to mechanize directly; the contextual lift is informal but
+substantive (see "What's still open").
 
 ```lean
 def ObsEquivConverges (M N : Expr) : Prop :=
@@ -317,10 +321,10 @@ that admissions are non-disturbing; it doesn't claim the admissions
 participate in the computation.
 
 **Why `[acceptAllPolicy]` and not `[approvedPolicy approvals]`**:
-`native_decide` needs a closed term to compile. Strengthening to the
-gated form needs a separate policy-independence lemma for `.set`-free
-expressions — about 80 LOC of structural induction. Documented as a
-follow-up in `ProofBased.lean`.
+`native_decide` needs a closed term to compile. The strengthening to
+the gated form, with the β-redex witness preserved, is
+`wand_defeated_existential_gated_beta` in §9 below, bridged through
+the `AllPureIndep` policy-independence lemma.
 
 **The DecidableEq machinery**: `native_decide` for `Option Val`
 equality requires `DecidableEq Val`. Lean 4 doesn't auto-derive
@@ -329,7 +333,7 @@ so `ProofBased.lean` builds the instance manually from the existing
 `Val.beq` + `val_beq_eq` (in `Black.lean`) plus a freshly-proved
 mutual reflexivity (`val_beq_self`, `expr_beq_self`, `env_beq_self`).
 
-## 7. The multn approval
+## 8. The multn approval
 
 The headline worked example: an `ApprovedModification` for the multn
 closure, constructed by invoking
@@ -376,12 +380,12 @@ Scene 3: multn approval constructs + matches
   OK  multnApproval refuses non-multn newVal: expected false, got false
 ```
 
-The "admits" line is the keynote-grade evidence: the kernel
+The "admits" line is the evidence the abstract names: the kernel
 type-checked the `CE_weak_strong` proof (which threads through
 fuel splits and the existing multn soundness theorem), and the
 runtime gate accepts the admission.
 
-## 8. The `Pure` policy-independence lemma + strengthened β-redex W1
+## 9. The `Pure` policy-independence lemma + strengthened β-redex W1
 
 The `AllPureIndep` lemma — proved sorry-free — establishes that
 `eval` (and the mutually-recursive `evalList`/`applyVia`/`applyDirect`)
@@ -417,23 +421,34 @@ theorem wand_defeated_existential_gated_beta
     · simp [evalProgram, eval]; rfl
 ```
 
-The β-redex narrative is now formal: β-equivalent terms remain
-observationally equivalent under arbitrary proof-bearing admission
-policies, with the witness `((λx. x) 0)` vs `.num 0` evaluating
-identically — proved sorry-free.
+The β-redex narrative is now formal in the convergent sense: the
+β-redex `(λx. x) 0` and its contractum `.num 0` evaluate to the
+same value under any gated policy table, proved sorry-free. The
+full contextual lift (∀ context C, evalProgram (C[M]) = evalProgram
+(C[N])) is not formalized — see "What's still open".
 
-## 9. What's still open
+## 10. What's still open
 
-**Scene A (full end-to-end).** Wire `multnApproval` into a runner
-that actually executes `(em (let ((orig base-apply)) (set! base-apply
-multnWrapper)))` with `approvedPolicy [multnApproval]` as the level-1
-gate, observes the admission, and checks that subsequent `(2 3 4)`
-returns `24`. The blocker isn't the proof side (already done) — it's
-runtime-state construction: the admission heap and closure value must
-match the runtime state's heap and the elaborated wrapper value
-exactly, which means computing them from `evalProgram`'s state.
+**The contextual obs-equivalence lift.** The W1 statements in §7 and
+§9 are about convergent obs-equivalence (M and N evaluate to the
+same value at the top level). Full contextual obs-equivalence —
+`∀ C : Expr → Expr, evalProgram (C[M]) = evalProgram (C[N])` — is
+not in Lean. The informal argument lifts cleanly (any admitted
+modification preserves call-trace bisim, so no context can
+distinguish β-equivalent pairs through the gated runtime), but the
+universal quantification over `C` is not yet a theorem.
 
-## 9. Reading order for the source
+**Scene A (full end-to-end multn run).** Wire `multnApproval` into
+a runner that actually executes `(em (let ((orig base-apply))
+(set! base-apply multnWrapper)))` with `approvedPolicy [multnApproval]`
+as the level-1 gate, observes the admission, and checks that
+subsequent `(2 3 4)` returns `24`. The blocker isn't the proof
+side (already done) — it's runtime-state construction: the
+admission heap and closure value must match the runtime state's
+heap and the elaborated wrapper value exactly, which means
+computing them from `evalProgram`'s state.
+
+## 11. Reading order for the source
 
 If you want to dig into `LeanBlack/ProofBased.lean`, the file is
 already structured top-to-bottom for sequential reading:
@@ -466,7 +481,7 @@ already structured top-to-bottom for sequential reading:
     `valToList_PureValList`, `applyPrim_PureVal`), `AllPureIndep`
     statement, `allPureIndep_zero` (base), `allPureIndep_succ`
     (inductive step), `allPureIndep` (wrapper),
-    `evalProgram_pure_indep`, and the keynote-grade
+    `evalProgram_pure_indep`, and
     `wand_defeated_existential_gated_beta` (β-redex witness under
     `[approvedPolicy approvals]`).
 16. **Multn approval**: `InstallFacts.heap_extend` (via
