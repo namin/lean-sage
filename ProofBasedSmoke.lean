@@ -406,6 +406,110 @@ def test_logging_distinct_from_multn : Bool :=
   -- multn closure (different then-branch). Confirm `Val.beq`-distinct.
   ! Val.beq loggingMultnClosure sampleMultnClosure
 
+/-! ## Scene 7: cross-level approval — proof-based at level 2
+
+    `multnApproval` parameterizes on `level`, so the same proof
+    template works at any tower level. Here we instantiate the
+    approval at **level 2** — gating a `.set` that mutates level-2's
+    `base-apply` (which in turn affects level-1's apply-dispatch via
+    the cross-level cascade).
+
+    The architectural claim: proof-based admission is uniform across
+    the tower. The soundness theorem applies at every level. A
+    policy table can hold multiple `approvedPolicy`s — one per level —
+    each gating modifications at the level it's installed at.
+
+    We demonstrate:
+    - `multnApproval 2 ...` constructs (the kernel accepts the
+      `CE_weak_strong 2` proof).
+    - `approvedPolicy_soundForCE_weak_strong 2` applies to the
+      level-2 approval list.
+    - The runtime gate matches a level-2 multn `.set`.
+
+    A natural multi-level table — index 0 admits at level 1, index 1
+    admits at level 2 — is also exercised. A real tower run wiring
+    both gates would need approvals matching the runtime heap state
+    precisely; here we verify the static admission logic. -/
+
+/-- Same sample state, but level := 2. -/
+def sampleAdmitCtxLevel2 : MutationCtx :=
+  { target := "base-apply", heap := sampleAdmitHeap,
+    env := sampleAdmitCenv, metaEnv := .nil, index := 0, level := 2 }
+
+theorem sample_multn_admit_level2 :
+    multnExactPolicy sampleAdmitCtxLevel2 .builtinBaseApply sampleMultnClosure
+      = true := by
+  native_decide
+
+/-- The multn approval at level 2. Same proof template as
+    `sampleMultnApproval`, instantiated at a different level. The
+    kernel accepts `CE_weak_strong 2 sampleAdmitHeap .builtinBaseApply
+    sampleMultnClosure`. -/
+def sampleMultnApprovalLevel2 : ApprovedModification :=
+  multnApproval 2 sampleAdmitHeap sampleAdmitCenv .nil 0
+    sampleMultnClosure sample_multn_admit_level2
+
+def sampleMultnApprovalsLevel2 : List ApprovedModification :=
+  [sampleMultnApprovalLevel2]
+
+/-- The level-2 approval list is sound at level 2. -/
+example :
+    BlackPolicy.SoundForCE_weak_strong 2
+      (approvedPolicy sampleMultnApprovalsLevel2) := by
+  apply approvedPolicy_soundForCE_weak_strong
+  intro am h_mem
+  simp [sampleMultnApprovalsLevel2, sampleMultnApprovalLevel2,
+        multnApproval] at h_mem
+  subst h_mem; rfl
+
+def test_multn_admitted_at_level2 : Bool :=
+  approvedPolicy sampleMultnApprovalsLevel2 sampleAdmitCtxLevel2
+    .builtinBaseApply sampleMultnClosure
+
+/-- A level-1 ctx is NOT admitted by the level-2 approval list (level
+    mismatch — `matches` checks `am.level = ctx.level`). -/
+def test_level2_approval_refuses_level1_ctx : Bool :=
+  approvedPolicy sampleMultnApprovalsLevel2 sampleAdmitCtx
+    .builtinBaseApply sampleMultnClosure
+
+/-! ### Multi-level policy table
+
+    A policy table with one `approvedPolicy` per level. Index 0
+    admits at level 1; index 1 admits at level 2. Installed in the
+    tower via `(em (installPolicy 0))` and
+    `(em (em (installPolicy 1)))`. -/
+
+def crossLevelTable : PolicyTable :=
+  [approvedPolicy sampleMultnApprovals,       -- level 1
+   approvedPolicy sampleMultnApprovalsLevel2] -- level 2
+
+/-- The level-1 entry is sound at level 1; the level-2 entry is
+    sound at level 2. Each composed independently. -/
+example :
+    BlackPolicy.SoundForCE_weak_strong 1
+      (crossLevelTable[0]'(by simp [crossLevelTable])) := by
+  apply approvedPolicy_soundForCE_weak_strong
+  intro am h_mem
+  simp [sampleMultnApprovals, sampleMultnApproval, multnApproval] at h_mem
+  subst h_mem; rfl
+
+example :
+    BlackPolicy.SoundForCE_weak_strong 2
+      (crossLevelTable[1]'(by simp [crossLevelTable])) := by
+  apply approvedPolicy_soundForCE_weak_strong
+  intro am h_mem
+  simp [sampleMultnApprovalsLevel2, sampleMultnApprovalLevel2,
+        multnApproval] at h_mem
+  subst h_mem; rfl
+
+def test_crosslevel_level1_admits : Bool :=
+  approvedPolicy sampleMultnApprovals sampleAdmitCtx
+    .builtinBaseApply sampleMultnClosure
+
+def test_crosslevel_level2_admits : Bool :=
+  approvedPolicy sampleMultnApprovalsLevel2 sampleAdmitCtxLevel2
+    .builtinBaseApply sampleMultnClosure
+
 def main : IO Unit := do
   IO.println "Scene 1: proof-bearing admission — identity mod ADMITTED"
   runOne "(em (set! base-apply base-apply)) ⇒ bool(true)"
@@ -439,3 +543,9 @@ def main : IO Unit := do
   IO.println "Scene 6: custom modification (logging-multn) — same template, novel mod"
   IO.println s!"  {if test_logging_admitted then "OK " else "XX "} logging-multn admits via multnApproval: expected true, got {test_logging_admitted}"
   IO.println s!"  {if test_logging_distinct_from_multn then "OK " else "XX "} logging closure distinct from canonical multn (Val.beq false): expected true, got {test_logging_distinct_from_multn}"
+  IO.println ""
+  IO.println "Scene 7: cross-level — proof-based admission at level 2"
+  IO.println s!"  {if test_multn_admitted_at_level2 then "OK " else "XX "} multn approval at level 2 admits level-2 ctx: expected true, got {test_multn_admitted_at_level2}"
+  IO.println s!"  {if test_level2_approval_refuses_level1_ctx then "XX " else "OK "} level-2 approval REFUSES level-1 ctx (level mismatch): expected false, got {test_level2_approval_refuses_level1_ctx}"
+  IO.println s!"  {if test_crosslevel_level1_admits then "OK " else "XX "} multi-level table index 0 admits at level 1: expected true, got {test_crosslevel_level1_admits}"
+  IO.println s!"  {if test_crosslevel_level2_admits then "OK " else "XX "} multi-level table index 1 admits at level 2: expected true, got {test_crosslevel_level2_admits}"

@@ -21,7 +21,7 @@ If you want the architectural rationale instead, read
 lake build                    # builds the library + all three exes
 lake exe smoke                # 8/8  — structural-policy smoke
 lake exe demos                # 29/29 — reflection demos
-lake exe proofBasedSmoke      # 14/14 — proof-based integration scenes
+lake exe proofBasedSmoke      # 18/18 — proof-based integration scenes
 ```
 
 Proof-based admission lives in two files:

@@ -30,6 +30,7 @@ a hands-on walkthrough.
 | **Scene B (custom modification)** | **shipped** — `loggingMultnApproval` in `ProofBasedSmoke.lean` Scene 6; same multn proof template applied to a closure with side effects |
 | **Scene C (compile-time refusal)** | **shipped** — `ProofBasedSmoke.lean` Scene 4: doubling wrapper refused at runtime, documented compile-time-failure block |
 | **Verified compose** | **shipped** — `ProofBasedSmoke.lean` Scene 5: `[identity, multn]` coexist, soundness proved |
+| **Cross-level approval (level 2)** | **shipped** — `ProofBasedSmoke.lean` Scene 7: `multnApproval` at level 2, multi-level policy table with per-level soundness |
 | W2 / W3 | out of scope; future work |
 
 All deferred items have file/line pointers and effort estimates in
