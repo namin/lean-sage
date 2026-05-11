@@ -5,10 +5,11 @@ proved governance coherence) and [`lean-green`](../lean-green/) (Black-faithful
 heap+closure+`set!` interpreter with CakeML-style value bisimulation).
 
 **Status: 0 sorries.** ~14.5k LOC of library (8 files in `LeanBlack/`)
-+ ~900 LOC of demo executables. Smoke 8/8 passing. Demos 29/29
-passing across 12 scenes. `proofBasedSmoke` 6/6 passing across 3
-scenes (identity admit, identity refuse, multn approval). All
-headline theorems proved.
++ ~1100 LOC of demo executables. Smoke 8/8 passing. Demos 29/29
+passing across 12 scenes. `proofBasedSmoke` 14/14 passing across 6
+scenes (identity admit, identity refuse, multn approval, disaster
+demo, verified compose, custom modification). All headline theorems
+proved.
 
 ## What this is
 
@@ -136,7 +137,7 @@ consistent with lean-green (one heap, level-uniform allocation discipline).
 | `ProofBased.lean` | 806 | Proof-based admission. `DecidableEq` for Val/Expr/Env (mutual `*_beq_self` + instance derivation from existing `*_beq_eq`). `HeapPrefix` predicate + lemmas (`length_le`, `refl`, `trans`, `getElem?`). `CE_weak_strong` predicate (with content-prefix premise) + `CE_weak_to_strong` weakening + `BlackPolicy.SoundForCE_weak_strong` abbrev. `ApprovedModification` structure (proof field is `CE_weak_strong`-typed; matches checks content-prefix). `approvedPolicy` runtime gate. `structural_policy_yields_approval`. `CE_weak_strong_heap_mono`, `approvedPolicy_soundForCE_weak_strong` (headline soundness). `CE_weak_num_identity` + `numIdentityApproval` (vacuous identity). `callAsBaseApply_preserves` + `CE_weak_refl` + `identityApproval` (closure-identity). `ObsEquivConverges` + `wand_defeated_existential` (W1, the existential equational-theory defeat, proved sorry-free via `native_decide`). `InstallFacts.heap_extend` via `OrigBoundIn_heap_extend` + `NumQBoundIn_heap_extend`, `applyDirect_prim_fuel_bump`, `callAsBaseApply_one_builtin_succeeds_implies_prim`, `multnApproval` (the worked multn case, proved sorry-free). |
 | `Smoke.lean` | 176 | 4 scenes, 8 tests. |
 | `Demos.lean` | 508 | 12 demos, 29 tests. Doubling, identity, tripler, install-composition (multn-then-double, double-then-multn), three-level meta-meta, constant wrapper, inspection (return op/args), self-modifying wrapper, lazy multn (adaptive), three-level governance, selective fail. |
-| `ProofBasedSmoke.lean` | 207 | 3 scenes, 6 tests. Integration of `approvedPolicy` with the tower runtime: admit (identity mod) + refuse (non-matching mod), both checking arithmetic preservation; multn approval constructs and matches admit/refuse. |
+| `ProofBasedSmoke.lean` | 441 | 6 scenes, 14 tests. Identity admit + arithmetic preservation; non-matching mod refuse; multn approval constructs + matches; disaster demo (doubling wrapper refused, with/without governance contrast); verified compose ([identity, multn] coexist, soundness proved); custom modification (logging-multn variant admitted via same multnApproval template). |
 | `DESIGN.md` | — | Architectural rationale (the structural-policy half), decisions, scope. |
 | `DESIGN_PROOF.md` | — | Proof-based admission design + status. |
 | `TUTORIAL.md` | — | Hands-on walkthrough of proof-based admission. |
@@ -147,7 +148,7 @@ consistent with lean-green (one heap, level-uniform allocation discipline).
 lake build               # library + all three executables
 lake exe smoke           # 4 scenes, 8 tests
 lake exe demos           # 12 scenes, 29 tests
-lake exe proofBasedSmoke # 3 scenes, 6 tests
+lake exe proofBasedSmoke # 6 scenes, 14 tests
 ```
 
 Pinned to `leanprover/lean4:v4.20.0` via `lean-toolchain` (matches lean-green).

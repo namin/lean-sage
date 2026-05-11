@@ -435,3 +435,7 @@ def main : IO Unit := do
   IO.println s!"  {if test_composed_admits_identity_at_1 then "OK " else "XX "} composed list admits identity at level 1: expected true, got {test_composed_admits_identity_at_1}"
   IO.println s!"  {if test_composed_admits_multn then "OK " else "XX "} composed list admits multn at level 1: expected true, got {test_composed_admits_multn}"
   IO.println s!"  {if test_composed_refuses_doubling then "XX " else "OK "} composed list refuses doubling: expected false, got {test_composed_refuses_doubling}"
+  IO.println ""
+  IO.println "Scene 6: custom modification (logging-multn) — same template, novel mod"
+  IO.println s!"  {if test_logging_admitted then "OK " else "XX "} logging-multn admits via multnApproval: expected true, got {test_logging_admitted}"
+  IO.println s!"  {if test_logging_distinct_from_multn then "OK " else "XX "} logging closure distinct from canonical multn (Val.beq false): expected true, got {test_logging_distinct_from_multn}"
