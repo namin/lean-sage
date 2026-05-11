@@ -381,21 +381,48 @@ type-checked the `CE_weak_strong` proof (which threads through
 fuel splits and the existing multn soundness theorem), and the
 runtime gate accepts the admission.
 
-## 8. What's still open
+## 8. The `Pure` policy-independence lemma + strengthened β-redex W1
 
-**Parameterized W1.** Strengthen `wand_defeated_existential` to use
-`[approvedPolicy approvals]` instead of `[acceptAllPolicy]` in the
-policy table. Needs a `NoSet`-policy-independence lemma:
+The `AllPureIndep` lemma — proved sorry-free — establishes that
+`eval` (and the mutually-recursive `evalList`/`applyVia`/`applyDirect`)
+are policy-table-independent for `Pure` expressions in a `PureHeap`
+context. `Pure` rules out `.set` and `.installPolicy`; everything
+else (including `.em`/`.app`/`.letE`/`.primApp`/`.seq`) thread the
+policy without consulting it.
 
 ```lean
-lemma eval_ptable_indep
-    (M : Expr) (h : NoSetNoInstall M)
-    (env : Env) (T : TowerState) (fuel : Nat)
-    (p₁ p₂ : PolicyTable) :
-    eval fuel p₁ 0 M env T = eval fuel p₂ 0 M env T
+def Pure : Expr → Bool := ...        -- no .set, no .installPolicy
+def PureVal : Val → Bool := ...      -- closures have Pure bodies; .cons recurses
+def PureHeap (h : Heap) : Prop := ∀ i v, h[i]? = some v → PureVal v = true
+
+theorem allPureIndep : ∀ fuel, AllPureIndep fuel  -- joint induction on fuel
 ```
 
-By structural induction on `Expr` (or fuel). ~80 LOC.
+The proof is ~1000 LOC of joint induction with auxiliary preservation
+lemmas (`PureHeap_append`, `materialize_preserves_PureHeap`,
+`Heap_alloc_preserves_PureHeap`, `foldl_allocStep_preserves_PureHeap`,
+`PureVal_listToVal`, `valToList_PureValList`, `applyPrim_PureVal`).
+With it in hand, **β-redex W1 strengthens**:
+
+```lean
+theorem wand_defeated_existential_gated_beta
+    (approvals : List ApprovedModification) :
+    ∃ M N : Expr, M ≠ N ∧ ObsEquivConvergesGated approvals M N := by
+  refine ⟨.app [.lam ["x"] (.var "x"), .num 0], .num 0, ?_, ?_⟩
+  · intro h; cases h
+  · refine ⟨100, .num 0, ?_, ?_⟩
+    · rw [evalProgram_pure_indep _ (by decide) 100
+            [approvedPolicy approvals] [acceptAllPolicy]]
+      native_decide
+    · simp [evalProgram, eval]; rfl
+```
+
+The β-redex narrative is now formal: β-equivalent terms remain
+observationally equivalent under arbitrary proof-bearing admission
+policies, with the witness `((λx. x) 0)` vs `.num 0` evaluating
+identically — proved sorry-free.
+
+## 9. What's still open
 
 **Scene A (full end-to-end).** Wire `multnApproval` into a runner
 that actually executes `(em (let ((orig base-apply)) (set! base-apply
@@ -428,8 +455,21 @@ already structured top-to-bottom for sequential reading:
 11. `callAsBaseApply_preserves` + `CE_weak_refl` + `identityApproval`
     (closure-identity).
 12. Closure-identity demo (`trivialClosure`, `smokeClosureApprovals`).
-13. `ObsEquivConverges` + `wand_defeated_existential` (W1).
-14. **Multn approval**: `InstallFacts.heap_extend` (via
+13. `ObsEquivConverges` + `wand_defeated_existential` (W1, baseline).
+14. `ObsEquivConvergesGated` + `wand_defeated_existential_gated`
+    (W1, gated, `.ifte` witness).
+15. **`Pure` policy-independence**: `Pure`/`PureVal`/`PureHeap`
+    predicates, auxiliary preservation lemmas
+    (`PureHeap_append`, `freshLevelEnv_preserves_PureHeap`,
+    `materialize_preserves_PureHeap`, `Heap_alloc_preserves_PureHeap`,
+    `foldl_allocStep_preserves_PureHeap`, `PureVal_listToVal`,
+    `valToList_PureValList`, `applyPrim_PureVal`), `AllPureIndep`
+    statement, `allPureIndep_zero` (base), `allPureIndep_succ`
+    (inductive step), `allPureIndep` (wrapper),
+    `evalProgram_pure_indep`, and the keynote-grade
+    `wand_defeated_existential_gated_beta` (β-redex witness under
+    `[approvedPolicy approvals]`).
+16. **Multn approval**: `InstallFacts.heap_extend` (via
     `OrigBoundIn_heap_extend` and `NumQBoundIn_heap_extend`),
     `applyDirect_prim_fuel_bump`,
     `callAsBaseApply_one_builtin_succeeds_implies_prim`, and

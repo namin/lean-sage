@@ -25,7 +25,7 @@ a hands-on walkthrough.
 | Identity demos (vacuous + closure) | shipped |
 | **Multn approval (worked example)** | **proved sorry-free** |
 | W1 (existential equational defeat) | **proved** (baseline-policy form) |
-| **Parameterized W1 (under `[approvedPolicy approvals]`)** | **proved** (different witness; `NoSet` policy-independence lemma still deferred for β-redex witness) |
+| Parameterized W1 (under `[approvedPolicy approvals]`, `.ifte` witness) | **proved** (`wand_defeated_existential_gated`) |
 | Scene A (end-to-end with multn) | partial — `multnApproval` constructs + matches verified in `ProofBasedSmoke.lean` Scene 3 |
 | **Scene B (custom modification)** | **shipped** — `loggingMultnApproval` in `ProofBasedSmoke.lean` Scene 6; same multn proof template applied to a closure with side effects |
 | **Scene C (compile-time refusal)** | **shipped** — `ProofBasedSmoke.lean` Scene 4: doubling wrapper refused at runtime, documented compile-time-failure block |

@@ -134,7 +134,7 @@ consistent with lean-green (one heap, level-uniform allocation discipline).
 | `Frame.lean` | 4948 | `PolicyRespectsBisimT`, `PolicyTableRespectsBisimT`. Single-side materialize preservation lemmas. Tower-aware `WFCtxT` (13 fields), `TowerCross` (12 fields), `FrameStmtT`, `frame_tower` (the framing theorem, all 4 mutual clauses, all 13 expression cases proved). `all_preserves_envAt` (mutual conjunction). `heap_mono` (4-way mutual induction over fuel). `policy_shift_preserved` (4-way mutual). `shift_respect` (the 4-way commutativity proof). `applyDirect_heap_extend_weak` (prefix-extension, derived via `shift_respect` + `frame_tower` self-bisim). |
 | `Soundness.lean` | 1990 | `TowerCE`, `SafeEvolution`. `TowerCE` helpers (`refl`/`trans`/`of_heap_eq`/`of_heap_extends`/`lift_source`/`weaken_h_ref`). `Expr.IsAtomic` and `eval_atomic_T_unchanged`. `HeapValid_alloc_one`, `EnvValid_cons_alloc`, self-invariant preservation lemmas. `safeEvolution_necessary` (concrete counterexample). `all_tower_safe` (the 4-way mutual safety theorem). `eval_tower_safe` (wrapper). |
 | `Policies.lean` | 611 | Tower-aware `callAsBaseApply`, per-level `CE`/`CE_weak`, `BlackPolicy.SoundForCE`/`_weak`, `numGuardPolicy`/`multnExactPolicy` definitions + shape lemmas, `verifiedTable`. `OrigBoundIn`/`NumQBoundIn`/`InstallFacts`/`RuntimeWF` (tower-aware install-protocol structures). `multnExactPolicy_implies_InstallFacts` (bridge lemma). `multn_closure_body_unfolds` (closure-body trace). `multnExact_CE_num_case_vacuous` (vacuous numerical case). `multnExact_CE_nonnum_case` (substantive non-numerical case via `applyDirect_heap_extend_weak`). `multnExact_soundForCE_first_install_tower` (the headline). |
-| `ProofBased.lean` | 806 | Proof-based admission. `DecidableEq` for Val/Expr/Env (mutual `*_beq_self` + instance derivation from existing `*_beq_eq`). `HeapPrefix` predicate + lemmas (`length_le`, `refl`, `trans`, `getElem?`). `CE_weak_strong` predicate (with content-prefix premise) + `CE_weak_to_strong` weakening + `BlackPolicy.SoundForCE_weak_strong` abbrev. `ApprovedModification` structure (proof field is `CE_weak_strong`-typed; matches checks content-prefix). `approvedPolicy` runtime gate. `structural_policy_yields_approval`. `CE_weak_strong_heap_mono`, `approvedPolicy_soundForCE_weak_strong` (headline soundness). `CE_weak_num_identity` + `numIdentityApproval` (vacuous identity). `callAsBaseApply_preserves` + `CE_weak_refl` + `identityApproval` (closure-identity). `ObsEquivConverges` + `wand_defeated_existential` (W1, the existential equational-theory defeat, proved sorry-free via `native_decide`). `InstallFacts.heap_extend` via `OrigBoundIn_heap_extend` + `NumQBoundIn_heap_extend`, `applyDirect_prim_fuel_bump`, `callAsBaseApply_one_builtin_succeeds_implies_prim`, `multnApproval` (the worked multn case, proved sorry-free). |
+| `ProofBased.lean` | 1898 | Proof-based admission. `DecidableEq` for Val/Expr/Env (mutual `*_beq_self` + instance derivation from existing `*_beq_eq`). `HeapPrefix` predicate + lemmas (`length_le`, `refl`, `trans`, `getElem?`). `CE_weak_strong` predicate (with content-prefix premise) + `CE_weak_to_strong` weakening + `BlackPolicy.SoundForCE_weak_strong` abbrev. `ApprovedModification` structure (proof field is `CE_weak_strong`-typed; matches checks content-prefix). `approvedPolicy` runtime gate. `structural_policy_yields_approval`. `CE_weak_strong_heap_mono`, `approvedPolicy_soundForCE_weak_strong` (headline soundness). `CE_weak_num_identity` + `numIdentityApproval` (vacuous identity). `callAsBaseApply_preserves` + `CE_weak_refl` + `identityApproval` (closure-identity). `ObsEquivConverges` + `wand_defeated_existential` (W1, baseline). `ObsEquivConvergesGated` + `wand_defeated_existential_gated` (W1, gated, `.ifte` witness). **`Pure`/`PureVal`/`PureHeap` predicates + auxiliary preservation lemmas (`PureHeap_append`, `materialize_preserves_PureHeap`, `Heap_alloc_preserves_PureHeap`, `foldl_allocStep_preserves_PureHeap`, `applyPrim_PureVal`, `valToList_PureValList`) + `AllPureIndep` (mutual policy-independence lemma, proved sorry-free via joint induction on fuel) + `evalProgram_pure_indep` + `wand_defeated_existential_gated_beta`** (β-redex W1 under the gated policy table, the keynote-grade narrative formalized). `InstallFacts.heap_extend` via `OrigBoundIn_heap_extend` + `NumQBoundIn_heap_extend`, `applyDirect_prim_fuel_bump`, `callAsBaseApply_one_builtin_succeeds_implies_prim`, `multnApproval` (the worked multn case, proved sorry-free). |
 | `Smoke.lean` | 176 | 4 scenes, 8 tests. |
 | `Demos.lean` | 508 | 12 demos, 29 tests. Doubling, identity, tripler, install-composition (multn-then-double, double-then-multn), three-level meta-meta, constant wrapper, inspection (return op/args), self-modifying wrapper, lazy multn (adaptive), three-level governance, selective fail. |
 | `ProofBasedSmoke.lean` | 551 | 7 scenes, 18 tests. Identity admit + arithmetic preservation; non-matching mod refuse; multn approval constructs + matches; disaster demo (doubling wrapper refused, with/without governance contrast); verified compose ([identity, multn] coexist, soundness proved); custom modification (logging-multn variant admitted via same multnApproval template); cross-level approval (multn at level 2, multi-level policy table). |
@@ -203,11 +203,25 @@ level via `(installPolicy n)` exactly like any other policy.
 
 Headline addition: `wand_defeated_existential` — the existential
 equational-theory defeat. β-equivalent terms remain observationally
-equivalent even with proof-based admissions in scope. Proved
-sorry-free via `native_decide` on a baseline policy table.
+equivalent even with proof-based admissions in scope. Three forms,
+all proved sorry-free:
+
+- `wand_defeated_existential` — baseline, `[acceptAllPolicy]` table,
+  β-redex witness, `native_decide`.
+- `wand_defeated_existential_gated` — gated `[approvedPolicy approvals]`,
+  `.ifte`-style witness, `simp + rfl`.
+- `wand_defeated_existential_gated_beta` — **gated `[approvedPolicy
+  approvals]` with the β-redex witness** (the keynote-grade
+  statement), bridged through the `AllPureIndep` policy-independence
+  lemma.
+
+The `AllPureIndep` lemma (also proved sorry-free) establishes that
+`eval` is policy-table-independent for `Pure` expressions
+(no `.set`, no `.installPolicy`) — i.e., reflection-policy choices
+don't affect pure functional code.
 
 ```bash
-lake exe proofBasedSmoke   # 4/4 — integration scenes
+lake exe proofBasedSmoke   # 7 scenes, 18 tests
 ```
 
 See [`DESIGN_PROOF.md`](DESIGN_PROOF.md) for the design and
