@@ -11,12 +11,12 @@ namespace LeanBlack
 /-! # Proof-bearing admission
 
 The `proof-based` branch's contribution: a `.set` admission path that
-takes a *Lean proof of CE_weak* as the certificate, rather than a
-pre-registered structural shape.
+takes a *Lean proof of CE_weak_strong* as the certificate, rather
+than a pre-registered structural shape.
 
 An `ApprovedModification` bundles `(level, oldVal, newVal, heap)`
-with a Lean term of type `CE_weak level heap oldVal newVal`. The
-kernel type-checks the term at construction time; if it doesn't
+with a Lean term of type `CE_weak_strong level heap oldVal newVal`.
+The kernel type-checks the term at construction time; if it doesn't
 type-check, no `ApprovedModification` value exists.
 
 The runtime policy `approvedPolicy` admits a `.set` iff the runtime
@@ -27,20 +27,104 @@ Structural policies from `Policies.lean` (`multnExactPolicy`,
 `numGuardPolicy`) remain useful as *proof templates*: each
 soundness theorem (`multnExact_soundForCE_first_install_tower` etc.)
 is a function from structural admission + side conditions to a
-`CE_weak` proof, which the proposer can use to construct an
+`CE_weak_strong` proof, which the proposer can use to construct an
 `ApprovedModification` for any multn-shape modification without
 hand-writing the bisim case analysis.
+
+## Why `CE_weak_strong` and not `CE_weak`?
+
+`Policies.lean`'s `CE_weak` quantifies over test states `T` with
+only `HeapValid`/`ValValid` shape — no `HeapDeep`, no Shift-respect.
+But the headline soundness theorem
+`multnExact_soundForCE_first_install_tower` *requires* those Deep
+and Shift hypotheses on the test state. So `CE_weak`-shaped
+approvals cannot be constructed by invoking that theorem.
+
+`CE_weak_strong` (below) extends `CE_weak`'s hypothesis chain with
+`HeapDeep`/`ValDeep`/`ListValDeep`/`EnvDeep` and the Shift-respect
+premises. Its conclusion is identical to `CE_weak`'s. Relationship:
+`CE_weak → CE_weak_strong` (trivially — more hypotheses are easier
+to satisfy from a witness side, harder to provide from a consumer
+side; the strong predicate is a weaker property statement).
+
+Consumers of an approval (the runtime gate, the soundness lemma)
+discharge the Deep+Shift hypotheses at admission time, where the
+runner already maintains them as invariants.
 -/
+
+/-! ## CE_weak_strong: CE_weak extended with Deep + Shift hypotheses
+
+The proof-bearing payload for approvals. Same conclusion shape as
+`CE_weak`, but with extra hypotheses on the test state `T`:
+
+- `HeapDeep T.heap`, `ValDeep op T.heap`, `ListValDeep operands T.heap`,
+  and `EnvDeep` at every level.
+- `PolicyTableRespectsShift T.heap.length [op, listToVal operands] ptable`
+  and the per-level analogue.
+
+These match the hypothesis chain of
+`multnExact_soundForCE_first_install_tower`, so the multn proof
+template produces a `CE_weak_strong` directly.
+
+The trivial weakening `CE_weak → CE_weak_strong` (theorem
+`CE_weak_to_strong`) lets the existing identity/structural-policy
+infrastructure feed into the new predicate without rework. -/
+def CE_weak_strong (level : Nat) (h_ref : Heap) (old new : Val) : Prop :=
+  ∀ fuel ptable op operands T r T',
+    h_ref.length ≤ T.heap.length →
+    HeapValid T.heap → ValValid op T.heap → ListValValid operands T.heap →
+    ValValid old T.heap → ValValid new T.heap →
+    PolicyTableRespectsBisimT ptable →
+    (∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p) →
+    (∀ n env, T.envAt? n = some env → EnvValid env T.heap) →
+    (∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p) →
+    (∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap) →
+    -- Deep predicates on the test state:
+    HeapDeep T.heap → ValDeep op T.heap → ListValDeep operands T.heap →
+    (∀ n env, T.envAt? n = some env → EnvDeep env T.heap) →
+    -- Shift-respect on the test state:
+    PolicyTableRespectsShift T.heap.length [op, listToVal operands] ptable →
+    (∀ n p, T.policyAt? n = some p →
+       PolicyRespectsShift T.heap.length [op, listToVal operands] p) →
+    callAsBaseApply fuel ptable level old op operands T = some (r, T') →
+    ∃ fuel' T'' r',
+      callAsBaseApply fuel' ptable level new op operands T = some (r', T'') ∧
+      ValVis_weak r r' T'.heap T''.heap ∧
+      T'.policyAt? level = T''.policyAt? level ∧
+      HeapValid T''.heap ∧
+      T.heap.length ≤ T''.heap.length
+
+/-- `CE_weak` implies `CE_weak_strong`. The strong predicate has more
+    test-state hypotheses, which we simply discard when applying the
+    `CE_weak` witness. -/
+theorem CE_weak_to_strong {level : Nat} {h_ref : Heap} {old new : Val}
+    (h : CE_weak level h_ref old new) :
+    CE_weak_strong level h_ref old new := by
+  intro fuel ptable op operands T r T'
+    h_T_len h_heap h_op h_operands h_old h_new
+    h_ptable h_lvl_pol h_env h_pol h_env_bisim
+    _h_heap_deep _h_op_deep _h_operands_deep _h_env_deep
+    _h_pt_shift _h_pol_shift h_call
+  exact h fuel ptable op operands T r T'
+    h_T_len h_heap h_op h_operands h_old h_new
+    h_ptable h_lvl_pol h_env h_pol h_env_bisim h_call
+
+/-- Soundness predicate for the proof-bearing reading: a policy is
+    `SoundForCE_weak_strong` at `level` if every admission has a
+    `CE_weak_strong` witness. Parallels `BlackPolicy.SoundForCE_weak`
+    in `Policies.lean`. -/
+abbrev BlackPolicy.SoundForCE_weak_strong (level : Nat) (p : BlackPolicy) : Prop :=
+  ∀ ctx old new, p ctx old new = true → CE_weak_strong level ctx.heap old new
 
 /-- A modification approved for installation. The `proof` field is
     the load-bearing certificate: Lean's type checker refuses
-    construction without a valid term of `CE_weak`. -/
+    construction without a valid term of `CE_weak_strong`. -/
 structure ApprovedModification where
   level   : Nat
   heap    : Heap
   oldVal  : Val
   newVal  : Val
-  proof   : CE_weak level heap oldVal newVal
+  proof   : CE_weak_strong level heap oldVal newVal
 
 /-- Boolean match of an approval against a runtime mutation context
     and proposed new value. Uses structural `Val.beq` on `oldVal` and
@@ -83,54 +167,48 @@ approval carries only the `CE_weak` conclusion.
 -/
 
 /-- Convenience: lift a `BlackPolicy.SoundForCE_weak` witness into a
-    statement that the policy is a *correct admission filter* — every
-    `.set` it admits has a `CE_weak` proof available.
-
-    This is the formal statement that structural policies remain
-    sound under the proof-bearing reading: an admission via the
-    structural policy corresponds to an `ApprovedModification` with
-    the policy's soundness theorem providing the proof. -/
+    `CE_weak_strong` proof. Since `CE_weak → CE_weak_strong`, the
+    structural-policy soundness gives us exactly what an approval's
+    `proof` field needs. -/
 theorem structural_policy_yields_approval
     {p : BlackPolicy} {level : Nat}
     (h_sound : p.SoundForCE_weak level)
     (ctx : MutationCtx) (oldVal newVal : Val)
     (h_admit : p ctx oldVal newVal = true) :
-    CE_weak level ctx.heap oldVal newVal :=
-  h_sound ctx oldVal newVal h_admit
+    CE_weak_strong level ctx.heap oldVal newVal :=
+  CE_weak_to_strong (h_sound ctx oldVal newVal h_admit)
 
 /-! ## Soundness of `approvedPolicy`
 
-`approvedPolicy approvals` is `SoundForCE_weak` provided all approvals
-are at the level being checked. The match condition ensures the
-approval's heap is a length-prefix of the runtime heap; the resulting
-`CE_weak` proof is monotone in the reference-heap parameter, so we
-can lift the approval's CE_weak (over `am.heap`) to a CE_weak over
-`ctx.heap`.
+`approvedPolicy approvals` is `SoundForCE_weak_strong` provided all
+approvals are at the level being checked. The match condition ensures
+the approval's heap is a length-prefix of the runtime heap; the
+resulting `CE_weak_strong` proof is monotone in the reference-heap
+parameter, so we can lift the approval's witness (over `am.heap`) to
+one over `ctx.heap`.
 -/
 
-/-- `CE_weak` is monotone in the reference heap: shrinking `h_ref` to
-    any earlier point (heap of equal or shorter length) gives a
-    weaker hypothesis, so the conclusion still holds. Used to lift an
-    approval's CE_weak proof (over `am.heap`, the heap snapshot the
-    proof was constructed against) to a CE_weak over the current
-    runtime heap `ctx.heap`, which is at least as long. -/
-theorem CE_weak_heap_mono
+/-- `CE_weak_strong` is monotone in the reference heap. Used to lift
+    an approval's proof (over `am.heap`, the heap snapshot the proof
+    was constructed against) to one over the current runtime heap
+    `ctx.heap`, which is at least as long. -/
+theorem CE_weak_strong_heap_mono
     {level : Nat} {h₁ h₂ : Heap} {old new : Val}
     (h_le : h₁.length ≤ h₂.length)
-    (h : CE_weak level h₁ old new) :
-    CE_weak level h₂ old new := by
+    (h : CE_weak_strong level h₁ old new) :
+    CE_weak_strong level h₂ old new := by
   intro fuel ptable op operands T r T' h_T_len
   exact h fuel ptable op operands T r T' (Nat.le_trans h_le h_T_len)
 
-/-- The headline: `approvedPolicy approvals` is sound for `CE_weak`
-    at any level whose approvals all bind to that level. The matching
-    approval's `proof` field supplies the CE_weak witness; the
-    heap-length match plus `CE_weak_heap_mono` shifts the reference
-    heap from the approval's snapshot to the runtime heap. -/
-theorem approvedPolicy_soundForCE_weak
+/-- The headline: `approvedPolicy approvals` is sound for
+    `CE_weak_strong` at any level whose approvals all bind to that
+    level. The matching approval's `proof` field supplies the witness;
+    the heap-length match plus `CE_weak_strong_heap_mono` shifts the
+    reference heap from the approval's snapshot to the runtime heap. -/
+theorem approvedPolicy_soundForCE_weak_strong
     (approvals : List ApprovedModification) (level : Nat)
     (h_levels : ∀ am ∈ approvals, am.level = level) :
-    (approvedPolicy approvals).SoundForCE_weak level := by
+    BlackPolicy.SoundForCE_weak_strong level (approvedPolicy approvals) := by
   intro ctx old new h_admit
   unfold approvedPolicy at h_admit
   rw [List.any_eq_true] at h_admit
@@ -144,7 +222,7 @@ theorem approvedPolicy_soundForCE_weak
   subst h_old_eq
   subst h_new_eq
   subst h_level
-  exact CE_weak_heap_mono h_heap_len am.proof
+  exact CE_weak_strong_heap_mono h_heap_len am.proof
 
 /-! ## CE_weak reflexivity (identity modifications)
 
@@ -216,17 +294,17 @@ theorem CE_weak_refl (level : Nat) (h_ref : Heap) (v : Val) :
 
 /-- An `ApprovedModification` for the identity case at any `v` that
     is `ValValid` in the admission heap. The proof field is
-    `CE_weak_refl`. The `ValValid` precondition isn't needed by
-    `CE_weak_refl` itself (which is universally quantified over `T`)
-    — only for documentation that the approval is meaningful at
-    `am.heap`. -/
+    `CE_weak_refl` widened via `CE_weak_to_strong`. The `ValValid`
+    precondition isn't needed by `CE_weak_refl` itself (which is
+    universally quantified over `T`) — only for documentation that
+    the approval is meaningful at `am.heap`. -/
 def identityApproval (level : Nat) (heap : Heap) (v : Val) :
     ApprovedModification :=
   { level   := level
     heap    := heap
     oldVal  := v
     newVal  := v
-    proof   := CE_weak_refl level heap v }
+    proof   := CE_weak_to_strong (CE_weak_refl level heap v) }
 
 /-- The narrower numerical identity. Kept as a convenience (and a
     sanity-check that the more general `identityApproval` agrees on
@@ -268,11 +346,11 @@ example :
         smokeIdentityCtx (.num 42) (.num 7) = false := by
   decide
 
-/-- The policy's soundness follows from `approvedPolicy_soundForCE_weak`
-    once we verify all approvals bind to level 0 — which they do, by
-    construction. -/
-example : (approvedPolicy smokeIdentityApprovals).SoundForCE_weak 0 :=
-  approvedPolicy_soundForCE_weak smokeIdentityApprovals 0
+/-- The policy's soundness follows from
+    `approvedPolicy_soundForCE_weak_strong` once we verify all
+    approvals bind to level 0 — which they do, by construction. -/
+example : BlackPolicy.SoundForCE_weak_strong 0 (approvedPolicy smokeIdentityApprovals) :=
+  approvedPolicy_soundForCE_weak_strong smokeIdentityApprovals 0
     (by intro am h_mem
         simp [smokeIdentityApprovals, numIdentityApproval, identityApproval]
           at h_mem
@@ -299,8 +377,8 @@ example :
         smokeIdentityCtx trivialClosure trivialClosure = true := by
   decide
 
-example : (approvedPolicy smokeClosureApprovals).SoundForCE_weak 0 :=
-  approvedPolicy_soundForCE_weak smokeClosureApprovals 0
+example : BlackPolicy.SoundForCE_weak_strong 0 (approvedPolicy smokeClosureApprovals) :=
+  approvedPolicy_soundForCE_weak_strong smokeClosureApprovals 0
     (by intro am h_mem
         simp [smokeClosureApprovals, identityApproval] at h_mem
         subst h_mem; rfl)
