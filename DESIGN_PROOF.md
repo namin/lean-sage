@@ -9,6 +9,32 @@ attached."
 This document scopes the architectural change, names the load-bearing
 pieces, and flags the open work.
 
+## Status (as of 2026-05-10)
+
+Most of the design has shipped. See [`TUTORIAL.md`](TUTORIAL.md) for
+a hands-on walkthrough.
+
+| Item | Status |
+|---|---|
+| `ApprovedModification` structure | shipped |
+| `approvedPolicy` runtime policy | shipped |
+| `CE_weak_strong` (the proof-bearing predicate) | shipped |
+| `approvedPolicy_soundForCE_weak_strong` (headline soundness) | proved |
+| Identity demos (vacuous + closure) | shipped |
+| Multn approval (worked example) | **deferred** — two concrete blockers |
+| W1 (existential equational defeat) | **proved** (baseline-policy form) |
+| Parameterized W1 (under `[approvedPolicy approvals]`) | deferred — needs `NoSet` policy-independence lemma |
+| Scene A (end-to-end with multn) | deferred (downstream of multn) |
+| Scene B (custom non-multn) | deferred |
+| Scene C (compile-time refusal) | deferred (downstream of Scene A) |
+| W2 / W3 | out of scope; future work |
+
+All deferred items have file/line pointers and effort estimates in
+`LeanBlack/ProofBased.lean`'s docstrings and the *Open work* section
+below.
+
+## Design (original — most of which has shipped)
+
 ## Why
 
 `main`'s admission discipline is **structural**: a `BlackPolicy` is a

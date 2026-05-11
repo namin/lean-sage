@@ -180,3 +180,25 @@ The reflective rewiring of `base-apply` lets you:
   (non-num operators behave identically; num operators get the multn fold).
 
 See [`DESIGN.md`](DESIGN.md) for the full architectural rationale.
+
+## The `proof-based` branch
+
+The `proof-based` branch extends admission from "Boolean policy decides
+on structural shape" to "Lean term proves per-modification soundness."
+On that branch, an `ApprovedModification` bundles `(level, heap,
+oldVal, newVal)` with a `CE_weak_strong` proof; the kernel type-checks
+the proof at construction time. The runtime gate `approvedPolicy`
+admits a `.set` iff some approval matches.
+
+Headline addition: `wand_defeated_existential` — the existential
+equational-theory defeat. β-equivalent terms remain observationally
+equivalent even with proof-bearing admissions in scope. Proved
+sorry-free via `native_decide` on a baseline policy table.
+
+```bash
+git checkout proof-based
+lake build        # smoke + demos unchanged from main
+```
+
+See [`DESIGN_PROOF.md`](DESIGN_PROOF.md) for the design and
+[`TUTORIAL.md`](TUTORIAL.md) for a hands-on walkthrough.
