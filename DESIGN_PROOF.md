@@ -1,13 +1,15 @@
-# DESIGN_PROOF.md — proof-bearing admission
+# DESIGN_PROOF.md — proof-based admission
 
-A design for the `proof-based` branch: extend lean-sage's admission gate
+The design for proof-based admission: extend lean-sage's admission gate
 to accept *per-modification soundness proofs* alongside the proposed
 mutation, so that admission is "kernel type-checks this proof" rather
 than "the mutation matches a structural shape with a meta-theorem
 attached."
 
 This document scopes the architectural change, names the load-bearing
-pieces, and flags the open work.
+pieces, and flags the open work. Proof-based admission is purely
+additive on top of the structural-policy world (the `multnExactPolicy`
+family); both admission paths coexist in the same `PolicyTable`.
 
 ## Status (as of 2026-05-10)
 
@@ -37,13 +39,13 @@ below.
 
 ## Why
 
-`main`'s admission discipline is **structural**: a `BlackPolicy` is a
-Boolean function `MutationCtx → Val → Val → Bool`, and each policy in
-the verified table is paired with a separate soundness theorem
-(`multnExact_soundForCE_first_install_tower`) proving that *admissions
-by that policy* are CE_weak-conservative. To admit a modification the
-proposer must find a pre-existing policy with a soundness theorem
-whose structural shape matches.
+The structural-policy admission discipline (`multnExactPolicy` and
+friends) makes a `BlackPolicy` a Boolean function `MutationCtx → Val
+→ Val → Bool`, and each policy in the verified table is paired with a
+separate soundness theorem (`multnExact_soundForCE_first_install_tower`)
+proving that *admissions by that policy* are CE_weak-conservative. To
+admit a modification the proposer must find a pre-existing policy with
+a soundness theorem whose structural shape matches.
 
 This is "semantic at the meta level, structural at runtime." It
 delivers operational soundness per admission, but it does not deliver
@@ -60,7 +62,7 @@ admissions), but they are no longer the only admission path.
 This is the "proof-theoretic" tier of the keynote's assurance lattice,
 realized concretely.
 
-## What this branch claims
+## What proof-based admission claims
 
 1. **CE_weak as a standalone Lean predicate.** Extract the
    conservative-extension-under-bisimulation property from its current
@@ -86,12 +88,12 @@ realized concretely.
    constructed as an `ApprovedModification` — the soundness field
    either has the wrong type or requires `sorry`. The build refuses.
 6. **W1 (existential equational-theory defeat) as a target theorem.**
-   The proof-bearing hypothesis makes W1 directly tractable: "under
-   any modification admitted via the proof-bearing path, no context
+   The proof-based hypothesis makes W1 directly tractable: "under
+   any modification admitted via the proof-based path, no context
    distinguishes a β-redex from its contractum" — because the proof
    *is* the hypothesis the W1 argument needs. The case-by-case lift
-   from operational to universal that's hard on `main` falls out
-   here.
+   from operational to universal that's hard with structural-only
+   admission falls out here.
 
 ## Architecture
 
@@ -229,18 +231,19 @@ file doesn't compile," not "this run gives the wrong answer."
   goes through Lean's kernel type-checking the proof. This is exactly
   what the keynote's assurance-lattice column means by
   "proof-theoretic."
-- **The disaster demo is sharper than `main`'s.** On `main`, the
-  disaster is "without `multnExactPolicy`, a bad mod gets through" —
-  but the policy world is the safe one. Here the disaster is "without
-  a valid proof, the modification literally won't compile." The
-  failure mode is at the build, not at runtime.
+- **The disaster demo is sharper.** With structural-only admission,
+  the disaster is "without `multnExactPolicy`, a bad mod gets
+  through" — but the policy world is the safe one. With proof-based
+  admission, the disaster is "without a valid proof, the modification
+  literally won't compile." The failure mode is at the build, not at
+  runtime.
 - **W1 becomes provable.** The universal-quantification W1 says ∃
   non-α terms no context distinguishes under any CE_weak-sound
-  admission. The proof-bearing hypothesis *is* the universal: every
+  admission. The proof-based hypothesis *is* the universal: every
   admission carries a CE_weak proof; therefore every admission
   preserves β-behavior; therefore no context built from admitted
   modifications distinguishes a β-redex from its contractum. This is
-  the path the lift on `main` couldn't take.
+  the path that structural-only admission couldn't take.
 
 ## Open work, in order
 
@@ -265,24 +268,16 @@ file doesn't compile," not "this run gives the wrong answer."
 Total: 1–2 focused weeks. Substantially less than the LLM-cascade
 path; LLM proposer can be a later v3 reusing this architecture.
 
-## What this branch does NOT claim
+## What proof-based admission does NOT claim
 
 - **W2 (βη ⊆ ≃_obs).** The βη induction is open; W1 doesn't
   generalize to W2 for free.
-- **W3 (lattice monotonicity).** Comparing different proof-bearing
+- **W3 (lattice monotonicity).** Comparing different proof-based
   admission paths is its own problem; not addressed.
 - **LLM proposer.** Future work; the architecture supports it (the
-  LLM ships the proof along with the modification), but this branch
-  is purely manual.
+  LLM ships the proof along with the modification), but the current
+  implementation is purely manual.
 - **A cleaner statement of `CE_weak_holds`.** The proposed form above
-  is a starting point; finding the right uniform formulation is
-  part of the refactor work.
-
-## Naming
-
-If this lands, possible final names:
-- `lean-back` (continuation of grey/green/sage).
-- `lean-violet` or `lean-rose` (next colors in the spectrum).
-- Keep `lean-sage` and rename the branch to `proof-based` permanently.
-
-Defer until the branch ships.
+  is a starting point; finding the right uniform formulation is part
+  of the refactor work. The actual landed predicate is named
+  `CE_weak_strong` and lives in `LeanBlack/ProofBased.lean`.

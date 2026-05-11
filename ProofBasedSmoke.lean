@@ -1,5 +1,5 @@
 /-
-  Smoke tests for proof-bearing admission (`proof-based` branch).
+  Smoke tests for proof-based admission.
 
   Demonstrates the integration of `approvedPolicy` with the tower
   runtime. The key claim is that `approvedPolicy : BlackPolicy` —

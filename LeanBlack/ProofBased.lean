@@ -96,11 +96,10 @@ instance : DecidableEq Env := fun a b =>
   else
     isFalse (fun heq => h (heq ▸ env_beq_self a))
 
-/-! # Proof-bearing admission
+/-! # Proof-based admission
 
-The `proof-based` branch's contribution: a `.set` admission path that
-takes a *Lean proof of CE_weak_strong* as the certificate, rather
-than a pre-registered structural shape.
+A `.set` admission path that takes a *Lean proof of `CE_weak_strong`*
+as the certificate, rather than a pre-registered structural shape.
 
 An `ApprovedModification` bundles `(level, oldVal, newVal, heap)`
 with a Lean term of type `CE_weak_strong level heap oldVal newVal`.
@@ -566,8 +565,7 @@ or smoke runner, where the runtime state provides the deep-validity
 and shift-respect facts via `initState_deep` and
 `verifiedTable_respects_shift` (already in `Policies.lean`).
 
-A sample construction (filled in by `Demos.lean` on the proof-based
-branch):
+A sample construction (sketched here; not yet wired up):
 
 ```lean
 def multnApproval (level : Nat) (heap : Heap) (newClosure : Val)

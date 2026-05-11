@@ -1,6 +1,6 @@
-# TUTORIAL — proof-bearing admission in lean-sage
+# TUTORIAL — proof-based admission in lean-sage
 
-A hands-on walkthrough of the `proof-based` branch. By the end, you'll
+A hands-on walkthrough of proof-based admission. By the end, you'll
 understand:
 
 - What an `ApprovedModification` is and why its `proof` field is
@@ -18,14 +18,13 @@ If you want the architectural rationale instead, read
 ## 0. Setup
 
 ```bash
-git checkout proof-based
 lake build                    # builds the library + all three exes
-lake exe smoke                # 8/8  — unchanged from main
-lake exe demos                # 29/29 — unchanged from main
+lake exe smoke                # 8/8  — structural-policy smoke
+lake exe demos                # 29/29 — reflection demos
 lake exe proofBasedSmoke      # 4/4  — proof-based integration scenes
 ```
 
-The proof-based extension lives in two files:
+Proof-based admission lives in two files:
 
 - [`LeanBlack/ProofBased.lean`](LeanBlack/ProofBased.lean) — the
   library: `CE_weak_strong`, `ApprovedModification`, `approvedPolicy`,
@@ -35,17 +34,20 @@ The proof-based extension lives in two files:
   `.set` during tower evaluation. **This is where you see the
   integration with the rest of lean-sage.**
 
-No file from `main` is modified except one `private` → public on a
-preservation lemma in `Soundness.lean`.
+Proof-based admission is purely additive on top of the structural-
+policy world; the only change to existing files was dropping a
+`private` on a preservation lemma in `Soundness.lean`.
 
 ## 1. The idea in two sentences
 
-On `main`, an admission is a Boolean function deciding whether to admit
-a `(set! ...)` based on the modification's *structural shape*. On the
-`proof-based` branch, an admission is a Lean term of type
+In the structural-policy world (`multnExactPolicy` and friends), an
+admission is a Boolean function deciding whether to admit a
+`(set! ...)` based on the modification's *structural shape*. With
+proof-based admission, an admission is a Lean term of type
 `CE_weak_strong level heap oldVal newVal` — a soundness proof for the
 specific modification. The kernel type-checks the proof at construction
-time; if it doesn't type-check, no admission value exists.
+time; if it doesn't type-check, no admission value exists. The two
+admission paths coexist in the same `PolicyTable`.
 
 ## 2. The architecture in three definitions
 
