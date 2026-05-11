@@ -189,6 +189,94 @@ def test_multn_refuses_other : Bool :=
   approvedPolicy sampleMultnApprovals sampleAdmitCtx
     .builtinBaseApply (.num 0)
 
+/-! ## Scene 4: disaster demo — doubling wrapper REFUSED
+
+    The doubling wrapper (from `Demos.lean`'s Demo 1) modifies
+    observable semantics: every numeric result is doubled. That's
+    **not** CE_weak-conservative: `(+ 1 2)` evaluates to `3` under
+    `.builtinBaseApply` but `6` under the doubling wrapper.
+
+    Two levels of refusal:
+
+    1. **Runtime refusal.** Install `approvedPolicy [identityApproval]`
+       (which only admits the identity modification), then attempt
+       `(em (let ((orig base-apply)) (set! base-apply doublingWrapper)))`.
+       The gate consults the approval list, finds no match for the
+       doubling closure, returns `false`. The `.set` returns
+       `bool(false)`. `(+ 1 2)` still returns `3`.
+
+    2. **Compile-time refusal.** Trying to construct an
+       `ApprovedModification` for the doubling wrapper requires a
+       `CE_weak_strong` proof — which is *unprovable* because doubling
+       changes observable behavior. See the commented-out attempt
+       below; replacing the `sorry` with any term that type-checks is
+       impossible. The kernel refuses the construction. -/
+
+def doublingWrapperExpr : Expr :=
+  .lam ["op", "args"] <|
+    .letE "result" (.primApp (.var "orig") [.var "op", .var "args"]) <|
+      .ifte (.primApp (.var "num?") [.var "result"])
+        (.primApp (.var "+") [.var "result", .var "result"])
+        (.var "result")
+
+/-- `(em (let ((orig base-apply)) (set! base-apply <doubling>)))` —
+    the standard install pattern, but for the doubling wrapper. -/
+def installDoublingOneUp : Expr :=
+  .em <|
+    .letE "orig" (.var "base-apply") <|
+      .set "base-apply" doublingWrapperExpr
+
+def test_doubling_refused : Option Val :=
+  evalProgram fuel proofBasedTable <|
+    .seq [installApprovedAt1, installDoublingOneUp]
+-- Expected: bool(false) — approvedPolicy refuses; doubling not in approval list.
+
+def test_doubling_refused_preserves_plus : Option Val :=
+  evalProgram fuel proofBasedTable <|
+    .seq [installApprovedAt1, installDoublingOneUp,
+          .app [.var "+", .num 1, .num 2]]
+-- Expected: num(3) — heap unchanged; base-apply still .builtinBaseApply.
+
+/-!
+**Compile-time refusal: a documented unprovable construction.**
+
+The following block sketches what someone trying to admit doubling
+would write. The `sorry` is the heart of the disaster: no term of
+type `CE_weak_strong level heap .builtinBaseApply doublingWrapperClosure`
+exists, because doubling provably changes observable behavior on
+numeric operators (see `test_doubling_changes_result` below — without
+proof-based admission, doubling makes `(+ 1 2)` return `6`).
+
+```lean
+-- This would NOT compile (cannot be made `sorry`-free):
+def doublingApproval (heap : Heap) (doublingClosure : Val) :
+    ApprovedModification :=
+  { level   := 1
+    heap    := heap
+    oldVal  := .builtinBaseApply
+    newVal  := doublingClosure
+    proof   := sorry  -- ⟵ unprovable: CE_weak_strong requires
+                       --    ValVis_weak between (.num k) and (.num 2k)
+                       --    for arithmetic results, but those are
+                       --    unrelated under Val.beq.
+  }
+```
+
+Compare against the runtime-refusal test above: the runtime gate
+refuses doubling because *no valid `ApprovedModification` for doubling
+can be added to the approval list*. The two refusals are two sides of
+the same coin — proof-based admission is fail-closed at construction.
+-/
+
+/-- Sanity check: with NO governance (acceptAllPolicy), doubling
+    installs and `(+ 1 2)` returns `6`. This is the behavior
+    proof-based admission **prevents**. -/
+def test_doubling_changes_result : Option Val :=
+  evalProgram fuel [acceptAllPolicy] <|
+    .seq [.em (.installPolicy 0), installDoublingOneUp,
+          .app [.var "+", .num 1, .num 2]]
+-- Expected: num(6) — doubled. Diverges from base-apply's num(3).
+
 def main : IO Unit := do
   IO.println "Scene 1: proof-bearing admission — identity mod ADMITTED"
   runOne "(em (set! base-apply base-apply)) ⇒ bool(true)"
@@ -205,3 +293,11 @@ def main : IO Unit := do
   IO.println "Scene 3: multn approval constructs + matches"
   IO.println s!"  {if test_multn_admitted then "OK " else "XX "} multnApproval admits multn ctx: expected true, got {test_multn_admitted}"
   IO.println s!"  {if test_multn_refuses_other then "XX " else "OK "} multnApproval refuses non-multn newVal: expected false, got {test_multn_refuses_other}"
+  IO.println ""
+  IO.println "Scene 4: disaster demo — doubling wrapper REFUSED"
+  runOne "doubling refused at level 1: ⇒ bool(false)"
+         "bool(false)" test_doubling_refused
+  runOne "post-refuse, (+ 1 2) still 3"
+         "num(3)"      test_doubling_refused_preserves_plus
+  runOne "WITHOUT proof-based gate, doubling changes (+ 1 2) to 6"
+         "num(6)"      test_doubling_changes_result
