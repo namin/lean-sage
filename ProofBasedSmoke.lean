@@ -277,6 +277,135 @@ def test_doubling_changes_result : Option Val :=
           .app [.var "+", .num 1, .num 2]]
 -- Expected: num(6) — doubled. Diverges from base-apply's num(3).
 
+/-! ## Scene 5: verified compose — multiple approvals in one list
+
+    `approvedPolicy_soundForCE_weak_strong` doesn't care about list
+    structure: as long as every approval in the list binds to the
+    queried level, the resulting policy is `SoundForCE_weak_strong`.
+    So we can compose a list with multiple independent approvals —
+    each individually proved — and the runtime gate admits any
+    `.set` matching any of them.
+
+    Here we combine:
+    - `identityApproval 1 [] .builtinBaseApply` (the level-1 identity
+      mod, proved via `CE_weak_refl`).
+    - `sampleMultnApproval` (the multn install at level 1, proved via
+      `multnExact_soundForCE_first_install_tower`).
+
+    Both approvals are at level 1; the combined list is sound at
+    level 1. The runtime gate admits an identity `.set` (matched by
+    the first approval) and a multn-shape `.set` (matched by the
+    second), each independently. -/
+
+def composedApprovals : List ApprovedModification :=
+  [identityApproval 1 [] .builtinBaseApply, sampleMultnApproval]
+
+/-- The combined approvedPolicy is sound for CE_weak_strong at
+    level 1. Follows from `approvedPolicy_soundForCE_weak_strong`
+    once we verify all approvals bind to level 1. -/
+example :
+    BlackPolicy.SoundForCE_weak_strong 1 (approvedPolicy composedApprovals) := by
+  apply approvedPolicy_soundForCE_weak_strong
+  intro am h_mem
+  -- composedApprovals = [identity, multn]; check each.
+  simp [composedApprovals, identityApproval, sampleMultnApproval,
+        multnApproval] at h_mem
+  rcases h_mem with h | h <;> subst h <;> rfl
+
+def test_composed_admits_identity : Bool :=
+  approvedPolicy composedApprovals smokeIdentityCtx
+    .builtinBaseApply .builtinBaseApply
+-- Expected: true — matched by identity approval (am.heap = [] is prefix).
+-- NOTE: smokeIdentityCtx has level := 0; we need level 1 for this match.
+-- Use a level-1 context.
+
+def composedTestCtx : MutationCtx :=
+  { target := "base-apply", heap := sampleAdmitHeap,
+    env := sampleAdmitCenv, metaEnv := .nil, index := 0, level := 1 }
+
+def test_composed_admits_identity_at_1 : Bool :=
+  approvedPolicy composedApprovals composedTestCtx
+    .builtinBaseApply .builtinBaseApply
+
+def test_composed_admits_multn : Bool :=
+  approvedPolicy composedApprovals composedTestCtx
+    .builtinBaseApply sampleMultnClosure
+
+def test_composed_refuses_doubling : Bool :=
+  approvedPolicy composedApprovals composedTestCtx
+    .builtinBaseApply (.closure ["op", "args"] (.var "op") .nil)
+-- Different newVal (not identity, not multn) — refused.
+
+/-! ## Scene 6: a custom modification (Scene B)
+
+    Same `multnApproval` proof template, but applied to a *different*
+    modification: a multn-variant that allocates a "log cell" on each
+    numeric dispatch. The closure body retains the multn-required
+    shape (`.lam ["op","args"] (.ifte (num? op) _ (orig op args))`)
+    but the then-branch is rewritten:
+
+      .letE "_log" (.num 1)
+        (.primApp (.var "mul-list")
+          [.primApp (.var "cons") [.var "op", .var "args"]])
+
+    The `.letE` allocates a heap cell holding `.num 1` before the
+    multn fold. The cell is unreachable after the let goes out of
+    scope, but it's still in the heap — a *side effect*. Behaviorally
+    this differs from canonical multn only by the heap-growth on
+    numeric dispatches.
+
+    Why this still admits via `multnApproval`: the multn proof
+    template constrains only the closure SHAPE (the `.ifte` outer,
+    the else-branch `(orig op args)`, and the cenv lookups). The
+    then-branch is unconstrained. The CE_weak_strong premise
+    (`callAsBaseApply ... .builtinBaseApply ... = some (r, T')`)
+    is vacuous on numeric operators (builtinBaseApply returns `none`
+    for `.num` ops), so whatever the then-branch does — multn fold,
+    constant 42, log-then-fold — is irrelevant to soundness.
+
+    Concrete payoff: a *novel modification* (with observable side
+    effects on the heap) admitted by the existing proof template.
+    No bespoke CE_weak_strong proof needed; the multn theorem is the
+    proof template, and `multnApproval` packages it for any
+    multn-shape closure. -/
+
+def loggingMultnExpr : Expr :=
+  .lam ["op", "args"]
+    (.ifte (.primApp (.var "num?") [.var "op"])
+      (.letE "_log" (.num 1)
+        (.primApp (.var "mul-list")
+          [.primApp (.var "cons") [.var "op", .var "args"]]))
+      (.primApp (.var "orig") [.var "op", .var "args"]))
+
+def loggingMultnClosure : Val :=
+  .closure ["op", "args"]
+    (.ifte (.primApp (.var "num?") [.var "op"])
+      (.letE "_log" (.num 1)
+        (.primApp (.var "mul-list")
+          [.primApp (.var "cons") [.var "op", .var "args"]]))
+      (.primApp (.var "orig") [.var "op", .var "args"]))
+    sampleAdmitCenv
+
+theorem logging_multn_admit :
+    multnExactPolicy sampleAdmitCtx .builtinBaseApply loggingMultnClosure
+      = true := by
+  native_decide
+
+/-- The logging-multn approval. Same proof template as
+    `sampleMultnApproval`, applied to a different closure. -/
+def loggingMultnApproval : ApprovedModification :=
+  multnApproval 1 sampleAdmitHeap sampleAdmitCenv .nil 0
+    loggingMultnClosure logging_multn_admit
+
+def test_logging_admitted : Bool :=
+  approvedPolicy [loggingMultnApproval] sampleAdmitCtx
+    .builtinBaseApply loggingMultnClosure
+
+def test_logging_distinct_from_multn : Bool :=
+  -- The logging closure is structurally distinct from the canonical
+  -- multn closure (different then-branch). Confirm `Val.beq`-distinct.
+  ! Val.beq loggingMultnClosure sampleMultnClosure
+
 def main : IO Unit := do
   IO.println "Scene 1: proof-bearing admission — identity mod ADMITTED"
   runOne "(em (set! base-apply base-apply)) ⇒ bool(true)"
@@ -301,3 +430,8 @@ def main : IO Unit := do
          "num(3)"      test_doubling_refused_preserves_plus
   runOne "WITHOUT proof-based gate, doubling changes (+ 1 2) to 6"
          "num(6)"      test_doubling_changes_result
+  IO.println ""
+  IO.println "Scene 5: verified compose — [identity, multn] coexist"
+  IO.println s!"  {if test_composed_admits_identity_at_1 then "OK " else "XX "} composed list admits identity at level 1: expected true, got {test_composed_admits_identity_at_1}"
+  IO.println s!"  {if test_composed_admits_multn then "OK " else "XX "} composed list admits multn at level 1: expected true, got {test_composed_admits_multn}"
+  IO.println s!"  {if test_composed_refuses_doubling then "XX " else "OK "} composed list refuses doubling: expected false, got {test_composed_refuses_doubling}"

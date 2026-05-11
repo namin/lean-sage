@@ -574,20 +574,42 @@ theorem wand_defeated_existential (_approvals : List ApprovedModification) :
 
 Under the gated policy table `[approvedPolicy approvals]`, the
 witness still converges identically — because the redex/contractum
-contain no `.set`, the policy gate isn't consulted during eval. A
-clean way to prove this:
+contain no `.set`, the policy gate isn't consulted during eval.
+Full chaining via a `NoSet`-policy-independence lemma is ~80 LOC of
+mutual induction; for a quick gated W1 with a different witness pair
+(easier kernel reduction), see `wand_defeated_existential_gated`
+below. -/
 
-```lean
--- Helper: eval is policy-independent for .set-free, .installPolicy-free terms.
-lemma eval_ptable_indep
-    (M : Expr) (h : NoSetNoInstall M) (env : Env) (T : TowerState)
-    (fuel : Nat) (p₁ p₂ : PolicyTable) :
-    eval fuel p₁ 0 M env T = eval fuel p₂ 0 M env T
-```
+/-! ## Parameterized (gated) W1
 
-Proof by structural induction on `Expr` (or fuel). About 80 LOC.
-With it, `wand_defeated_existential_gated` follows by chaining
-through the baseline form. Deferred. -/
+Same headline claim as `wand_defeated_existential`, but the policy
+table is `[approvedPolicy approvals]` rather than baseline
+`[acceptAllPolicy]`. The β-redex/contractum pair would also work
+here, but proving its evaluation under abstract `approvals` requires
+the deferred policy-independence lemma; instead, we use a different
+syntactically-distinct convergent pair whose eval doesn't go through
+`applyVia` / `materialize` (so `simp [evalProgram, eval]; rfl` closes
+without needing further unfolding under abstract policy).
+
+Witness: `(if true then 0 else 1)` vs `0`. Different `Expr`
+constructors (`.ifte` vs `.num`), same value. The eval of `.ifte` on
+`.bool true` short-circuits to the then-branch without consulting the
+policy table. -/
+
+def ObsEquivConvergesGated (approvals : List ApprovedModification)
+    (M N : Expr) : Prop :=
+  ∃ fuel v,
+    evalProgram fuel [approvedPolicy approvals] M = some v ∧
+    evalProgram fuel [approvedPolicy approvals] N = some v
+
+theorem wand_defeated_existential_gated
+    (approvals : List ApprovedModification) :
+    ∃ M N : Expr, M ≠ N ∧ ObsEquivConvergesGated approvals M N := by
+  refine ⟨.ifte (.bool true) (.num 0) (.num 1), .num 0, ?_, ?_⟩
+  · intro h; cases h
+  · refine ⟨100, .num 0, ?_, ?_⟩
+    · simp [evalProgram, eval]; rfl
+    · simp [evalProgram, eval]; rfl
 
 /-! ## Multn approval — the worked example
 
