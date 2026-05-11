@@ -19,15 +19,24 @@ If you want the architectural rationale instead, read
 
 ```bash
 git checkout proof-based
-lake build           # builds the library + smoke + demos
-lake exe smoke       # 8/8 — unchanged from main
-lake exe demos       # 29/29 — unchanged from main
+lake build                    # builds the library + all three exes
+lake exe smoke                # 8/8  — unchanged from main
+lake exe demos                # 29/29 — unchanged from main
+lake exe proofBasedSmoke      # 4/4  — proof-based integration scenes
 ```
 
-The proof-based extension lives entirely in
-[`LeanBlack/ProofBased.lean`](LeanBlack/ProofBased.lean). No file from
-`main` is modified except one `private` → public on a preservation
-lemma in `Soundness.lean`.
+The proof-based extension lives in two files:
+
+- [`LeanBlack/ProofBased.lean`](LeanBlack/ProofBased.lean) — the
+  library: `CE_weak_strong`, `ApprovedModification`, `approvedPolicy`,
+  the soundness theorem, the identity constructors, W1.
+- [`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) — runnable scenes
+  showing `approvedPolicy` installed at a level and gating a real
+  `.set` during tower evaluation. **This is where you see the
+  integration with the rest of lean-sage.**
+
+No file from `main` is modified except one `private` → public on a
+preservation lemma in `Soundness.lean`.
 
 ## 1. The idea in two sentences
 
@@ -79,6 +88,68 @@ For any list of approvals all bound to the same level, the
 runtime gate is sound for `CE_weak_strong` at that level. Every
 admission has a `CE_weak_strong` witness derivable from the matching
 approval's `proof` field.
+
+## 2½. How it slots into the existing runtime
+
+This is the part of the story easiest to miss reading
+`ProofBased.lean` in isolation: **`approvedPolicy` is just a
+`BlackPolicy`**. Nothing in the rest of lean-sage changes; the new
+file extends the *construction* of policies, not the runtime.
+
+```text
+                     (existing infrastructure)
+                              │
+   PolicyTable : List BlackPolicy
+                              │
+        ┌─────────────────────┼────────────────────┐
+        ↓                     ↓                    ↓
+    acceptAllPolicy     multnExactPolicy     approvedPolicy ←─── NEW
+                        (structural)         (proof-bearing)
+                                                   │
+                                                   ↑
+                            ┌──────────────────────┘
+                            │
+                    List ApprovedModification
+                            │
+                            ↑
+                  each carries a CE_weak_strong proof
+                  (kernel type-checks at construction time)
+```
+
+A `BlackPolicy` is just a function `MutationCtx → Val → Val → Bool`.
+The runtime gate fires inside `eval`'s `.set` rule (see
+[`LeanBlack/Eval.lean`](LeanBlack/Eval.lean):87, `gate := T.policyAt?
+level`). `approvedPolicy approvals` is a `BlackPolicy` — it takes the
+same arguments, returns a `Bool`. From the runtime's perspective,
+it's interchangeable with `acceptAllPolicy` or `multnExactPolicy`.
+
+What's different is *construction*: an approval can only be built if
+the kernel accepts a `CE_weak_strong` proof. So the boolean the
+runtime sees is *backed by* a proof, even though the runtime itself
+doesn't consult the proof.
+
+[`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) demonstrates the
+integration end-to-end. Scene 1 installs
+`approvedPolicy [identityApproval 1 [] .builtinBaseApply]` at level 1
+via `(em (installPolicy 0))`, runs `(em (set! base-apply base-apply))`,
+and watches the `.set` go through the gate, find a match, and admit.
+Scene 2 attempts a non-matching mutation; the gate finds no match
+and refuses. Both scenes also check that arithmetic is preserved
+afterward.
+
+```bash
+$ lake exe proofBasedSmoke
+Scene 1: proof-bearing admission — identity mod ADMITTED
+  OK  (em (set! base-apply base-apply)) ⇒ bool(true): ...
+  OK  post-admit, (+ 1 2) still 3: ...
+
+Scene 2: proof-bearing admission — non-matching mod REFUSED
+  OK  (em (set! base-apply (lam … 42))) ⇒ bool(false): ...
+  OK  post-refuse, (+ 1 2) still 3 (no mod in effect): ...
+```
+
+That's the full integration. The next sections explain how the proof
+field is constructed.
 
 ## 3. Why `CE_weak_strong`?
 
