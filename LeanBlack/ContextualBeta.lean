@@ -404,6 +404,48 @@ theorem BetaLetEReady_num_iff (i : Int) (ptable : PolicyTable) (level : Nat)
     refine ⟨h_depth, 0, .num i, T, ?_, h_mat, h_builtin⟩
     simp [eval]
 
+/-! ### State-only predicate `BuiltinReady`
+
+For literal `v_expr` like `.num i`, the L1 conditions don't need
+to mention `eval` of `v_expr` — since the eval is trivial. The
+clean predicate is purely about the state's structural properties. -/
+
+/-- State-only L1 readiness predicate: depth bound + level+1
+    materialized + builtin base-apply at level. -/
+def BuiltinReady : StatePred :=
+  fun _ level _ T =>
+    level + 1 < Tower.maxDepth ∧
+    T.levels.length > level + 1 ∧
+    builtinBaseApplyAt level T
+
+/-- `BuiltinReady` implies `BetaLetEReady (.num i)`: just plug
+    `eval 1 (.num i) env T = some (.num i, T)` into the existential. -/
+theorem BuiltinReady.toBetaLetEReady_num {i : Int}
+    {ptable : PolicyTable} {level : Nat} {env : Env} {T : TowerState}
+    (h : BuiltinReady ptable level env T) :
+    BetaLetEReady (.num i) ptable level env T := by
+  obtain ⟨h_depth, h_mat, h_builtin⟩ := h
+  refine ⟨h_depth, 0, .num i, T, ?_, h_mat, h_builtin⟩
+  simp [eval]
+
+/-- β-equivalence under `BuiltinReady` for literal `v_expr = .num i`:
+    derived from `beta_letE_EvalEquivAt` via the implication above. -/
+theorem beta_letE_num_EvalEquivAt (x : String) (body : Expr) (i : Int) :
+    EvalEquivAt BuiltinReady
+        (.app [.lam [x] body, .num i])
+        (.letE x (.num i) body) := by
+  intro ptable level env T h v T_final
+  exact beta_letE_EvalEquivAt x body (.num i) ptable level env T
+          (BuiltinReady.toBetaLetEReady_num h) v T_final
+
+/-- Specialization of `wand_beta_ctx_easy` to `BuiltinReady`:
+    a cleaner state-only precondition for any easy context. -/
+theorem wand_beta_ctx_easy_builtin (C : EasyCtx) :
+    EvalEquivAt BuiltinReady
+                (C.plug (.app [.lam ["x"] (.var "x"), .num 0]))
+                (C.plug (.letE "x" (.num 0) (.var "x"))) :=
+  EasyCtx.plug_cong_at C (beta_letE_num_EvalEquivAt "x" (.var "x") 0)
+
 /-! ### Worked example — `wand_defeated_existential_gated_beta`'s
     specific pair, contextually quantified
 

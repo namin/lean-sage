@@ -750,6 +750,31 @@ done via:
   `BetaLetEReady v_expr`. One-line proof:
   `EasyCtx.plug_cong_at C (beta_letE_EvalEquivAt x body v_expr)`.
 
+### Specialized to `wand_defeated_existential_gated_beta`'s pair
+
+For the specific β-redex/`.letE` pair `((λx. x) 0)` and
+`.letE x 0 x`, `BetaLetEReady_num_iff` simplifies the precondition
+to a pure state property (`level + 1 < Tower.maxDepth`,
+`T.levels.length > level + 1`, `builtinBaseApplyAt level T`) —
+captured as **`BuiltinReady`**. Then:
+
+- **`beta_letE_num_EvalEquivAt`** — `EvalEquivAt BuiltinReady` for
+  literal `v_expr = .num i`.
+- **`wand_beta_ctx_easy_builtin`** — *the cleanest contextual β
+  statement for the wand pair*: under `BuiltinReady`, the
+  equivalence holds in any easy context.
+
+### Materialization gap
+
+`BuiltinReady` requires level+1 to be materialized at the
+β-redex's evaluation point. `initTower` has only level 0
+materialized, so the predicate fails at evalProgram's starting
+state — even though the β-redex's `applyVia` would materialize
+level+1 internally. Closing this gap requires deriving a "post-
+materialize" version of `BetaLetEReady`; deferred. Workaround:
+state the equivalence at level ≥ 1 (sub-evaluations inside an
+`.em`) where the tower is naturally pre-materialized.
+
 ## 12. Reading order for the source
 
 If you want to dig into `LeanBlack/ProofBased.lean`, the file is
