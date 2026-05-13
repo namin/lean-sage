@@ -24,11 +24,15 @@ lake exe demos                # 29/29 — reflection demos
 lake exe proofBasedSmoke      # 18/18 — proof-based integration scenes
 ```
 
-Proof-based admission lives in two files:
+Proof-based admission lives in three files:
 
 - [`LeanBlack/ProofBased.lean`](LeanBlack/ProofBased.lean) — the
   library: `CE_weak_strong`, `ApprovedModification`, `approvedPolicy`,
   the soundness theorem, the identity constructors, W1.
+- [`LeanBlack/ContextualBeta.lean`](LeanBlack/ContextualBeta.lean) —
+  operational β-redex factoring and the CE→β bridge. Connects an
+  `approvedPolicy` admission to a runtime β-equivalence statement.
+  See §11.5.
 - [`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) — runnable scenes
   showing `approvedPolicy` installed at a level and gating a real
   `.set` during tower evaluation. **This is where you see the
@@ -455,6 +459,97 @@ not in Lean. The informal argument lifts cleanly (any admitted
 modification preserves call-trace bisim, so no context can
 distinguish β-equivalent pairs through the gated runtime), but the
 universal quantification over `C` is not yet a theorem.
+
+`LeanBlack/ContextualBeta.lean` is a first step toward this lift —
+see §11.5.
+
+## 11.5. ContextualBeta — operational β and the CE→β bridge
+
+[`LeanBlack/ContextualBeta.lean`](LeanBlack/ContextualBeta.lean) adds
+three sorry-free theorems that connect the kernel infrastructure to
+β-equivalence statements directly (rather than going through
+`allPureIndep`).
+
+**`eval_beta_builtin`** (L1). At sufficient fuel, with level+1's
+`base-apply` cell still bound to `.builtinBaseApply` and level+1
+materialized below `Tower.maxDepth`:
+
+```lean
+eval (n + 3) ptable level (.app [.lam [x] body, v_expr]) env T
+  = eval n ptable level body
+      (Env.cons x T'.heap.length env)
+      { T' with heap := T'.heap ++ [v_val] }
+```
+
+— provided `v_expr` evaluates to `(v_val, T')` at fuel `n+1`. Pure
+operational unfolding through `.app` / `.lam` / `applyVia`-builtin /
+`applyDirect`-closure. No CE consumed.
+
+**`ce_apply_bisim_builtin`** (CE→β bridge). Given a `CE_weak_strong`
+certificate for the user-installed `base-apply` over the current heap,
+the apply path produces a bisim-equivalent result to the
+counterfactual builtin apply. Threads the full 16-condition CE
+premise stack and consumes the certificate once.
+
+**`admission_applyVia_bisim_builtin`** (admission corollary). Same
+conclusion as above, but with the CE certificate replaced by
+`approvedPolicy approvals ctx .builtinBaseApply bc = true` + an
+`am.level = level` invariant on `approvals`. This is the first place
+in the repo where `approvedPolicy`-admission flows into a β-equivalence
+statement at the runtime.
+
+### What this changes vs. the prior W1 story
+
+- `wand_defeated_existential_gated_beta` (§9) proves β for one
+  fixed pair `((λx. x) 0)` ≡ `0`, via `allPureIndep` — the policy is
+  never actually consulted because the redex is pure.
+- The bridge proves β-equivalence for **any** closure call going
+  through an admitted user `base-apply`, with CE actually flowing
+  into the conclusion. It just fires at one specific moment.
+
+### Why "one specific moment"
+
+The bridge fires where `HeapPrefix am.heap T.heap` holds. By
+construction this holds at the admission moment (the `.set` step
+itself, before the heap update commits — `ctx.heap = T.heap` and
+`am.heap` content-prefix-matches `ctx.heap`).
+
+After the `.set` commits, `T_post.heap = T.heap.update idx_ba bc`.
+Since `idx_ba < am.heap.length`, the content-prefix property breaks
+on the base-apply cell:
+
+```text
+am.heap[idx_ba]    = .builtinBaseApply   -- (in am's snapshot)
+T_post.heap[idx_ba] = bc                  -- (after the .set commits)
+```
+
+`CE_weak_strong_heap_mono` cannot lift the certificate to
+`T_post.heap`. So future β-equivalence questions — the kind a
+contextual lift would ask — sit outside the bridge's reach.
+
+### What the contextual lift requires
+
+The multn proof's actual cell lookups (in `multnExact_*` in
+`Policies.lean`) only read the prim cells (`num?`, `*`, …), never
+the base-apply cell. The `HeapPrefix` premise is **stronger than
+necessary** — it demands content-equality on cells the proof
+doesn't read.
+
+Three possible unblocks, in roughly decreasing scope:
+
+1. **Weaken `HeapPrefix`** to a selective form (content-equality
+   on a specified index set; length-extension overall). Refactor
+   `CE_weak_strong` to carry an explicit dependency set. Re-prove
+   the multn theorem under the weaker premise. The cleanest fix.
+2. **Add a `CE_weak_strong_stable` predicate** robust to
+   base-apply mutations, with a bridge from existing approvals.
+   Decouples the change from `Policies.lean`.
+3. **Hand-redo the multn argument** at post-mutation heaps,
+   treating each approval's bisim claim as a local fact. Most
+   local in scope; least general.
+
+Any of these unblocks the L4 / T1 path from the proof sketch in the
+file's docstring.
 
 ## 12. Reading order for the source
 
