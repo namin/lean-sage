@@ -14,8 +14,21 @@
     reduces operationally to body-in-extended-env. Pure unfolding;
     no CE consumed.
 
-  - **L2/L3/L4/T1**: not formalized in this file. Blocked on the
-    architectural finding below.
+  - **CE→β bridge** (`ce_apply_bisim_builtin`,
+    `admission_applyVia_bisim_builtin`): sorry-free. Given a
+    `CE_weak_strong` certificate for the installed user
+    `base-apply` over the current heap, the apply path produces a
+    bisim-equivalent result to the counterfactual builtin apply.
+    The admission-moment corollary consumes
+    `approvedPolicy_soundForCE_weak_strong` directly. This is the
+    first place CE certificates actually flow into a β-equivalence
+    statement in this codebase.
+
+  - **L2/L4/T1**: not formalized in this file. Blocked on the
+    architectural finding below — the bridge fires only at the
+    heap snapshot where `HeapPrefix am.heap T.heap` holds (the
+    admission moment, by construction). The contextual lift needs
+    the certificate to remain applicable as the heap evolves.
 
   ## Architectural finding (blocker for the CE-leveraging path)
 
@@ -69,6 +82,8 @@ import LeanBlack.Frame
 import LeanBlack.Soundness
 import LeanBlack.Policies
 import LeanBlack.ProofBased
+
+open LeanBlack
 
 /-! ## L1 — Builtin β unfolding
 
@@ -205,3 +220,195 @@ theorem eval_beta_builtin
   show applyVia (n + 2) ptable level (.closure [x] body env) [v_val] T' = _
   rw [applyVia_builtin_factors (n + 1) ptable level _ _ T' h_depth h_mat' h_builtin',
       applyDirect_closure_one n ptable level x body env v_val T']
+
+/-! ## Phase B — CE→β bridge (single-use form)
+
+The companion to L1 for the non-builtin case: when level+1's
+`base-apply` is bound to a *user* closure `bc` and we have a
+`CE_weak_strong` certificate for `bc` over the current heap, the
+β-redex's apply path produces a bisim-equivalent result to the
+counterfactual builtin-apply.
+
+This is the "single-use" form: the CE certificate is consumed
+exactly once at a heap snapshot where its `HeapPrefix` premise
+holds. The natural such moment is admission (where `T.heap = am.heap`
+by construction). The deferred contextual-β goal generalizes this
+to all future heap snapshots, which requires either weakening
+`HeapPrefix` or maintaining bisim by other means. -/
+
+/-! ### Structural lemma: applyVia with user base-apply factors. -/
+
+theorem applyVia_user_factors (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (op : Val) (args : List Val) (T : TowerState)
+    (h_depth : level + 1 < Tower.maxDepth)
+    (h_mat : T.levels.length > level + 1)
+    (upEnv : Env) (idx : Nat) (bc : Val)
+    (h_env : T.envAt? (level + 1) = some upEnv)
+    (h_lookup : upEnv.lookup "base-apply" = some idx)
+    (h_cell : T.heap[idx]? = some bc)
+    (h_bc : bc ≠ .builtinBaseApply) :
+    applyVia (n + 1) ptable level op args T
+      = applyDirect n ptable level bc [op, listToVal args] T := by
+  have h_materialize : T.materialize (level + 1) = some T := by
+    unfold TowerState.materialize
+    have h1 : ¬ (level + 1 ≥ Tower.maxDepth) := Nat.not_le_of_lt h_depth
+    simp [h1, h_mat]
+  unfold applyVia
+  rw [h_materialize]
+  cases bc with
+  | builtinBaseApply => exact absurd rfl h_bc
+  | num _ => simp [h_env, h_lookup, h_cell]
+  | bool _ => simp [h_env, h_lookup, h_cell]
+  | nilV => simp [h_env, h_lookup, h_cell]
+  | cons _ _ => simp [h_env, h_lookup, h_cell]
+  | sym _ => simp [h_env, h_lookup, h_cell]
+  | closure _ _ _ => simp [h_env, h_lookup, h_cell]
+  | prim _ => simp [h_env, h_lookup, h_cell]
+
+/-! ### Unfolding `callAsBaseApply` for both branches -/
+
+theorem callAsBaseApply_builtin (fuel : Nat) (ptable : PolicyTable) (level : Nat)
+    (op : Val) (operands : List Val) (T : TowerState) :
+    callAsBaseApply fuel ptable level .builtinBaseApply op operands T
+      = applyDirect fuel ptable level op operands T := by
+  unfold callAsBaseApply; rfl
+
+theorem callAsBaseApply_user (fuel : Nat) (ptable : PolicyTable) (level : Nat)
+    (bc : Val) (h_bc : bc ≠ .builtinBaseApply)
+    (op : Val) (operands : List Val) (T : TowerState) :
+    callAsBaseApply fuel ptable level bc op operands T
+      = applyDirect fuel ptable level bc [op, listToVal operands] T := by
+  unfold callAsBaseApply
+  cases bc with
+  | builtinBaseApply => exact absurd rfl h_bc
+  | num _ => rfl
+  | bool _ => rfl
+  | nilV => rfl
+  | cons _ _ => rfl
+  | sym _ => rfl
+  | closure _ _ _ => rfl
+  | prim _ => rfl
+
+/-! ### The bridge
+
+Given a `CE_weak_strong` certificate for `bc` over the current heap,
+the apply path through the user-installed base-apply produces a
+bisim-equivalent result to the counterfactual builtin apply. -/
+
+theorem ce_apply_bisim_builtin
+    (level : Nat) (ptable : PolicyTable) (op : Val) (operands : List Val) (T : TowerState)
+    (bc : Val) (h_bc : bc ≠ .builtinBaseApply)
+    (upEnv : Env) (idx : Nat)
+    (h_env : T.envAt? (level + 1) = some upEnv)
+    (h_lookup : upEnv.lookup "base-apply" = some idx)
+    (h_cell : T.heap[idx]? = some bc)
+    (h_depth : level + 1 < Tower.maxDepth)
+    (h_mat : T.levels.length > level + 1)
+    (h_ce : CE_weak_strong level T.heap .builtinBaseApply bc)
+    -- CE side conditions on T:
+    (h_heap : HeapValid T.heap)
+    (h_op : ValValid op T.heap)
+    (h_operands : ListValValid operands T.heap)
+    (h_old_valid : ValValid .builtinBaseApply T.heap)
+    (h_new_valid : ValValid bc T.heap)
+    (h_ptable : PolicyTableRespectsBisimT ptable)
+    (h_lvl_pol : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
+    (h_env_valid : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
+    (h_pol_bisim : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+    (h_env_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap)
+    (h_heap_deep : HeapDeep T.heap)
+    (h_op_deep : ValDeep op T.heap)
+    (h_operands_deep : ListValDeep operands T.heap)
+    (h_env_deep : ∀ n env, T.envAt? n = some env → EnvDeep env T.heap)
+    (h_pt_shift : PolicyTableRespectsShift T.heap.length [op, listToVal operands] ptable)
+    (h_pol_shift : ∀ n p, T.policyAt? n = some p →
+                    PolicyRespectsShift T.heap.length [op, listToVal operands] p)
+    -- builtin call succeeds:
+    (fuel : Nat) (r : Val) (T' : TowerState)
+    (h_call : applyDirect fuel ptable level op operands T = some (r, T')) :
+    ∃ fuel' T'' r',
+      applyVia (fuel' + 1) ptable level op operands T = some (r', T'') ∧
+      ValVis_weak r r' T'.heap T''.heap ∧
+      T'.policyAt? level = T''.policyAt? level ∧
+      HeapValid T''.heap ∧
+      T.heap.length ≤ T''.heap.length := by
+  have h_call' :
+      callAsBaseApply fuel ptable level .builtinBaseApply op operands T = some (r, T') := by
+    rw [callAsBaseApply_builtin]; exact h_call
+  have h_prefix : HeapPrefix T.heap T.heap := HeapPrefix.refl _
+  obtain ⟨fuel', T'', r', h_new_call, h_bisim, h_pol_eq, h_heap_valid, h_len⟩ :=
+    h_ce fuel ptable op operands T r T' h_prefix
+      h_heap h_op h_operands h_old_valid h_new_valid
+      h_ptable h_lvl_pol h_env_valid h_pol_bisim h_env_bisim
+      h_heap_deep h_op_deep h_operands_deep h_env_deep
+      h_pt_shift h_pol_shift h_call'
+  refine ⟨fuel', T'', r', ?_, h_bisim, h_pol_eq, h_heap_valid, h_len⟩
+  rw [applyVia_user_factors fuel' ptable level op operands T
+        h_depth h_mat upEnv idx bc h_env h_lookup h_cell h_bc]
+  rw [← callAsBaseApply_user fuel' ptable level bc h_bc op operands T]
+  exact h_new_call
+
+/-! ### Admission-moment corollary
+
+Consumes `approvedPolicy_soundForCE_weak_strong` directly. At the
+moment a `.set "base-apply"` is admitted by `approvedPolicy approvals`
+with new value `bc`, the apply path through `bc` (once installed)
+produces a bisim-equivalent result to the counterfactual builtin
+apply, evaluated at the admission-moment heap.
+
+This is the "single-use" form: applicable at the heap snapshot
+where `T.heap = ctx.heap` (the admission moment). Generalizing
+beyond admission requires either weakening `HeapPrefix` in
+`CE_weak_strong` (deferred) or maintaining bisim by other means. -/
+
+theorem admission_applyVia_bisim_builtin
+    (approvals : List ApprovedModification)
+    (level : Nat) (h_levels : ∀ am ∈ approvals, am.level = level)
+    (ctx : MutationCtx)
+    (bc : Val) (h_bc : bc ≠ .builtinBaseApply)
+    (h_admit : approvedPolicy approvals ctx .builtinBaseApply bc = true)
+    (T : TowerState) (h_heap_eq : T.heap = ctx.heap)
+    (upEnv : Env) (idx : Nat)
+    (h_env : T.envAt? (level + 1) = some upEnv)
+    (h_lookup : upEnv.lookup "base-apply" = some idx)
+    (h_cell : T.heap[idx]? = some bc)
+    (h_depth : level + 1 < Tower.maxDepth)
+    (h_mat : T.levels.length > level + 1)
+    (ptable : PolicyTable) (op : Val) (operands : List Val)
+    -- CE side conditions on T:
+    (h_heap : HeapValid T.heap)
+    (h_op : ValValid op T.heap)
+    (h_operands : ListValValid operands T.heap)
+    (h_old_valid : ValValid .builtinBaseApply T.heap)
+    (h_new_valid : ValValid bc T.heap)
+    (h_ptable : PolicyTableRespectsBisimT ptable)
+    (h_lvl_pol : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
+    (h_env_valid : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
+    (h_pol_bisim : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+    (h_env_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap)
+    (h_heap_deep : HeapDeep T.heap)
+    (h_op_deep : ValDeep op T.heap)
+    (h_operands_deep : ListValDeep operands T.heap)
+    (h_env_deep : ∀ n env, T.envAt? n = some env → EnvDeep env T.heap)
+    (h_pt_shift : PolicyTableRespectsShift T.heap.length [op, listToVal operands] ptable)
+    (h_pol_shift : ∀ n p, T.policyAt? n = some p →
+                    PolicyRespectsShift T.heap.length [op, listToVal operands] p)
+    (fuel : Nat) (r : Val) (T' : TowerState)
+    (h_call : applyDirect fuel ptable level op operands T = some (r, T')) :
+    ∃ fuel' T'' r',
+      applyVia (fuel' + 1) ptable level op operands T = some (r', T'') ∧
+      ValVis_weak r r' T'.heap T''.heap ∧
+      T'.policyAt? level = T''.policyAt? level ∧
+      HeapValid T''.heap ∧
+      T.heap.length ≤ T''.heap.length := by
+  have h_ce_at_ctx : CE_weak_strong level ctx.heap .builtinBaseApply bc :=
+    approvedPolicy_soundForCE_weak_strong approvals level h_levels
+      ctx .builtinBaseApply bc h_admit
+  have h_ce : CE_weak_strong level T.heap .builtinBaseApply bc := by
+    rw [h_heap_eq]; exact h_ce_at_ctx
+  exact ce_apply_bisim_builtin level ptable op operands T bc h_bc
+    upEnv idx h_env h_lookup h_cell h_depth h_mat h_ce
+    h_heap h_op h_operands h_old_valid h_new_valid
+    h_ptable h_lvl_pol h_env_valid h_pol_bisim h_env_bisim
+    h_heap_deep h_op_deep h_operands_deep h_env_deep
+    h_pt_shift h_pol_shift fuel r T' h_call
