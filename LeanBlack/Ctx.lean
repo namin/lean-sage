@@ -1500,10 +1500,268 @@ theorem EvalEquivAt.ifteElse_cong {P : StatePred} {M N : Expr}
          ifteElse_cong_at_forward h.symm ec t h_preserve ptable level env T hP
             v_final T_final⟩
 
+/-! ### List-traversal helper for `EvalEquivAt`
+
+For the list-position congruence cases (`.appArg`, `.primAppArg`,
+general `.seqTail`), `P` must propagate through *each* element of
+the pre-hole list — not just one step. The cleanest hypothesis is
+that `P` is closed under any successful evaluation. -/
+
+/-- `P` is preserved by any successful eval. Strong but useful:
+    holds when `P` only constrains static properties of the state
+    (level depth, materialized levels, base-apply identity) that
+    pure expressions don't disturb. -/
+def PIsClosedUnderEval (P : StatePred) : Prop :=
+  ∀ ptable level e env T, P ptable level env T →
+    ∀ k v T', eval k ptable level e env T = some (v, T') →
+    P ptable level env T'
+
+/-- List-traversal `EvalEquivAt` congruence. Given `EvalEquivAt P M N`
+    and that `P` is closed under eval, `evalList (pre ++ M :: post)`
+    and `evalList (pre ++ N :: post)` produce the same outcomes at
+    any starting state satisfying `P`. -/
+private theorem evalList_EvalEquivAt_forward {P : StatePred} {M N : Expr}
+    (h : EvalEquivAt P M N) (h_closed : PIsClosedUnderEval P) :
+    ∀ (pre post : List Expr) (ptable : PolicyTable) (level : Nat)
+      (env : Env) (T : TowerState),
+      P ptable level env T →
+      ∀ (vs : List Val) (T' : TowerState),
+      (∃ k, evalList k ptable level (pre ++ M :: post) env T = some (vs, T')) →
+      (∃ k, evalList k ptable level (pre ++ N :: post) env T = some (vs, T')) := by
+  intro pre
+  induction pre with
+  | nil =>
+      intro post ptable level env T hP vs T' ⟨k, h_some⟩
+      cases k with
+      | zero => simp [evalList] at h_some
+      | succ k' =>
+          simp only [List.nil_append, evalList] at h_some
+          cases h_eM : eval k' ptable level M env T with
+          | none => rw [h_eM] at h_some; simp at h_some
+          | some pair =>
+              obtain ⟨v_M, T_M⟩ := pair
+              obtain ⟨k_N, h_N⟩ :=
+                (h ptable level env T hP v_M T_M).mp ⟨k', h_eM⟩
+              rw [h_eM] at h_some
+              simp only at h_some
+              cases h_eList : evalList k' ptable level post env T_M with
+              | none => rw [h_eList] at h_some; simp at h_some
+              | some pair' =>
+                  obtain ⟨vs_rest, T_rest⟩ := pair'
+                  rw [h_eList] at h_some
+                  simp only at h_some
+                  refine ⟨max k' k_N + 1, ?_⟩
+                  simp only [List.nil_append, evalList,
+                             eval_fuel_mono (Nat.le_max_right k' k_N) h_N,
+                             evalList_fuel_mono (Nat.le_max_left k' k_N) h_eList]
+                  exact h_some
+  | cons h_pre pre_rest ih =>
+      intro post ptable level env T hP vs T' ⟨k, h_some⟩
+      cases k with
+      | zero => simp [evalList] at h_some
+      | succ k' =>
+          simp only [List.cons_append, evalList] at h_some
+          cases h_eH : eval k' ptable level h_pre env T with
+          | none => rw [h_eH] at h_some; simp at h_some
+          | some pair =>
+              obtain ⟨v_h, T_h⟩ := pair
+              rw [h_eH] at h_some
+              simp only at h_some
+              cases h_eList : evalList k' ptable level (pre_rest ++ M :: post) env T_h with
+              | none => rw [h_eList] at h_some; simp at h_some
+              | some pair' =>
+                  obtain ⟨vs_rest, T_rest⟩ := pair'
+                  rw [h_eList] at h_some
+                  simp only at h_some
+                  have hP_Th := h_closed ptable level h_pre env T hP k' v_h T_h h_eH
+                  have h_ih := ih post ptable level env T_h hP_Th vs_rest T_rest
+                                 ⟨k', h_eList⟩
+                  obtain ⟨k_N_inner, h_eList_N⟩ := h_ih
+                  refine ⟨max k' k_N_inner + 1, ?_⟩
+                  simp only [List.cons_append, evalList,
+                             eval_fuel_mono (Nat.le_max_left k' k_N_inner) h_eH,
+                             evalList_fuel_mono (Nat.le_max_right k' k_N_inner) h_eList_N]
+                  exact h_some
+
+theorem evalList_EvalEquivAt {P : StatePred} {M N : Expr}
+    (h : EvalEquivAt P M N) (h_closed : PIsClosedUnderEval P)
+    (pre post : List Expr) (ptable : PolicyTable) (level : Nat)
+    (env : Env) (T : TowerState) (hP : P ptable level env T)
+    (vs : List Val) (T' : TowerState) :
+    (∃ k, evalList k ptable level (pre ++ M :: post) env T = some (vs, T')) ↔
+    (∃ k, evalList k ptable level (pre ++ N :: post) env T = some (vs, T')) :=
+  ⟨evalList_EvalEquivAt_forward h h_closed pre post ptable level env T hP vs T',
+   evalList_EvalEquivAt_forward h.symm h_closed pre post ptable level env T hP vs T'⟩
+
+/-- `.app (head :: pre ++ · :: post)`: hole at an arg position. -/
+private theorem appArg_cong_at_forward {P : StatePred} {M N : Expr}
+    (h : EvalEquivAt P M N) (h_closed : PIsClosedUnderEval P)
+    (head : Expr) (pre' post : List Expr)
+    (ptable : PolicyTable) (level : Nat) (env : Env) (T : TowerState)
+    (hP : P ptable level env T)
+    (v_final : Val) (T_final : TowerState)
+    (h_ex : ∃ k, eval k ptable level (.app (head :: (pre' ++ M :: post))) env T
+                  = some (v_final, T_final)) :
+    ∃ k, eval k ptable level (.app (head :: (pre' ++ N :: post))) env T
+          = some (v_final, T_final) := by
+  obtain ⟨k, h_some⟩ := h_ex
+  cases k with
+  | zero => simp [eval] at h_some
+  | succ k' =>
+      simp only [eval] at h_some
+      cases h_eH : eval k' ptable level head env T with
+      | none => rw [h_eH] at h_some; simp at h_some
+      | some pair =>
+          obtain ⟨fv, T_h⟩ := pair
+          rw [h_eH] at h_some
+          simp only at h_some
+          have hP_Th := h_closed ptable level head env T hP k' fv T_h h_eH
+          cases h_eL : evalList k' ptable level (pre' ++ M :: post) env T_h with
+          | none => rw [h_eL] at h_some; simp at h_some
+          | some pair' =>
+              obtain ⟨avs, T_a⟩ := pair'
+              rw [h_eL] at h_some
+              simp only at h_some
+              obtain ⟨k_N, h_eL_N⟩ :=
+                (evalList_EvalEquivAt h h_closed pre' post ptable level env T_h
+                  hP_Th avs T_a).mp ⟨k', h_eL⟩
+              refine ⟨max k' k_N + 1, ?_⟩
+              simp only [eval, eval_fuel_mono (Nat.le_max_left k' k_N) h_eH,
+                         evalList_fuel_mono (Nat.le_max_right k' k_N) h_eL_N]
+              exact applyVia_fuel_mono (Nat.le_max_left k' k_N) h_some
+
+theorem EvalEquivAt.appArg_cong {P : StatePred} {M N : Expr}
+    (h : EvalEquivAt P M N) (h_closed : PIsClosedUnderEval P)
+    (head : Expr) (pre' post : List Expr) :
+    EvalEquivAt P (.app (head :: (pre' ++ M :: post)))
+                  (.app (head :: (pre' ++ N :: post))) := by
+  intro ptable level env T hP v_final T_final
+  exact ⟨appArg_cong_at_forward h h_closed head pre' post ptable level env T hP
+            v_final T_final,
+         appArg_cong_at_forward h.symm h_closed head pre' post ptable level env T hP
+            v_final T_final⟩
+
+/-- `.primApp f (pre ++ · :: post)`: hole at an arg position. -/
+private theorem primAppArg_cong_at_forward {P : StatePred} {M N : Expr}
+    (h : EvalEquivAt P M N) (h_closed : PIsClosedUnderEval P)
+    (f : Expr) (pre' post : List Expr)
+    (ptable : PolicyTable) (level : Nat) (env : Env) (T : TowerState)
+    (hP : P ptable level env T)
+    (v_final : Val) (T_final : TowerState)
+    (h_ex : ∃ k, eval k ptable level (.primApp f (pre' ++ M :: post)) env T
+                  = some (v_final, T_final)) :
+    ∃ k, eval k ptable level (.primApp f (pre' ++ N :: post)) env T
+          = some (v_final, T_final) := by
+  obtain ⟨k, h_some⟩ := h_ex
+  cases k with
+  | zero => simp [eval] at h_some
+  | succ k' =>
+      simp only [eval] at h_some
+      cases h_eF : eval k' ptable level f env T with
+      | none => rw [h_eF] at h_some; simp at h_some
+      | some pair =>
+          obtain ⟨fv, T_f⟩ := pair
+          rw [h_eF] at h_some
+          simp only at h_some
+          have hP_Tf := h_closed ptable level f env T hP k' fv T_f h_eF
+          cases h_eL : evalList k' ptable level (pre' ++ M :: post) env T_f with
+          | none => rw [h_eL] at h_some; simp at h_some
+          | some pair' =>
+              obtain ⟨avs, T_a⟩ := pair'
+              rw [h_eL] at h_some
+              simp only at h_some
+              obtain ⟨k_N, h_eL_N⟩ :=
+                (evalList_EvalEquivAt h h_closed pre' post ptable level env T_f
+                  hP_Tf avs T_a).mp ⟨k', h_eL⟩
+              refine ⟨max k' k_N + 1, ?_⟩
+              simp only [eval, eval_fuel_mono (Nat.le_max_left k' k_N) h_eF,
+                         evalList_fuel_mono (Nat.le_max_right k' k_N) h_eL_N]
+              exact applyDirect_fuel_mono (Nat.le_max_left k' k_N) h_some
+
+theorem EvalEquivAt.primAppArg_cong {P : StatePred} {M N : Expr}
+    (h : EvalEquivAt P M N) (h_closed : PIsClosedUnderEval P)
+    (f : Expr) (pre' post : List Expr) :
+    EvalEquivAt P (.primApp f (pre' ++ M :: post))
+                  (.primApp f (pre' ++ N :: post)) := by
+  intro ptable level env T hP v_final T_final
+  exact ⟨primAppArg_cong_at_forward h h_closed f pre' post ptable level env T hP
+            v_final T_final,
+         primAppArg_cong_at_forward h.symm h_closed f pre' post ptable level env T hP
+            v_final T_final⟩
+
+/-- General `.seq (head :: pre ++ · :: post)`: hole at any tail
+    position of a seq. Uses `PIsClosedUnderEval` to thread `P`
+    through the head + each pre element. -/
+private theorem seqTail_cong_at_forward {P : StatePred} {M N : Expr}
+    (h : EvalEquivAt P M N) (h_closed : PIsClosedUnderEval P) :
+    ∀ (pre post : List Expr) (head : Expr) (ptable : PolicyTable) (level : Nat)
+      (env : Env) (T : TowerState),
+      P ptable level env T →
+      ∀ (v_final : Val) (T_final : TowerState),
+      (∃ k, eval k ptable level (.seq (head :: pre ++ M :: post)) env T
+              = some (v_final, T_final)) →
+      (∃ k, eval k ptable level (.seq (head :: pre ++ N :: post)) env T
+              = some (v_final, T_final)) := by
+  intro pre
+  induction pre with
+  | nil =>
+      intro post head ptable level env T hP v_final T_final ⟨k, h_some⟩
+      cases k with
+      | zero => simp [eval] at h_some
+      | succ k' =>
+          simp only [List.cons_append, List.nil_append, eval] at h_some
+          cases h_eH : eval k' ptable level head env T with
+          | none => rw [h_eH] at h_some; simp at h_some
+          | some pair =>
+              obtain ⟨v_h, T_h⟩ := pair
+              rw [h_eH] at h_some
+              simp only at h_some
+              have hP_Th := h_closed ptable level head env T hP k' v_h T_h h_eH
+              obtain ⟨k_N, h_seq_N⟩ :=
+                (EvalEquivAt.seqHead_cong h post ptable level env T_h hP_Th
+                  v_final T_final).mp ⟨k', h_some⟩
+              refine ⟨max k' k_N + 1, ?_⟩
+              simp only [List.cons_append, List.nil_append, eval,
+                         eval_fuel_mono (Nat.le_max_left k' k_N) h_eH]
+              exact eval_fuel_mono (Nat.le_max_right k' k_N) h_seq_N
+  | cons h_pre pre_rest ih =>
+      intro post head ptable level env T hP v_final T_final ⟨k, h_some⟩
+      cases k with
+      | zero => simp [eval] at h_some
+      | succ k' =>
+          simp only [List.cons_append, eval] at h_some
+          cases h_eH : eval k' ptable level head env T with
+          | none => rw [h_eH] at h_some; simp at h_some
+          | some pair =>
+              obtain ⟨v_h, T_h⟩ := pair
+              rw [h_eH] at h_some
+              simp only at h_some
+              have hP_Th := h_closed ptable level head env T hP k' v_h T_h h_eH
+              obtain ⟨k_N, h_seq_N⟩ :=
+                ih post h_pre ptable level env T_h hP_Th v_final T_final
+                  ⟨k', h_some⟩
+              refine ⟨max k' k_N + 1, ?_⟩
+              simp only [List.cons_append, eval,
+                         eval_fuel_mono (Nat.le_max_left k' k_N) h_eH]
+              exact eval_fuel_mono (Nat.le_max_right k' k_N) h_seq_N
+
+/-- `.seq (head :: pre ++ · :: post)`: hole at any tail position of
+    a seq. Requires `P` closed under eval. -/
+theorem EvalEquivAt.seqTail_cong {P : StatePred} {M N : Expr}
+    (h : EvalEquivAt P M N) (h_closed : PIsClosedUnderEval P)
+    (head : Expr) (pre post : List Expr) :
+    EvalEquivAt P (.seq (head :: pre ++ M :: post))
+                  (.seq (head :: pre ++ N :: post)) := by
+  intro ptable level env T hP v_final T_final
+  exact ⟨seqTail_cong_at_forward h h_closed pre post head ptable level env T hP
+            v_final T_final,
+         seqTail_cong_at_forward h.symm h_closed pre post head ptable level env T hP
+            v_final T_final⟩
+
 /-- `.seq (head :: · :: post)`: hole at position 1 of a seq (just
-    after a fixed head). Restricted to `pre = []`; the general
-    `.seq (head :: pre ++ · :: post)` case requires a `.seq`-
-    traversal helper analogous to `evalList_EvalEquiv`. -/
+    after a fixed head). Specialization of `seqTail_cong` to
+    `pre = []`; takes a *narrower* preservation hypothesis (only
+    `head`'s eval, not all of `pre`). -/
 theorem EvalEquivAt.seqTailFirst_cong {P : StatePred} {M N : Expr}
     (h : EvalEquivAt P M N) (head : Expr) (post : List Expr)
     (h_preserve : ∀ ptable level env T, P ptable level env T →
@@ -1612,6 +1870,104 @@ theorem EasyCtx.plug_cong_at {P : StatePred} : ∀ (C : EasyCtx) {M N : Expr},
       intros M N h
       simp only [EasyCtx.plug]
       exact EvalEquivAt.seqHead_cong (ih h) rest
+
+/-! ### `WideCtx` — `PIsClosedUnderEval`-compatible coverage
+
+`WideCtx` adds to `EasyCtx` the five congruence cases whose
+preservation hypothesis is exactly `PIsClosedUnderEval`:
+`ifteThen`, `ifteElse`, `appArg`, `primAppArg`, `seqTail`.
+
+`WideCtx.plug_cong_at` takes a single `PIsClosedUnderEval P`
+hypothesis and lifts `EvalEquivAt P` through the entire 12-ctor
+sub-language by induction. This is the full Expr-tree coverage
+except `.letEBody`, `.em` (which need *different* preservation
+hypotheses — env-extension and level-shift respectively) and
+`.lam` (which needs `ValVis`-style refinement). -/
+
+inductive WideCtx where
+  | hole       : WideCtx
+  | set        : String → WideCtx → WideCtx
+  | ifteCond   : WideCtx → Expr → Expr → WideCtx
+  | ifteThen   : Expr → WideCtx → Expr → WideCtx
+  | ifteElse   : Expr → Expr → WideCtx → WideCtx
+  | letEVal    : String → WideCtx → Expr → WideCtx
+  | appHead    : WideCtx → List Expr → WideCtx
+  | appArg     : Expr → List Expr → WideCtx → List Expr → WideCtx
+  | primAppFun : WideCtx → List Expr → WideCtx
+  | primAppArg : Expr → List Expr → WideCtx → List Expr → WideCtx
+  | seqHead    : WideCtx → List Expr → WideCtx
+  | seqTail    : Expr → List Expr → WideCtx → List Expr → WideCtx
+
+def WideCtx.plug : WideCtx → Expr → Expr
+  | .hole,             e => e
+  | .set x c,          e => .set x (c.plug e)
+  | .ifteCond c t' e', e => .ifte (c.plug e) t' e'
+  | .ifteThen ec c ee, e => .ifte ec (c.plug e) ee
+  | .ifteElse ec t c,  e => .ifte ec t (c.plug e)
+  | .letEVal x c b,    e => .letE x (c.plug e) b
+  | .appHead c args,   e => .app (c.plug e :: args)
+  | .appArg hd pre c post, e => .app (hd :: (pre ++ c.plug e :: post))
+  | .primAppFun c args,e => .primApp (c.plug e) args
+  | .primAppArg f pre c post, e => .primApp f (pre ++ c.plug e :: post)
+  | .seqHead c rest,   e => .seq (c.plug e :: rest)
+  | .seqTail hd pre c post, e => .seq (hd :: pre ++ c.plug e :: post)
+
+theorem WideCtx.plug_cong_at {P : StatePred} (h_closed : PIsClosedUnderEval P) :
+    ∀ (C : WideCtx) {M N : Expr},
+    EvalEquivAt P M N → EvalEquivAt P (C.plug M) (C.plug N) := by
+  intro C
+  induction C with
+  | hole =>
+      intros M N h
+      simp only [WideCtx.plug]; exact h
+  | set x c ih =>
+      intros M N h
+      simp only [WideCtx.plug]
+      exact EvalEquivAt.set_cong (ih h) x
+  | ifteCond c t' e' ih =>
+      intros M N h
+      simp only [WideCtx.plug]
+      exact EvalEquivAt.ifteCond_cong (ih h) t' e'
+  | ifteThen ec c ee ih =>
+      intros M N h
+      simp only [WideCtx.plug]
+      exact EvalEquivAt.ifteThen_cong (ih h) ec ee
+        (fun ptable level env T hP k v_c T_c h_ec =>
+          h_closed ptable level ec env T hP k v_c T_c h_ec)
+  | ifteElse ec t c ih =>
+      intros M N h
+      simp only [WideCtx.plug]
+      exact EvalEquivAt.ifteElse_cong (ih h) ec t
+        (fun ptable level env T hP k v_c T_c h_ec =>
+          h_closed ptable level ec env T hP k v_c T_c h_ec)
+  | letEVal x c b ih =>
+      intros M N h
+      simp only [WideCtx.plug]
+      exact EvalEquivAt.letEVal_cong (ih h) x b
+  | appHead c args ih =>
+      intros M N h
+      simp only [WideCtx.plug]
+      exact EvalEquivAt.appHead_cong (ih h) args
+  | appArg hd pre c post ih =>
+      intros M N h
+      simp only [WideCtx.plug]
+      exact EvalEquivAt.appArg_cong (ih h) h_closed hd pre post
+  | primAppFun c args ih =>
+      intros M N h
+      simp only [WideCtx.plug]
+      exact EvalEquivAt.primAppFun_cong (ih h) args
+  | primAppArg f pre c post ih =>
+      intros M N h
+      simp only [WideCtx.plug]
+      exact EvalEquivAt.primAppArg_cong (ih h) h_closed f pre post
+  | seqHead c rest ih =>
+      intros M N h
+      simp only [WideCtx.plug]
+      exact EvalEquivAt.seqHead_cong (ih h) rest
+  | seqTail hd pre c post ih =>
+      intros M N h
+      simp only [WideCtx.plug]
+      exact EvalEquivAt.seqTail_cong (ih h) h_closed hd pre post
 
 /-! ## Sub-language with full coverage
 

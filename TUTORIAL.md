@@ -710,20 +710,29 @@ The general β-redex / `.letE` pair depends on
   the cases where the hole's sub-eval happens at the same outer
   state, so `P` propagates trivially: `set_cong`, `ifteCond_cong`,
   `letEVal_cong`, `appHead_cong`, `primAppFun_cong`, `seqHead_cong`.
-- **Five "hard" congruence lemmas** with `P`-preservation
+- **Eight "hard" congruence lemmas** with `P`-preservation
   hypotheses: `letEBody_cong`, `em_cong`, `ifteThen_cong`,
-  `ifteElse_cong`, `seqTailFirst_cong`. Each takes an explicit
+  `ifteElse_cong`, `seqTailFirst_cong`, `appArg_cong`,
+  `primAppArg_cong`, `seqTail_cong`. Each takes an explicit
   hypothesis that `P` is preserved by the relevant pre-hole
-  sub-eval (e.g., for `.letEBody`, the hypothesis says `P` at the
-  outer state implies `P` at the post-`ev`-eval, post-alloc state).
-- **`EasyCtx`** — sub-language with the 7 constructors covered by
-  the easy cases (hole + the six above). **`EasyCtx.plug_cong_at`**
-  lifts `EvalEquivAt P` through any `EasyCtx` by induction.
+  sub-eval.
+- **`PIsClosedUnderEval P`** — the common-case preservation
+  property: `P` is preserved by any successful evaluation at the
+  same `env`/`level`.
+- **`evalList_EvalEquivAt`** — list-traversal congruence helper,
+  the conditional analog of `evalList_EvalEquiv`.
+- **`EasyCtx`** (7 ctors) — `EasyCtx.plug_cong_at` lifts
+  `EvalEquivAt P` with no preservation hypothesis.
+- **`WideCtx`** (12 ctors) — `WideCtx.plug_cong_at` lifts
+  `EvalEquivAt P` given `PIsClosedUnderEval P`. Adds `.ifteThen`,
+  `.ifteElse`, `.appArg`, `.primAppArg`, `.seqTail` to `EasyCtx`'s
+  coverage.
 
-The remaining list-position cases (`.appArg`, `.primAppArg`,
-general `.seqTail`) need an `evalList_EvalEquivAt` helper
-threading the `P`-preservation hypothesis through the list
-traversal — deferred.
+The remaining cases needing a *different* preservation hypothesis
+are `.letEBody` (env-extension across the binding) and `.em`
+(level-shift). Both have standalone congruence lemmas; bundling
+them into a `MediumCtx` would require a record of per-binder
+preservation witnesses.
 
 With **`beta_letE_conv_equiv`** (in `ContextualBeta.lean`) as the
 concrete base-case witness under L1 conditions, the wrapping is
