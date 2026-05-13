@@ -55,6 +55,7 @@ import LeanBlack.Policies
 import LeanBlack.ProofBased
 import LeanBlack.HeapAgree
 import LeanBlack.EvalFuelMono
+import LeanBlack.Ctx
 
 open LeanBlack
 
@@ -288,6 +289,54 @@ theorem beta_letE_conv_equiv
             refine ⟨n'' + 3, ?_⟩
             rw [h_eq]
             exact h_body_n''
+
+/-- State predicate encoding the L1 (`eval_beta_builtin`)
+    conditions, specialized to a fixed `v_expr`: the β-redex
+    `(λx. body) v_expr` and `.letE x v_expr body` are equivalent
+    at any state satisfying this predicate.
+
+    The predicate says: the depth check holds, and *some* fuel
+    `n+1` succeeds in evaluating `v_expr` at this state to a
+    `(v_val, T')` such that `T'` has level+1 materialized with
+    the builtin `base-apply` cell. -/
+def BetaLetEReady (v_expr : Expr) : StatePred :=
+  fun ptable level env T =>
+    level + 1 < Tower.maxDepth ∧
+    ∃ (n : Nat) (v_val : Val) (T' : TowerState),
+      eval (n + 1) ptable level v_expr env T = some (v_val, T') ∧
+      T'.levels.length > level + 1 ∧
+      builtinBaseApplyAt level T'
+
+/-- Bridge from `beta_letE_conv_equiv` to the `EvalEquivAt`
+    framework: the β-redex and `.letE` form are equivalent at
+    any state satisfying `BetaLetEReady v_expr`. -/
+theorem beta_letE_EvalEquivAt (x : String) (body v_expr : Expr) :
+    EvalEquivAt (BetaLetEReady v_expr)
+                (.app [.lam [x] body, v_expr])
+                (.letE x v_expr body) := by
+  intro ptable level env T hP v T_final
+  obtain ⟨h_depth, n, v_val, T', h_eval_v, h_mat', h_builtin'⟩ := hP
+  exact beta_letE_conv_equiv n ptable level x body v_expr env T
+          h_depth v_val T' h_eval_v h_mat' h_builtin' v T_final
+
+/-- **Contextual β-equivalence over `EasyCtx`** — the headline
+    deliverable for the "easy" half of T1.
+
+    For any easy context `C` and any `(x, body, v_expr)`, the
+    β-redex plug and the `.letE` plug are observationally
+    equivalent at every state where the L1 conditions hold on
+    the *plugged* expression.
+
+    Note: the predicate refers to the *inner* `v_expr`, not the
+    plugged `.app [...]` / `.letE`. This is the right form for
+    use cases where the surrounding `EasyCtx` doesn't disturb the
+    L1 conditions (e.g., pure contexts at the relevant levels). -/
+theorem contextual_beta_easy
+    (x : String) (body v_expr : Expr) (C : EasyCtx) :
+    EvalEquivAt (BetaLetEReady v_expr)
+                (C.plug (.app [.lam [x] body, v_expr]))
+                (C.plug (.letE x v_expr body)) :=
+  EasyCtx.plug_cong_at C (beta_letE_EvalEquivAt x body v_expr)
 
 /-- Fuel-flexible packaging of `eval_beta_builtin`: if the β-redex
     succeeds at fuel `n+3` with result `(result, T_final)`, then for

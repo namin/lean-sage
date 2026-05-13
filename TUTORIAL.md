@@ -721,10 +721,20 @@ explicit `P`-preservation hypothesis for the intermediate step.
 They're deferred; the framework template makes them mechanical.
 
 With **`beta_letE_conv_equiv`** (in `ContextualBeta.lean`) as the
-concrete base-case witness under L1 conditions, the remaining
-piece is to wrap it as an `EvalEquivAt P` for the appropriate
-state predicate `P`, then use `EasyCtx.plug_cong_at` to lift to
-any easy context.
+concrete base-case witness under L1 conditions, the wrapping is
+done via:
+
+- **`BetaLetEReady v_expr`** — the L1 conditions packaged as a
+  `StatePred`.
+- **`beta_letE_EvalEquivAt`** — the base case in `EvalEquivAt`
+  form: `EvalEquivAt (BetaLetEReady v_expr) (β-redex) (.letE)`.
+  Direct one-liner consuming `beta_letE_conv_equiv`.
+- **`contextual_beta_easy`** — *the headline T1 deliverable for
+  the easy half*: for any easy context `C : EasyCtx` and any
+  `(x, body, v_expr)`, `C.plug (β-redex)` and `C.plug (.letE)`
+  are observationally equivalent at every state satisfying
+  `BetaLetEReady v_expr`. One-line proof:
+  `EasyCtx.plug_cong_at C (beta_letE_EvalEquivAt x body v_expr)`.
 
 ## 12. Reading order for the source
 

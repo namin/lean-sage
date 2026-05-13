@@ -969,14 +969,16 @@ case at the hole) with `EvalEquivAt.plug_*_cong` for any `Ctx`
 satisfying the relevant preservation properties, yielding
 contextually-quantified β-equivalence. -/
 
-/-- A state predicate over `level`, `env`, and `T`. -/
-abbrev StatePred := Nat → Env → TowerState → Prop
+/-- A state predicate over `ptable`, `level`, `env`, and `T`.
+    Includes `PolicyTable` so predicates can reference `eval` of
+    auxiliary expressions (e.g., the L1 conditions for β-redex). -/
+abbrev StatePred := PolicyTable → Nat → Env → TowerState → Prop
 
 /-- Conditional observational equivalence: same convergent outcomes
     across starting states *satisfying `P`*. -/
 def EvalEquivAt (P : StatePred) (M N : Expr) : Prop :=
   ∀ (ptable : PolicyTable) (level : Nat) (env : Env) (T : TowerState),
-    P level env T →
+    P ptable level env T →
     ∀ (v : Val) (T' : TowerState),
       (∃ k, eval k ptable level M env T = some (v, T')) ↔
       (∃ k, eval k ptable level N env T = some (v, T'))
@@ -1041,7 +1043,7 @@ theorem EvalEquivAt.set_cong {P : StatePred} {M N : Expr}
 private theorem ifteCond_cong_at_forward {P : StatePred} {M N : Expr}
     (h : EvalEquivAt P M N)
     (t e : Expr) (ptable : PolicyTable) (level : Nat) (env : Env) (T : TowerState)
-    (hP : P level env T)
+    (hP : P ptable level env T)
     (v_final : Val) (T_final : TowerState)
     (h_ex : ∃ k, eval k ptable level (.ifte M t e) env T = some (v_final, T_final)) :
     ∃ k, eval k ptable level (.ifte N t e) env T = some (v_final, T_final) := by
@@ -1126,7 +1128,7 @@ theorem EvalEquivAt.letEVal_cong {P : StatePred} {M N : Expr}
 private theorem appHead_cong_at_forward {P : StatePred} {M N : Expr}
     (h : EvalEquivAt P M N) (args : List Expr)
     (ptable : PolicyTable) (level : Nat) (env : Env) (T : TowerState)
-    (hP : P level env T)
+    (hP : P ptable level env T)
     (v_final : Val) (T_final : TowerState)
     (h_ex : ∃ k, eval k ptable level (.app (M :: args)) env T = some (v_final, T_final)) :
     ∃ k, eval k ptable level (.app (N :: args)) env T = some (v_final, T_final) := by
@@ -1164,7 +1166,7 @@ theorem EvalEquivAt.appHead_cong {P : StatePred} {M N : Expr}
 private theorem primAppFun_cong_at_forward {P : StatePred} {M N : Expr}
     (h : EvalEquivAt P M N) (args : List Expr)
     (ptable : PolicyTable) (level : Nat) (env : Env) (T : TowerState)
-    (hP : P level env T)
+    (hP : P ptable level env T)
     (v_final : Val) (T_final : TowerState)
     (h_ex : ∃ k, eval k ptable level (.primApp M args) env T = some (v_final, T_final)) :
     ∃ k, eval k ptable level (.primApp N args) env T = some (v_final, T_final) := by
@@ -1202,7 +1204,7 @@ theorem EvalEquivAt.primAppFun_cong {P : StatePred} {M N : Expr}
 private theorem seqHead_cong_at_forward {P : StatePred} {M N : Expr}
     (h : EvalEquivAt P M N) (rest : List Expr)
     (ptable : PolicyTable) (level : Nat) (env : Env) (T : TowerState)
-    (hP : P level env T)
+    (hP : P ptable level env T)
     (v_final : Val) (T_final : TowerState)
     (h_ex : ∃ k, eval k ptable level (.seq (M :: rest)) env T = some (v_final, T_final)) :
     ∃ k, eval k ptable level (.seq (N :: rest)) env T = some (v_final, T_final) := by
