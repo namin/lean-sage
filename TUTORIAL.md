@@ -625,6 +625,19 @@ fuel pair (`n+3` for the redex, `n` for the contractum); the lift
 re-states the conclusion with quantified fuel on each side
 (`k ≥ n+3`, `m ≥ n`), pushing the alignment to the call site.
 
+A second, more substantive consumer is **`beta_letE_conv_equiv`**:
+the conditional β-redex / `.letE` convergence-existential
+equivalence. Under the `eval_beta_builtin` conditions, the
+existential `(∃ k, eval k β-redex = some(v, T_final))` is
+equivalent to `(∃ k, eval k .letE = some(v, T_final))`. The
+companion lemma **`eval_letE`** unfolds `.letE` in the
+`eval_beta_builtin` shape (body in extended env+heap, at fuel `n`),
+making both sides reduce to the same body eval. The proof aligns
+the two fuel offsets via `eval_fuel_mono` and reconciles the
+post-`v_expr` states via determinism. This is the practical
+β-equivalence base case — what would feed a conditional
+`EvalEquivAt` framework to give fully contextual β.
+
 ### §11.8. Contextual β scaffolding — `Ctx.lean`
 
 [`LeanBlack/Ctx.lean`](LeanBlack/Ctx.lean) opens the contextual-β

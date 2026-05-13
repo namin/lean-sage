@@ -194,15 +194,105 @@ theorem eval_beta_builtin
   rw [applyVia_builtin_factors (n + 1) ptable level _ _ T' h_depth h_mat' h_builtin',
       applyDirect_closure_one n ptable level x body env v_val T']
 
+/-- The `.letE`-step lemma: at fuel `n+1`, `.letE x e body` reduces
+    to body evaluation in the extended environment and heap (provided
+    `e` succeeds at fuel `n`). Analogous to `eval_beta_builtin` but
+    for the `.letE` form. -/
+theorem eval_letE (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (x : String) (e body : Expr) (env : Env) (T : TowerState)
+    (v : Val) (T' : TowerState)
+    (h_eval_e : eval n ptable level e env T = some (v, T')) :
+    eval (n + 1) ptable level (.letE x e body) env T =
+    eval n ptable level body (.cons x T'.heap.length env)
+                              {T' with heap := T'.heap ++ [v]} := by
+  simp only [eval, h_eval_e]
+  rfl
+
+/-- **β-redex ↔ `.letE` convergence-existential equivalence**
+    under the `eval_beta_builtin` conditions. Both sides reach the
+    same body evaluation in the same extended environment / heap;
+    fuel arithmetic differs (β-redex needs `+3`, `.letE` needs `+2`)
+    but converges to the same outcome under `eval_fuel_mono`. This
+    is the practical β-equivalence "base-case witness" — composing
+    with the `SimpleCtx.plug_cong` analog would give contextually-
+    quantified β under the appropriate state preconditions. -/
+theorem beta_letE_conv_equiv
+    (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (x : String) (body v_expr : Expr) (env : Env) (T : TowerState)
+    (h_depth : level + 1 < Tower.maxDepth)
+    (v_val : Val) (T' : TowerState)
+    (h_eval_v : eval (n + 1) ptable level v_expr env T = some (v_val, T'))
+    (h_mat' : T'.levels.length > level + 1)
+    (h_builtin' : builtinBaseApplyAt level T')
+    (v : Val) (T_final : TowerState) :
+    (∃ k, eval k ptable level (.app [.lam [x] body, v_expr]) env T
+            = some (v, T_final)) ↔
+    (∃ k, eval k ptable level (.letE x v_expr body) env T
+            = some (v, T_final)) := by
+  constructor
+  · rintro ⟨k, h_k⟩
+    -- Lift β-redex to fuel ≥ n+3. Let n'' = (max k (n+3)) - 3, so n''+3 ≥ k and n'' ≥ n.
+    let K := max k (n + 3)
+    have h_beta_K : eval K ptable level (.app [.lam [x] body, v_expr]) env T
+                      = some (v, T_final) := eval_fuel_mono (Nat.le_max_left _ _) h_k
+    have h_le_n3_K : n + 3 ≤ K := Nat.le_max_right _ _
+    have h_K_eq : K = (K - 3) + 3 := by omega
+    have h_le_n_K3 : n ≤ K - 3 := by omega
+    have h_eval_v_K3 : eval ((K - 3) + 1) ptable level v_expr env T
+                          = some (v_val, T') :=
+      eval_fuel_mono (by omega) h_eval_v
+    have h_eq := eval_beta_builtin (K - 3) ptable level x body v_expr env T
+                   h_depth v_val T' h_eval_v_K3 h_mat' h_builtin'
+    rw [← h_K_eq] at h_eq
+    rw [h_eq] at h_beta_K
+    -- h_beta_K : eval (K - 3) body (extended env) (extended heap) = some(v, T_final)
+    refine ⟨(K - 3) + 2, ?_⟩
+    rw [eval_letE ((K - 3) + 1) ptable level x v_expr body env T v_val T' h_eval_v_K3]
+    exact eval_fuel_mono (Nat.le_succ _) h_beta_K
+  · rintro ⟨k, h_k⟩
+    -- .letE success at fuel k. Extract m = k - 1.
+    cases k with
+    | zero => simp [eval] at h_k
+    | succ m =>
+        simp only [eval] at h_k
+        cases h_em : eval m ptable level v_expr env T with
+        | none => rw [h_em] at h_k; simp at h_k
+        | some pair =>
+            obtain ⟨v', T_v'⟩ := pair
+            rw [h_em] at h_k
+            simp only at h_k
+            -- By determinism + fuel_mono, v' = v_val and T_v' = T'.
+            have h_lift_M : max m (n + 1) ≥ m := Nat.le_max_left _ _
+            have h_lift_n1 : max m (n + 1) ≥ n + 1 := Nat.le_max_right _ _
+            have h_em_M : eval (max m (n + 1)) ptable level v_expr env T = some (v', T_v') :=
+              eval_fuel_mono h_lift_M h_em
+            have h_ev_M : eval (max m (n + 1)) ptable level v_expr env T = some (v_val, T') :=
+              eval_fuel_mono h_lift_n1 h_eval_v
+            have h_eq_some : some (v', T_v') = some (v_val, T') := by
+              rw [← h_em_M, h_ev_M]
+            obtain ⟨h_v', h_T_v'⟩ := Prod.mk.inj (Option.some.inj h_eq_some)
+            rw [h_v', h_T_v'] at h_k
+            -- h_k : eval m body (extended env) (extended heap) = some(v, T_final)
+            let n'' := max m n
+            have h_le_m_n'' : m ≤ n'' := Nat.le_max_left _ _
+            have h_le_n_n'' : n ≤ n'' := Nat.le_max_right _ _
+            have h_body_n'' : eval n'' ptable level body
+                                (.cons x T'.heap.length env)
+                                {T' with heap := T'.heap ++ [v_val]}
+                              = some (v, T_final) := eval_fuel_mono h_le_m_n'' h_k
+            have h_eval_v_n'' : eval (n'' + 1) ptable level v_expr env T
+                                  = some (v_val, T') :=
+              eval_fuel_mono (by omega) h_eval_v
+            have h_eq := eval_beta_builtin n'' ptable level x body v_expr env T
+                           h_depth v_val T' h_eval_v_n'' h_mat' h_builtin'
+            refine ⟨n'' + 3, ?_⟩
+            rw [h_eq]
+            exact h_body_n''
+
 /-- Fuel-flexible packaging of `eval_beta_builtin`: if the β-redex
     succeeds at fuel `n+3` with result `(result, T_final)`, then for
     any `k ≥ n+3` it also succeeds at fuel `k`, and for any `m ≥ n`
-    the contractum body succeeds at fuel `m` with the same result.
-
-    Concretely, this is the composition of `eval_beta_builtin` with
-    `eval_fuel_mono` (from `EvalFuelMono.lean`) on each side. Useful
-    when the surrounding context fixes a different outer fuel: pick
-    `k = m + 3` for any `m ≥ n` and the two evaluations align. -/
+    the contractum body succeeds at fuel `m` with the same result. -/
 theorem eval_beta_builtin_fuel_lift
     (n : Nat) (ptable : PolicyTable) (level : Nat)
     (x : String) (body : Expr) (v_expr : Expr) (env : Env) (T : TowerState)
