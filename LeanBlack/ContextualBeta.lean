@@ -382,6 +382,60 @@ example (x : String) (body v_expr : Expr) (y : String) (t e : Expr) :
                 (.ifte (.set y (.letE x v_expr body)) t e) :=
   contextual_beta_easy x body v_expr (.ifteCond (.set y .hole) t e)
 
+/-! ### Specialization to literal `v_expr`
+
+For `v_expr = .num i` (and other "trivially evaluable" literals),
+`BetaLetEReady` simplifies to a state-only predicate — no
+`eval` reference. -/
+
+/-- For `v_expr = .num i`, `BetaLetEReady` reduces to a state-only
+    predicate (no `eval` quantification). -/
+theorem BetaLetEReady_num_iff (i : Int) (ptable : PolicyTable) (level : Nat)
+    (env : Env) (T : TowerState) :
+    BetaLetEReady (.num i) ptable level env T ↔
+      (level + 1 < Tower.maxDepth ∧ T.levels.length > level + 1 ∧
+       builtinBaseApplyAt level T) := by
+  constructor
+  · rintro ⟨h_depth, n, v_val, T', h_eval, h_mat, h_builtin⟩
+    simp [eval] at h_eval
+    obtain ⟨rfl, rfl⟩ := h_eval
+    exact ⟨h_depth, h_mat, h_builtin⟩
+  · rintro ⟨h_depth, h_mat, h_builtin⟩
+    refine ⟨h_depth, 0, .num i, T, ?_, h_mat, h_builtin⟩
+    simp [eval]
+
+/-! ### Worked example — `wand_defeated_existential_gated_beta`'s
+    specific pair, contextually quantified
+
+`M = (λx. x) 0`, `N = .letE x 0 x` — the exact pair used in the
+specific-fuel `wand_defeated_existential_gated_beta` theorem.
+Lifted via `contextual_beta_easy` to any `EasyCtx`. -/
+
+/-- The contextually-quantified β-equivalence for the
+    wand-defeated specific pair: for any easy context `C`,
+    `C.plug ((λx. x) 0) ≡ C.plug (.letE x 0 x)` at every state
+    where the L1 conditions hold. -/
+theorem wand_beta_ctx_easy (C : EasyCtx) :
+    EvalEquivAt (BetaLetEReady (.num 0))
+                (C.plug (.app [.lam ["x"] (.var "x"), .num 0]))
+                (C.plug (.letE "x" (.num 0) (.var "x"))) :=
+  contextual_beta_easy "x" (.var "x") (.num 0) C
+
+/-- Concrete instantiation: β in the function position of an outer
+    `.primApp`. Result: `(+ ((λx. x) 0) ...) ≡ (+ (.letE x 0 x) ...)`. -/
+example (args : List Expr) :
+    EvalEquivAt (BetaLetEReady (.num 0))
+                (.primApp (.app [.lam ["x"] (.var "x"), .num 0]) args)
+                (.primApp (.letE "x" (.num 0) (.var "x")) args) :=
+  wand_beta_ctx_easy (.primAppFun .hole args)
+
+/-- Concrete instantiation: β at the head of an `.app`. -/
+example (args : List Expr) :
+    EvalEquivAt (BetaLetEReady (.num 0))
+                (.app ((.app [.lam ["x"] (.var "x"), .num 0]) :: args))
+                (.app ((.letE "x" (.num 0) (.var "x")) :: args)) :=
+  wand_beta_ctx_easy (.appHead .hole args)
+
 /-- Fuel-flexible packaging of `eval_beta_builtin`: if the β-redex
     succeeds at fuel `n+3` with result `(result, T_final)`, then for
     any `k ≥ n+3` it also succeeds at fuel `k`, and for any `m ≥ n`
