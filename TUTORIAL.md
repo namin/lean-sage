@@ -24,7 +24,7 @@ lake exe demos                # 29/29 — reflection demos
 lake exe proofBasedSmoke      # 18/18 — proof-based integration scenes
 ```
 
-Proof-based admission lives in four files:
+Proof-based admission lives in five files:
 
 - [`LeanBlack/ProofBased.lean`](LeanBlack/ProofBased.lean) — the
   library: `CE_weak_strong`, `ApprovedModification`, `approvedPolicy`,
@@ -38,6 +38,11 @@ Proof-based admission lives in four files:
   operational β-redex factoring and the CE→β bridges (full-prefix
   + selective). Connects an `approvedPolicy` admission to a
   runtime β-equivalence statement. See §11.5.
+- [`LeanBlack/EvalFuelMono.lean`](LeanBlack/EvalFuelMono.lean) —
+  fuel monotonicity: success at fuel `n` is preserved at every
+  fuel `m ≥ n`, for all four mutually-recursive evaluation
+  functions. The arithmetic enabler for fuel-juggling inside L4
+  and contextual β. See §11.7.
 - [`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) — runnable scenes
   showing `approvedPolicy` installed at a level and gating a real
   `.set` during tower evaluation. **This is where you see the
@@ -575,6 +580,45 @@ adds the matching bridge:
 Net effect: the CE certificate now flows past admission. What
 remains for full contextual β is L4's parallel-bisim invariant
 threaded through eval — the pieces it consumes are now in place.
+
+### §11.7. Fuel monotonicity — `EvalFuelMono.lean`
+
+[`LeanBlack/EvalFuelMono.lean`](LeanBlack/EvalFuelMono.lean) closes
+a small but load-bearing gap: the operational β-redex factoring in
+§11.5 fixes a specific fuel for the redex (`n+3`) and another for
+the contractum (`n`). To equate the two inside a containing
+context, the surrounding `eval`s on each side need to be reconciled
+at a common fuel.
+
+- **`EvalFuelBump n`** — joint claim: success at fuel `n` implies
+  success at fuel `n+1` (same value, same final tower state) for
+  all four mutually-recursive functions.
+- **`evalFuelBump_zero`** — base case, vacuous (no function
+  succeeds at fuel 0).
+- **`evalFuelBump_succ`** — inductive step, joint induction on the
+  outer constructor (per-`Expr` for `eval`, per-`List` shape for
+  `evalList`, per-`Val` for `applyDirect`, sequential for
+  `applyVia`). Structurally parallel to
+  `ProofBased.lean`'s `allPureIndep_succ`, but with a one-step
+  fuel-bump claim and no `Pure` precondition. All cases proven,
+  including `.set` and `.installPolicy` (which `allPureIndep_succ`
+  skips via `Pure = false`).
+- **`evalFuelBump`** — combines base and step.
+- **`eval_fuel_mono`**, **`evalList_fuel_mono`**,
+  **`applyVia_fuel_mono`**, **`applyDirect_fuel_mono`** — the
+  user-facing corollaries. For any `n ≤ m`, success at fuel `n`
+  implies success at fuel `m`. Proved by `Nat.le.induction` on the
+  bump.
+
+These corollaries are the input to L4's joint-induction setup:
+fuel can be juggled freely while threading the cross-side
+invariant, without committing to a single fuel value up front.
+
+The first concrete consumer is **`eval_beta_builtin_fuel_lift`** in
+`ContextualBeta.lean`. `eval_beta_builtin` is stated at a specific
+fuel pair (`n+3` for the redex, `n` for the contractum); the lift
+re-states the conclusion with quantified fuel on each side
+(`k ≥ n+3`, `m ≥ n`), pushing the alignment to the call site.
 
 ## 12. Reading order for the source
 

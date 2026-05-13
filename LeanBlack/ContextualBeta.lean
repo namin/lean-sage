@@ -54,6 +54,7 @@ import LeanBlack.Soundness
 import LeanBlack.Policies
 import LeanBlack.ProofBased
 import LeanBlack.HeapAgree
+import LeanBlack.EvalFuelMono
 
 open LeanBlack
 
@@ -192,6 +193,41 @@ theorem eval_beta_builtin
   show applyVia (n + 2) ptable level (.closure [x] body env) [v_val] T' = _
   rw [applyVia_builtin_factors (n + 1) ptable level _ _ T' h_depth h_mat' h_builtin',
       applyDirect_closure_one n ptable level x body env v_val T']
+
+/-- Fuel-flexible packaging of `eval_beta_builtin`: if the β-redex
+    succeeds at fuel `n+3` with result `(result, T_final)`, then for
+    any `k ≥ n+3` it also succeeds at fuel `k`, and for any `m ≥ n`
+    the contractum body succeeds at fuel `m` with the same result.
+
+    Concretely, this is the composition of `eval_beta_builtin` with
+    `eval_fuel_mono` (from `EvalFuelMono.lean`) on each side. Useful
+    when the surrounding context fixes a different outer fuel: pick
+    `k = m + 3` for any `m ≥ n` and the two evaluations align. -/
+theorem eval_beta_builtin_fuel_lift
+    (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (x : String) (body : Expr) (v_expr : Expr) (env : Env) (T : TowerState)
+    (h_depth : level + 1 < Tower.maxDepth)
+    (v_val : Val) (T' : TowerState)
+    (h_eval_v : eval (n + 1) ptable level v_expr env T = some (v_val, T'))
+    (h_mat' : T'.levels.length > level + 1)
+    (h_builtin' : builtinBaseApplyAt level T')
+    {result : Val} {T_final : TowerState}
+    (h_redex : eval (n + 3) ptable level (.app [.lam [x] body, v_expr]) env T
+                = some (result, T_final))
+    {k m : Nat} (h_k : n + 3 ≤ k) (h_m : n ≤ m) :
+    eval k ptable level (.app [.lam [x] body, v_expr]) env T = some (result, T_final)
+      ∧ eval m ptable level body
+            (Env.cons x T'.heap.length env)
+            { T' with heap := T'.heap ++ [v_val] } = some (result, T_final) := by
+  refine ⟨eval_fuel_mono h_k h_redex, ?_⟩
+  have h_contract :
+      eval n ptable level body (Env.cons x T'.heap.length env)
+        { T' with heap := T'.heap ++ [v_val] } = some (result, T_final) := by
+    have h_eq := eval_beta_builtin n ptable level x body v_expr env T h_depth
+                   v_val T' h_eval_v h_mat' h_builtin'
+    rw [h_eq] at h_redex
+    exact h_redex
+  exact eval_fuel_mono h_m h_contract
 
 /-! ## Phase B — CE→β bridge (single-use form)
 
