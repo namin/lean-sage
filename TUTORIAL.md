@@ -691,10 +691,40 @@ The **unconditional witness library** provides concrete
 (`.ifte (.bool false) t e ≡ e`). For each, combining with
 `SimpleCtx.plug_cong` yields a contextually-quantified
 equivalence — i.e., a constant-fold / β-reduction valid in any
-position. The general β-redex / `.letE` pair is *not* in this
-library: it depends on `builtinBaseApplyAt level T'`, so the
-natural form is conditional (`EvalEquivAt`), which is the next
-piece.
+position.
+
+### §11.9. Conditional contextual β — `EvalEquivAt` + `EasyCtx`
+
+The general β-redex / `.letE` pair depends on
+`builtinBaseApplyAt level T'`, so the natural form is *conditional*.
+[`LeanBlack/Ctx.lean`](LeanBlack/Ctx.lean) provides this:
+
+- **`StatePred := Nat → Env → TowerState → Prop`** — a state
+  predicate.
+- **`EvalEquivAt P M N`** — `M` and `N` are observationally
+  equivalent at every state satisfying `P`. `EvalEquiv` is the
+  special case `EvalEquivAt (fun _ _ _ => True)`;
+  `EvalEquiv.toEvalEquivAt` lifts strict witnesses to any `P`.
+- Equivalence relation (`refl` / `symm` / `trans`).
+- **Six "easy" congruence lemmas** at the `EvalEquivAt P` level —
+  the cases where the hole's sub-eval happens at the same outer
+  state, so `P` propagates trivially: `set_cong`, `ifteCond_cong`,
+  `letEVal_cong`, `appHead_cong`, `primAppFun_cong`, `seqHead_cong`.
+- **`EasyCtx`** — sub-language with the 7 constructors covered by
+  the easy cases (hole + the six above). **`EasyCtx.plug_cong_at`**
+  lifts `EvalEquivAt P` through any `EasyCtx` by induction.
+
+The "hard" cases (`.ifteThen`/`.ifteElse`, `.em`, `.letEBody`,
+`.appArg`/`.primAppArg`, `.seqTail`) — where the hole's sub-eval
+happens at a state *after* an intermediate evaluation — need an
+explicit `P`-preservation hypothesis for the intermediate step.
+They're deferred; the framework template makes them mechanical.
+
+With **`beta_letE_conv_equiv`** (in `ContextualBeta.lean`) as the
+concrete base-case witness under L1 conditions, the remaining
+piece is to wrap it as an `EvalEquivAt P` for the appropriate
+state predicate `P`, then use `EasyCtx.plug_cong_at` to lift to
+any easy context.
 
 ## 12. Reading order for the source
 
