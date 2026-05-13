@@ -24,7 +24,7 @@ lake exe demos                # 29/29 — reflection demos
 lake exe proofBasedSmoke      # 18/18 — proof-based integration scenes
 ```
 
-Proof-based admission lives in five files:
+Proof-based admission lives in six files:
 
 - [`LeanBlack/ProofBased.lean`](LeanBlack/ProofBased.lean) — the
   library: `CE_weak_strong`, `ApprovedModification`, `approvedPolicy`,
@@ -43,6 +43,11 @@ Proof-based admission lives in five files:
   fuel `m ≥ n`, for all four mutually-recursive evaluation
   functions. The arithmetic enabler for fuel-juggling inside L4
   and contextual β. See §11.7.
+- [`LeanBlack/Ctx.lean`](LeanBlack/Ctx.lean) — term contexts +
+  `EvalEquiv` observational equivalence + per-constructor
+  congruence lemmas (`.set`, `.em`, `.letEVal`, `.letEBody`,
+  `.ifteCond`). Includes `SimpleCtx`, the sub-language with full
+  congruence coverage. See §11.8.
 - [`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) — runnable scenes
   showing `approvedPolicy` installed at a level and gating a real
   `.set` during tower evaluation. **This is where you see the
@@ -619,6 +624,45 @@ The first concrete consumer is **`eval_beta_builtin_fuel_lift`** in
 fuel pair (`n+3` for the redex, `n` for the contractum); the lift
 re-states the conclusion with quantified fuel on each side
 (`k ≥ n+3`, `m ≥ n`), pushing the alignment to the call site.
+
+### §11.8. Contextual β scaffolding — `Ctx.lean`
+
+[`LeanBlack/Ctx.lean`](LeanBlack/Ctx.lean) opens the contextual-β
+track. The shape:
+
+- **`Ctx`** — term contexts with a single hole, one constructor per
+  `Expr` shape with a recursive sub-expression position. Includes
+  `.hole`, `.ifteCond`/`.ifteThen`/`.ifteElse`, `.lam`, `.app pre · post`,
+  `.set`, `.em`, `.primAppFun`/`.primAppArg`, `.letEVal`/`.letEBody`,
+  `.seq pre · post`.
+- **`Ctx.plug : Ctx → Expr → Expr`** — fills the hole.
+- **`EvalEquiv M N`** — observational equivalence in
+  convergence-existential form: `∀ initial state, ∀ outcome,
+  (∃ k, eval k M = some outcome) ↔ (∃ k, eval k N = some outcome)`.
+  Equivalent under `eval_fuel_mono` to "agree at all sufficient fuel".
+- `EvalEquiv.refl` / `.symm` / `.trans` — equivalence relation.
+
+The substantive content is the per-`Ctx`-constructor congruence
+lemmas: `EvalEquiv M N → EvalEquiv (C M) (C N)` for one wrapper at
+a time. Five non-trivial cases are proven:
+**`plug_set`**, **`em_cong`**, **`letEVal_cong`**, **`letEBody_cong`**,
+**`ifteCond_cong`** (plus the trivial `plug_hole`).
+
+The proof template:
+1. unfold one `eval` step (`simp only [eval]`),
+2. case-split on the sub-eval at the hole position,
+3. apply the `EvalEquiv` hypothesis to lift the M-side sub-eval to
+   the N-side,
+4. use `eval_fuel_mono` to align fuels when re-assembling.
+
+**`SimpleCtx`** is the sub-language whose constructors all have
+proven congruence lemmas; **`SimpleCtx.plug_cong`** lifts
+`EvalEquiv` through any `SimpleCtx` by induction. This is the
+clean half of T1 — the contextually-quantified β statement for the
+sub-fragment where the hole sits in an impure-but-tractable
+position. The deferred cases (`.lam`, `.ifteThen`/`.ifteElse`,
+`.app`/`.primApp`/`.seq` list-positions) are documented inside the
+file with their proof structures.
 
 ## 12. Reading order for the source
 
