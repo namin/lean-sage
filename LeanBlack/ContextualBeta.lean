@@ -338,6 +338,50 @@ theorem contextual_beta_easy
                 (C.plug (.letE x v_expr body)) :=
   EasyCtx.plug_cong_at C (beta_letE_EvalEquivAt x body v_expr)
 
+/-! ### Concrete usage examples — the framework in action -/
+
+/-- Identity context: β at top level. -/
+example (x : String) (body v_expr : Expr) :
+    EvalEquivAt (BetaLetEReady v_expr)
+                (.app [.lam [x] body, v_expr])
+                (.letE x v_expr body) :=
+  contextual_beta_easy x body v_expr .hole
+
+/-- β under `.set` (the gate value position). -/
+example (x : String) (body v_expr : Expr) (y : String) :
+    EvalEquivAt (BetaLetEReady v_expr)
+                (.set y (.app [.lam [x] body, v_expr]))
+                (.set y (.letE x v_expr body)) :=
+  contextual_beta_easy x body v_expr (.set y .hole)
+
+/-- β nested in `.ifte`'s cond. -/
+example (x : String) (body v_expr : Expr) (t e : Expr) :
+    EvalEquivAt (BetaLetEReady v_expr)
+                (.ifte (.app [.lam [x] body, v_expr]) t e)
+                (.ifte (.letE x v_expr body) t e) :=
+  contextual_beta_easy x body v_expr (.ifteCond .hole t e)
+
+/-- β at the function position of an outer `.primApp`. -/
+example (x : String) (body v_expr : Expr) (args : List Expr) :
+    EvalEquivAt (BetaLetEReady v_expr)
+                (.primApp (.app [.lam [x] body, v_expr]) args)
+                (.primApp (.letE x v_expr body) args) :=
+  contextual_beta_easy x body v_expr (.primAppFun .hole args)
+
+/-- β in the value position of a `.letE` binding another variable. -/
+example (x : String) (body v_expr : Expr) (y : String) (body' : Expr) :
+    EvalEquivAt (BetaLetEReady v_expr)
+                (.letE y (.app [.lam [x] body, v_expr]) body')
+                (.letE y (.letE x v_expr body) body') :=
+  contextual_beta_easy x body v_expr (.letEVal y .hole body')
+
+/-- β nested two levels deep: inside a `.set` inside an `.ifteCond`. -/
+example (x : String) (body v_expr : Expr) (y : String) (t e : Expr) :
+    EvalEquivAt (BetaLetEReady v_expr)
+                (.ifte (.set y (.app [.lam [x] body, v_expr])) t e)
+                (.ifte (.set y (.letE x v_expr body)) t e) :=
+  contextual_beta_easy x body v_expr (.ifteCond (.set y .hole) t e)
+
 /-- Fuel-flexible packaging of `eval_beta_builtin`: if the β-redex
     succeeds at fuel `n+3` with result `(result, T_final)`, then for
     any `k ≥ n+3` it also succeeds at fuel `k`, and for any `m ≥ n`
