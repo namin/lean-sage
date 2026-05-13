@@ -710,15 +710,20 @@ The general β-redex / `.letE` pair depends on
   the cases where the hole's sub-eval happens at the same outer
   state, so `P` propagates trivially: `set_cong`, `ifteCond_cong`,
   `letEVal_cong`, `appHead_cong`, `primAppFun_cong`, `seqHead_cong`.
+- **Five "hard" congruence lemmas** with `P`-preservation
+  hypotheses: `letEBody_cong`, `em_cong`, `ifteThen_cong`,
+  `ifteElse_cong`, `seqTailFirst_cong`. Each takes an explicit
+  hypothesis that `P` is preserved by the relevant pre-hole
+  sub-eval (e.g., for `.letEBody`, the hypothesis says `P` at the
+  outer state implies `P` at the post-`ev`-eval, post-alloc state).
 - **`EasyCtx`** — sub-language with the 7 constructors covered by
   the easy cases (hole + the six above). **`EasyCtx.plug_cong_at`**
   lifts `EvalEquivAt P` through any `EasyCtx` by induction.
 
-The "hard" cases (`.ifteThen`/`.ifteElse`, `.em`, `.letEBody`,
-`.appArg`/`.primAppArg`, `.seqTail`) — where the hole's sub-eval
-happens at a state *after* an intermediate evaluation — need an
-explicit `P`-preservation hypothesis for the intermediate step.
-They're deferred; the framework template makes them mechanical.
+The remaining list-position cases (`.appArg`, `.primAppArg`,
+general `.seqTail`) need an `evalList_EvalEquivAt` helper
+threading the `P`-preservation hypothesis through the list
+traversal — deferred.
 
 With **`beta_letE_conv_equiv`** (in `ContextualBeta.lean`) as the
 concrete base-case witness under L1 conditions, the wrapping is

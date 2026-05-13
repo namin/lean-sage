@@ -1238,6 +1238,317 @@ theorem EvalEquivAt.seqHead_cong {P : StatePred} {M N : Expr}
   exact ⟨seqHead_cong_at_forward h rest ptable level env T hP v_final T_final,
          seqHead_cong_at_forward h.symm rest ptable level env T hP v_final T_final⟩
 
+/-! ### "Hard" cases — inner state differs from outer
+
+These congruence lemmas take an explicit `P`-preservation
+hypothesis for the pre-hole sub-eval. The user supplies the
+preservation proof per choice of `P`. -/
+
+/-- `.letE x ev ·`: hole in the body. Inner eval is at the
+    post-alloc state. -/
+theorem EvalEquivAt.letEBody_cong {P : StatePred} {M N : Expr}
+    (h : EvalEquivAt P M N) (x : String) (ev : Expr)
+    (h_preserve : ∀ ptable level env T, P ptable level env T →
+                  ∀ k v T', eval k ptable level ev env T = some (v, T') →
+                  P ptable level (.cons x T'.heap.length env)
+                                  {T' with heap := T'.heap ++ [v]}) :
+    EvalEquivAt P (.letE x ev M) (.letE x ev N) := by
+  intro ptable level env T hP v_final T_final
+  constructor
+  · rintro ⟨k, h_some⟩
+    cases k with
+    | zero => simp [eval] at h_some
+    | succ k' =>
+        simp only [eval] at h_some
+        cases h_ev : eval k' ptable level ev env T with
+        | none => rw [h_ev] at h_some; simp at h_some
+        | some pair =>
+            obtain ⟨v_ev, T_ev⟩ := pair
+            rw [h_ev] at h_some
+            simp only at h_some
+            have hP' := h_preserve ptable level env T hP k' v_ev T_ev h_ev
+            obtain ⟨k_N, h_N⟩ := (h ptable level _ _ hP' v_final T_final).mp
+              ⟨k', h_some⟩
+            refine ⟨max k' k_N + 1, ?_⟩
+            simp only [eval, eval_fuel_mono (Nat.le_max_left k' k_N) h_ev]
+            exact eval_fuel_mono (Nat.le_max_right k' k_N) h_N
+  · rintro ⟨k, h_some⟩
+    cases k with
+    | zero => simp [eval] at h_some
+    | succ k' =>
+        simp only [eval] at h_some
+        cases h_ev : eval k' ptable level ev env T with
+        | none => rw [h_ev] at h_some; simp at h_some
+        | some pair =>
+            obtain ⟨v_ev, T_ev⟩ := pair
+            rw [h_ev] at h_some
+            simp only at h_some
+            have hP' := h_preserve ptable level env T hP k' v_ev T_ev h_ev
+            obtain ⟨k_M, h_M⟩ := (h ptable level _ _ hP' v_final T_final).mpr
+              ⟨k', h_some⟩
+            refine ⟨max k' k_M + 1, ?_⟩
+            simp only [eval, eval_fuel_mono (Nat.le_max_left k' k_M) h_ev]
+            exact eval_fuel_mono (Nat.le_max_right k' k_M) h_M
+
+/-- `.em ·`: hole in the body. Inner eval is at the materialized
+    state at level+1. -/
+theorem EvalEquivAt.em_cong {P : StatePred} {M N : Expr}
+    (h : EvalEquivAt P M N)
+    (h_preserve : ∀ ptable level env T, P ptable level env T →
+                  ∀ T_mat, T.materialize (level + 1) = some T_mat →
+                  ∀ upEnv, T_mat.envAt? (level + 1) = some upEnv →
+                  P ptable (level + 1) upEnv T_mat) :
+    EvalEquivAt P (.em M) (.em N) := by
+  intro ptable level env T hP v_final T_final
+  constructor
+  · rintro ⟨k, h_some⟩
+    cases k with
+    | zero => simp [eval] at h_some
+    | succ k' =>
+        simp only [eval] at h_some
+        cases h_mat : T.materialize (level + 1) with
+        | none => rw [h_mat] at h_some; simp at h_some
+        | some T_mat =>
+            simp [h_mat] at h_some
+            cases h_env : T_mat.envAt? (level + 1) with
+            | none => simp [h_env] at h_some
+            | some upEnv =>
+                simp [h_env] at h_some
+                have hP' := h_preserve ptable level env T hP T_mat h_mat upEnv h_env
+                obtain ⟨k_N, h_N⟩ := (h ptable (level+1) upEnv T_mat hP'
+                  v_final T_final).mp ⟨k', h_some⟩
+                refine ⟨k_N + 1, ?_⟩
+                simp only [eval, h_mat]
+                simp [h_env, h_N]
+  · rintro ⟨k, h_some⟩
+    cases k with
+    | zero => simp [eval] at h_some
+    | succ k' =>
+        simp only [eval] at h_some
+        cases h_mat : T.materialize (level + 1) with
+        | none => rw [h_mat] at h_some; simp at h_some
+        | some T_mat =>
+            simp [h_mat] at h_some
+            cases h_env : T_mat.envAt? (level + 1) with
+            | none => simp [h_env] at h_some
+            | some upEnv =>
+                simp [h_env] at h_some
+                have hP' := h_preserve ptable level env T hP T_mat h_mat upEnv h_env
+                obtain ⟨k_M, h_M⟩ := (h ptable (level+1) upEnv T_mat hP'
+                  v_final T_final).mpr ⟨k', h_some⟩
+                refine ⟨k_M + 1, ?_⟩
+                simp only [eval, h_mat]
+                simp [h_env, h_M]
+
+/-- Helper for `.ifteThen_cong_at`. -/
+private theorem ifteThen_cong_at_forward {P : StatePred} {M N : Expr}
+    (h : EvalEquivAt P M N) (ec ee : Expr)
+    (h_preserve : ∀ ptable level env T, P ptable level env T →
+                  ∀ k v_c T_c, eval k ptable level ec env T = some (v_c, T_c) →
+                  P ptable level env T_c)
+    (ptable : PolicyTable) (level : Nat) (env : Env) (T : TowerState)
+    (hP : P ptable level env T)
+    (v_final : Val) (T_final : TowerState)
+    (h_ex : ∃ k, eval k ptable level (.ifte ec M ee) env T = some (v_final, T_final)) :
+    ∃ k, eval k ptable level (.ifte ec N ee) env T = some (v_final, T_final) := by
+  obtain ⟨k, h_some⟩ := h_ex
+  cases k with
+  | zero => simp [eval] at h_some
+  | succ k' =>
+      simp only [eval] at h_some
+      cases h_ec : eval k' ptable level ec env T with
+      | none => rw [h_ec] at h_some; simp at h_some
+      | some pair =>
+          obtain ⟨v_c, T_c⟩ := pair
+          rw [h_ec] at h_some
+          have hP_Tc := h_preserve ptable level env T hP k' v_c T_c h_ec
+          cases v_c with
+          | bool b =>
+              cases b with
+              | false =>
+                  refine ⟨k' + 1, ?_⟩
+                  simp only [eval, h_ec]; exact h_some
+              | true =>
+                  obtain ⟨k_N, h_N⟩ :=
+                    (h ptable level env T_c hP_Tc v_final T_final).mp ⟨k', h_some⟩
+                  refine ⟨max k' k_N + 1, ?_⟩
+                  simp only [eval, eval_fuel_mono (Nat.le_max_left k' k_N) h_ec]
+                  try simp
+                  exact eval_fuel_mono (Nat.le_max_right k' k_N) h_N
+          | num _ =>
+              obtain ⟨k_N, h_N⟩ :=
+                (h ptable level env T_c hP_Tc v_final T_final).mp ⟨k', h_some⟩
+              refine ⟨max k' k_N + 1, ?_⟩
+              simp only [eval, eval_fuel_mono (Nat.le_max_left k' k_N) h_ec]
+              try simp
+              exact eval_fuel_mono (Nat.le_max_right k' k_N) h_N
+          | nilV =>
+              obtain ⟨k_N, h_N⟩ :=
+                (h ptable level env T_c hP_Tc v_final T_final).mp ⟨k', h_some⟩
+              refine ⟨max k' k_N + 1, ?_⟩
+              simp only [eval, eval_fuel_mono (Nat.le_max_left k' k_N) h_ec]
+              try simp
+              exact eval_fuel_mono (Nat.le_max_right k' k_N) h_N
+          | sym _ =>
+              obtain ⟨k_N, h_N⟩ :=
+                (h ptable level env T_c hP_Tc v_final T_final).mp ⟨k', h_some⟩
+              refine ⟨max k' k_N + 1, ?_⟩
+              simp only [eval, eval_fuel_mono (Nat.le_max_left k' k_N) h_ec]
+              try simp
+              exact eval_fuel_mono (Nat.le_max_right k' k_N) h_N
+          | cons _ _ =>
+              obtain ⟨k_N, h_N⟩ :=
+                (h ptable level env T_c hP_Tc v_final T_final).mp ⟨k', h_some⟩
+              refine ⟨max k' k_N + 1, ?_⟩
+              simp only [eval, eval_fuel_mono (Nat.le_max_left k' k_N) h_ec]
+              try simp
+              exact eval_fuel_mono (Nat.le_max_right k' k_N) h_N
+          | closure _ _ _ =>
+              obtain ⟨k_N, h_N⟩ :=
+                (h ptable level env T_c hP_Tc v_final T_final).mp ⟨k', h_some⟩
+              refine ⟨max k' k_N + 1, ?_⟩
+              simp only [eval, eval_fuel_mono (Nat.le_max_left k' k_N) h_ec]
+              try simp
+              exact eval_fuel_mono (Nat.le_max_right k' k_N) h_N
+          | prim _ =>
+              obtain ⟨k_N, h_N⟩ :=
+                (h ptable level env T_c hP_Tc v_final T_final).mp ⟨k', h_some⟩
+              refine ⟨max k' k_N + 1, ?_⟩
+              simp only [eval, eval_fuel_mono (Nat.le_max_left k' k_N) h_ec]
+              try simp
+              exact eval_fuel_mono (Nat.le_max_right k' k_N) h_N
+          | builtinBaseApply =>
+              obtain ⟨k_N, h_N⟩ :=
+                (h ptable level env T_c hP_Tc v_final T_final).mp ⟨k', h_some⟩
+              refine ⟨max k' k_N + 1, ?_⟩
+              simp only [eval, eval_fuel_mono (Nat.le_max_left k' k_N) h_ec]
+              try simp
+              exact eval_fuel_mono (Nat.le_max_right k' k_N) h_N
+
+/-- `.ifte ec · ee`: hole in the then-branch. -/
+theorem EvalEquivAt.ifteThen_cong {P : StatePred} {M N : Expr}
+    (h : EvalEquivAt P M N) (ec ee : Expr)
+    (h_preserve : ∀ ptable level env T, P ptable level env T →
+                  ∀ k v_c T_c, eval k ptable level ec env T = some (v_c, T_c) →
+                  P ptable level env T_c) :
+    EvalEquivAt P (.ifte ec M ee) (.ifte ec N ee) := by
+  intro ptable level env T hP v_final T_final
+  exact ⟨ifteThen_cong_at_forward h ec ee h_preserve ptable level env T hP
+            v_final T_final,
+         ifteThen_cong_at_forward h.symm ec ee h_preserve ptable level env T hP
+            v_final T_final⟩
+
+/-- Helper for `.ifteElse_cong_at`. -/
+private theorem ifteElse_cong_at_forward {P : StatePred} {M N : Expr}
+    (h : EvalEquivAt P M N) (ec t : Expr)
+    (h_preserve : ∀ ptable level env T, P ptable level env T →
+                  ∀ k v_c T_c, eval k ptable level ec env T = some (v_c, T_c) →
+                  P ptable level env T_c)
+    (ptable : PolicyTable) (level : Nat) (env : Env) (T : TowerState)
+    (hP : P ptable level env T)
+    (v_final : Val) (T_final : TowerState)
+    (h_ex : ∃ k, eval k ptable level (.ifte ec t M) env T = some (v_final, T_final)) :
+    ∃ k, eval k ptable level (.ifte ec t N) env T = some (v_final, T_final) := by
+  obtain ⟨k, h_some⟩ := h_ex
+  cases k with
+  | zero => simp [eval] at h_some
+  | succ k' =>
+      simp only [eval] at h_some
+      cases h_ec : eval k' ptable level ec env T with
+      | none => rw [h_ec] at h_some; simp at h_some
+      | some pair =>
+          obtain ⟨v_c, T_c⟩ := pair
+          rw [h_ec] at h_some
+          have hP_Tc := h_preserve ptable level env T hP k' v_c T_c h_ec
+          cases v_c with
+          | bool b =>
+              cases b with
+              | false =>
+                  obtain ⟨k_N, h_N⟩ :=
+                    (h ptable level env T_c hP_Tc v_final T_final).mp ⟨k', h_some⟩
+                  refine ⟨max k' k_N + 1, ?_⟩
+                  simp only [eval, eval_fuel_mono (Nat.le_max_left k' k_N) h_ec]
+                  exact eval_fuel_mono (Nat.le_max_right k' k_N) h_N
+              | true =>
+                  refine ⟨k' + 1, ?_⟩
+                  simp only [eval, h_ec]; exact h_some
+          | num _ =>
+              refine ⟨k' + 1, ?_⟩; simp only [eval, h_ec]; exact h_some
+          | nilV =>
+              refine ⟨k' + 1, ?_⟩; simp only [eval, h_ec]; exact h_some
+          | sym _ =>
+              refine ⟨k' + 1, ?_⟩; simp only [eval, h_ec]; exact h_some
+          | cons _ _ =>
+              refine ⟨k' + 1, ?_⟩; simp only [eval, h_ec]; exact h_some
+          | closure _ _ _ =>
+              refine ⟨k' + 1, ?_⟩; simp only [eval, h_ec]; exact h_some
+          | prim _ =>
+              refine ⟨k' + 1, ?_⟩; simp only [eval, h_ec]; exact h_some
+          | builtinBaseApply =>
+              refine ⟨k' + 1, ?_⟩; simp only [eval, h_ec]; exact h_some
+
+/-- `.ifte ec t ·`: hole in the else-branch. -/
+theorem EvalEquivAt.ifteElse_cong {P : StatePred} {M N : Expr}
+    (h : EvalEquivAt P M N) (ec t : Expr)
+    (h_preserve : ∀ ptable level env T, P ptable level env T →
+                  ∀ k v_c T_c, eval k ptable level ec env T = some (v_c, T_c) →
+                  P ptable level env T_c) :
+    EvalEquivAt P (.ifte ec t M) (.ifte ec t N) := by
+  intro ptable level env T hP v_final T_final
+  exact ⟨ifteElse_cong_at_forward h ec t h_preserve ptable level env T hP
+            v_final T_final,
+         ifteElse_cong_at_forward h.symm ec t h_preserve ptable level env T hP
+            v_final T_final⟩
+
+/-- `.seq (head :: · :: post)`: hole at position 1 of a seq (just
+    after a fixed head). Restricted to `pre = []`; the general
+    `.seq (head :: pre ++ · :: post)` case requires a `.seq`-
+    traversal helper analogous to `evalList_EvalEquiv`. -/
+theorem EvalEquivAt.seqTailFirst_cong {P : StatePred} {M N : Expr}
+    (h : EvalEquivAt P M N) (head : Expr) (post : List Expr)
+    (h_preserve : ∀ ptable level env T, P ptable level env T →
+                  ∀ k v T', eval k ptable level head env T = some (v, T') →
+                  P ptable level env T') :
+    EvalEquivAt P (.seq (head :: M :: post)) (.seq (head :: N :: post)) := by
+  intro ptable level env T hP v_final T_final
+  constructor
+  · rintro ⟨k, h_some⟩
+    cases k with
+    | zero => simp [eval] at h_some
+    | succ k' =>
+        simp only [eval] at h_some
+        cases h_eH : eval k' ptable level head env T with
+        | none => rw [h_eH] at h_some; simp at h_some
+        | some pair =>
+            obtain ⟨v_h, T_h⟩ := pair
+            rw [h_eH] at h_some
+            simp only at h_some
+            have hP_Th := h_preserve ptable level env T hP k' v_h T_h h_eH
+            obtain ⟨k_N, h_seq_N⟩ :=
+              (EvalEquivAt.seqHead_cong h post ptable level env T_h hP_Th
+                v_final T_final).mp ⟨k', h_some⟩
+            refine ⟨max k' k_N + 1, ?_⟩
+            simp only [eval, eval_fuel_mono (Nat.le_max_left k' k_N) h_eH]
+            exact eval_fuel_mono (Nat.le_max_right k' k_N) h_seq_N
+  · rintro ⟨k, h_some⟩
+    cases k with
+    | zero => simp [eval] at h_some
+    | succ k' =>
+        simp only [eval] at h_some
+        cases h_eH : eval k' ptable level head env T with
+        | none => rw [h_eH] at h_some; simp at h_some
+        | some pair =>
+            obtain ⟨v_h, T_h⟩ := pair
+            rw [h_eH] at h_some
+            simp only at h_some
+            have hP_Th := h_preserve ptable level env T hP k' v_h T_h h_eH
+            obtain ⟨k_M, h_seq_M⟩ :=
+              (EvalEquivAt.seqHead_cong h post ptable level env T_h hP_Th
+                v_final T_final).mpr ⟨k', h_some⟩
+            refine ⟨max k' k_M + 1, ?_⟩
+            simp only [eval, eval_fuel_mono (Nat.le_max_left k' k_M) h_eH]
+            exact eval_fuel_mono (Nat.le_max_right k' k_M) h_seq_M
+
 /-! ### `EasyCtx` — sub-language with `EvalEquivAt` coverage
 
 `EasyCtx` includes only the `Ctx` constructors whose hole sits in
