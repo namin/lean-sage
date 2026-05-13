@@ -100,6 +100,28 @@ theorem EvalEquiv.trans {M N P : Expr}
     (h_MN : EvalEquiv M N) (h_NP : EvalEquiv N P) : EvalEquiv M P :=
   fun p l env T v T' => Iff.trans (h_MN p l env T v T') (h_NP p l env T v T')
 
+/-! ### Unconditional `EvalEquiv` witnesses
+
+These are concrete `EvalEquiv` proofs that hold across all states.
+They demonstrate the framework and act as building blocks for
+constructing β-equivalences via `EvalEquiv.trans`. -/
+
+/-- `eval (.seq [e]) ≡ eval e`: a single-element seq is observably
+    the same as its content. The fuel offsets by 1 but
+    `eval_fuel_mono` aligns. -/
+theorem EvalEquiv.seq_singleton (e : Expr) : EvalEquiv (.seq [e]) e := by
+  intro ptable level env T v T'
+  constructor
+  · rintro ⟨k, h_some⟩
+    cases k with
+    | zero => simp [eval] at h_some
+    | succ k' =>
+        simp only [eval] at h_some
+        exact ⟨k', h_some⟩
+  · rintro ⟨k, h_some⟩
+    refine ⟨k + 1, ?_⟩
+    simp only [eval]; exact h_some
+
 /-! ## Plug compositionality
 
 The substantive content of contextual β: `EvalEquiv M N` lifts
@@ -787,6 +809,74 @@ theorem EvalEquiv.primAppArg_cong {M N : Expr} (h : EvalEquiv M N)
   exact ⟨primAppArg_cong_forward h f pre' post ptable level env T v_final T_final,
          primAppArg_cong_forward h.symm f pre' post ptable level env T v_final T_final⟩
 
+/-! ### `.seq` tail position via induction on the prefix.
+
+The `.seq` traversal is structurally different from `evalList`:
+threads state through, returns the *last* value (or `.nilV` for
+empty). The eval definition has a special case for length-1 lists
+(`[e] => eval n e`) before falling through to the recursive case.
+
+For `.seq` with hole in the tail, we induct on the prefix `pre`.
+The base case (`pre = []`) is `seqHead_cong`. The step case unfolds
+one `e :: rest` step and applies the IH on the smaller prefix. -/
+
+private theorem seqTail_cong_forward {M N : Expr} (h : EvalEquiv M N) :
+    ∀ (pre post : List Expr) (head : Expr) (ptable : PolicyTable) (level : Nat)
+      (env : Env) (T : TowerState) (v_final : Val) (T_final : TowerState),
+      (∃ k, eval k ptable level (.seq (head :: pre ++ M :: post)) env T
+              = some (v_final, T_final)) →
+      (∃ k, eval k ptable level (.seq (head :: pre ++ N :: post)) env T
+              = some (v_final, T_final)) := by
+  intro pre
+  induction pre with
+  | nil =>
+      intro post head ptable level env T v_final T_final ⟨k, h_some⟩
+      cases k with
+      | zero => simp [eval] at h_some
+      | succ k' =>
+          simp only [List.cons_append, List.nil_append, eval] at h_some
+          cases h_eH : eval k' ptable level head env T with
+          | none => rw [h_eH] at h_some; simp at h_some
+          | some pair =>
+              obtain ⟨v_h, T_h⟩ := pair
+              rw [h_eH] at h_some
+              simp only at h_some
+              obtain ⟨k_N, h_seq_N⟩ :=
+                (EvalEquiv.seqHead_cong h post ptable level env T_h v_final T_final).mp
+                  ⟨k', h_some⟩
+              refine ⟨max k' k_N + 1, ?_⟩
+              simp only [List.cons_append, List.nil_append, eval,
+                         eval_fuel_mono (Nat.le_max_left k' k_N) h_eH]
+              exact eval_fuel_mono (Nat.le_max_right k' k_N) h_seq_N
+  | cons h_pre pre_rest ih =>
+      intro post head ptable level env T v_final T_final ⟨k, h_some⟩
+      cases k with
+      | zero => simp [eval] at h_some
+      | succ k' =>
+          simp only [List.cons_append, eval] at h_some
+          cases h_eH : eval k' ptable level head env T with
+          | none => rw [h_eH] at h_some; simp at h_some
+          | some pair =>
+              obtain ⟨v_h, T_h⟩ := pair
+              rw [h_eH] at h_some
+              simp only at h_some
+              obtain ⟨k_N, h_seq_N⟩ :=
+                ih post h_pre ptable level env T_h v_final T_final ⟨k', h_some⟩
+              refine ⟨max k' k_N + 1, ?_⟩
+              simp only [List.cons_append, eval,
+                         eval_fuel_mono (Nat.le_max_left k' k_N) h_eH]
+              exact eval_fuel_mono (Nat.le_max_right k' k_N) h_seq_N
+
+/-- `.seq (head :: pre ++ · :: post)`: hole at a tail position
+    after a non-trivial head. -/
+theorem EvalEquiv.seqTail_cong {M N : Expr} (h : EvalEquiv M N)
+    (head : Expr) (pre post : List Expr) :
+    EvalEquiv (.seq (head :: pre ++ M :: post))
+              (.seq (head :: pre ++ N :: post)) := by
+  intro ptable level env T v_final T_final
+  exact ⟨seqTail_cong_forward h pre post head ptable level env T v_final T_final,
+         seqTail_cong_forward h.symm pre post head ptable level env T v_final T_final⟩
+
 /-! ### Sub-language with full coverage
 
 `SimpleCtx` is the fragment of `Ctx` whose constructors all have
@@ -807,6 +897,7 @@ inductive SimpleCtx where
   | primAppFun : SimpleCtx → List Expr → SimpleCtx
   | primAppArg : Expr → List Expr → SimpleCtx → List Expr → SimpleCtx
   | seqHead    : SimpleCtx → List Expr → SimpleCtx
+  | seqTail    : Expr → List Expr → SimpleCtx → List Expr → SimpleCtx
 
 def SimpleCtx.plug : SimpleCtx → Expr → Expr
   | .hole,             e => e
@@ -822,6 +913,7 @@ def SimpleCtx.plug : SimpleCtx → Expr → Expr
   | .primAppFun c args,e => .primApp (c.plug e) args
   | .primAppArg f pre c post, e => .primApp f (pre ++ c.plug e :: post)
   | .seqHead c rest,   e => .seq (c.plug e :: rest)
+  | .seqTail hd pre c post, e => .seq (hd :: pre ++ c.plug e :: post)
 
 theorem SimpleCtx.plug_cong : ∀ (C : SimpleCtx) {M N : Expr},
     EvalEquiv M N → EvalEquiv (C.plug M) (C.plug N) := by
@@ -878,6 +970,10 @@ theorem SimpleCtx.plug_cong : ∀ (C : SimpleCtx) {M N : Expr},
       intros M N h
       simp only [SimpleCtx.plug]
       exact EvalEquiv.seqHead_cong (ih h) rest
+  | seqTail hd pre c post ih =>
+      intros M N h
+      simp only [SimpleCtx.plug]
+      exact EvalEquiv.seqTail_cong (ih h) hd pre post
 
 /-! ### Remaining per-`Ctx` cases — TODO
 

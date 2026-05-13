@@ -644,12 +644,12 @@ track. The shape:
 
 The substantive content is the per-`Ctx`-constructor congruence
 lemmas: `EvalEquiv M N → EvalEquiv (C M) (C N)` for one wrapper at
-a time. Twelve non-trivial cases are proven:
+a time. Thirteen non-trivial cases are proven:
 **`plug_set`**, **`em_cong`**, **`letEVal_cong`**, **`letEBody_cong`**,
 **`ifteCond_cong`**, **`ifteThen_cong`**, **`ifteElse_cong`**,
 **`appHead_cong`**, **`appArg_cong`**, **`primAppFun_cong`**,
-**`primAppArg_cong`**, **`seqHead_cong`** (plus the trivial
-`plug_hole`). The argument-position cases (`appArg`,
+**`primAppArg_cong`**, **`seqHead_cong`**, **`seqTail_cong`** (plus
+the trivial `plug_hole`). The argument-position cases (`appArg`,
 `primAppArg`) use **`evalList_EvalEquiv`** — a list-traversal
 congruence helper: if `M ≡ N`, then `evalList (pre ++ M :: post)`
 and `evalList (pre ++ N :: post)` produce the same outcomes.
@@ -662,14 +662,13 @@ The proof template:
 4. use `eval_fuel_mono` to align fuels when re-assembling.
 
 **`SimpleCtx`** is the sub-language whose constructors all have
-proven congruence lemmas (13 in total including hole);
+proven congruence lemmas (14 in total including hole);
 **`SimpleCtx.plug_cong`** lifts `EvalEquiv` through any
 `SimpleCtx` by induction. This is the clean half of T1 — the
 contextually-quantified β statement for the sub-fragment where
-the hole sits in any non-`.lam` position other than the tail of
-a multi-element `.seq`. Deferred: `.lam` (closure-syntactic-
-refinement issue) and the `.seq` tail position (analogous helper
-needed for `.seq`-traversal).
+the hole sits in any non-`.lam` position. Only `.lam`
+(closure-syntactic-refinement issue) is deferred; every other
+position in the `Expr` tree is covered.
 
 ## 12. Reading order for the source
 
