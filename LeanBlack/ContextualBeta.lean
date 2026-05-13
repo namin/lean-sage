@@ -8,70 +8,41 @@
 
   ## Status
 
-  - **L1** (`eval_beta_builtin`, this file): sorry-free. At
-    sufficient fuel, with level+1's `base-apply` cell still bound
-    to `.builtinBaseApply`, the β-redex `((λx. body) v_expr)`
-    reduces operationally to body-in-extended-env. Pure unfolding;
-    no CE consumed.
+  - **L1** (`eval_beta_builtin`): sorry-free. At sufficient fuel,
+    with level+1's `base-apply` cell still bound to
+    `.builtinBaseApply`, the β-redex `((λx. body) v_expr)` reduces
+    operationally to body-in-extended-env. Pure unfolding; no CE
+    consumed.
 
-  - **CE→β bridge** (`ce_apply_bisim_builtin`,
-    `admission_applyVia_bisim_builtin`): sorry-free. Given a
-    `CE_weak_strong` certificate for the installed user
-    `base-apply` over the current heap, the apply path produces a
+  - **CE→β bridges**: sorry-free. Given a CE certificate for the
+    installed user `base-apply`, the apply path produces a
     bisim-equivalent result to the counterfactual builtin apply.
-    The admission-moment corollary consumes
-    `approvedPolicy_soundForCE_weak_strong` directly. This is the
-    first place CE certificates actually flow into a β-equivalence
-    statement in this codebase.
+    Two forms:
+    - `ce_apply_bisim_builtin` — consumes `CE_weak_strong`
+      (full-prefix). Applicable at admission moment.
+    - `ce_apply_bisim_builtin_at` — consumes `CE_weak_strong_at`
+      (selective-prefix, from `HeapAgree.lean`). Applicable at any
+      heap preserving `HeapAgreeAt indices`, including
+      post-admission.
+    The full-prefix admission corollary
+    `admission_applyVia_bisim_builtin` packages
+    `approvedPolicy_soundForCE_weak_strong` directly.
 
-  - **L2/L4/T1**: not formalized in this file. Blocked on the
-    architectural finding below — the bridge fires only at the
-    heap snapshot where `HeapPrefix am.heap T.heap` holds (the
-    admission moment, by construction). The contextual lift needs
-    the certificate to remain applicable as the heap evolves.
+  - **`multn_postAdmit_apply_bisim`**: sorry-free. End-to-end
+    multn post-admission β-bisim. Combines `multnApproval_at_proof`
+    (in `HeapAgree.lean`) with `ce_apply_bisim_builtin_at` here.
+    For any multn-shape admitted modification, at any
+    post-admission heap preserving `HeapAgreeAt [idx_o, idx_n]`
+    on the closure's `orig` and `num?` cells, the applyVia path
+    through the installed multn closure produces a
+    bisim-equivalent result to the counterfactual builtin apply.
 
-  ## Architectural finding (blocker for the CE-leveraging path)
-
-  `CE_weak_strong level h_ref old new` carries the premise
-  `HeapPrefix h_ref T.heap` — *content*-prefix at the first
-  `h_ref.length` cells. An approval `am ∈ approvals` is constructed
-  with `am.heap = T.heap_at_admission`, and `am.heap` is the
-  reference heap for `am.proof : CE_weak_strong level am.heap …`.
-
-  After a `.set "base-apply"` fires and updates the heap at the
-  base-apply cell index `idx_ba`, we have
-  `T_new.heap = T.heap.update idx_ba newVal`. Since `idx_ba <
-  am.heap.length` (the base-apply cell was allocated before
-  admission), `T_new.heap[idx_ba] = newVal` but
-  `am.heap[idx_ba] = .builtinBaseApply`. Therefore
-  `HeapPrefix am.heap T_new.heap` is *false*.
-
-  Consequence: `CE_weak_strong_heap_mono` cannot lift the approval's
-  CE certificate from `am.heap` to `T_new.heap`. The certificate is
-  consumable *only at the admission moment* — but β-equivalence
-  questions arise at future eval steps, after the heap has drifted.
-
-  The multn proof's actual cell lookups only touch the prim cells
-  (`num?`, `*`, …), never the base-apply cell. So the proof remains
-  morally valid at `T_new.heap`. The `HeapPrefix` premise is
-  *stronger than necessary* — it demands content-equality on cells
-  the proof doesn't read.
-
-  ## Unblocks needed (any one of)
-
-  1. Weaken `HeapPrefix` to a selective form
-     (content-equality at a specific index set), and rerun the
-     multn proof under the weakened premise.
-  2. Add a separate predicate `CE_weak_strong_stable` that's
-     robust to base-apply mutations, with a bridge from existing
-     approvals.
-  3. Rebuild the multn-style argument at post-mutation heaps by
-     hand, treating each approval's bisim claim as a local fact
-     rather than a re-derivable theorem.
-
-  Without one of these, L1 stands as the most useful structural
-  fact this file can deliver; the contextual β-equivalence proof
-  cannot consume CE certificates beyond the moment of admission.
+  - **L4 (parallel-bisim eval congruence)**, **T1 (contextual β)**:
+    not yet formalized. The CE-certificate flow past admission is
+    no longer the blocker; what remains is threading a
+    `ParallelBisim` invariant through `eval` / `evalList` /
+    `applyVia` / `applyDirect` by joint induction on fuel, then
+    assembling per-Ctx-constructor congruence on top.
 -/
 
 import LeanBlack.Black
@@ -481,3 +452,84 @@ theorem ce_apply_bisim_builtin_at
         h_depth h_mat upEnv idx bc h_env h_lookup h_cell h_bc]
   rw [← callAsBaseApply_user fuel' ptable level bc h_bc op operands T]
   exact h_new_call
+
+/-! ## Phase D — packaged post-admission β-bisim for multn
+
+The end-to-end statement combining `multnApproval_at_proof`
+(`HeapAgree.lean`) and `ce_apply_bisim_builtin_at` (above): for any
+multn-shape admitted modification, at any post-admission heap
+preserving agreement on the closure's `orig` and `num?` cells, the
+apply path through the installed multn closure produces a
+bisim-equivalent result to the counterfactual builtin apply.
+
+This is the headline result enabled by the HeapPrefix weakening:
+the CE certificate fires *post*-admission, not only at admission
+moment. Useful as a building block for the L4/T1 contextual lift,
+and standalone as the first end-to-end "CE under mutation" theorem
+in the repo. -/
+
+theorem multn_postAdmit_apply_bisim
+    -- The approval shape:
+    (level : Nat) (admit_heap : Heap) (env metaEnv : Env) (index : Nat)
+    (newClosure : Val)
+    (h_admit : multnExactPolicy
+                 { target := "base-apply", heap := admit_heap, env := env,
+                   metaEnv := metaEnv, index := index, level := level }
+                 .builtinBaseApply newClosure = true)
+    (idx_o idx_n : Nat)
+    (h_shape_o : ∃ ps body cenv, newClosure = .closure ps body cenv ∧
+                  cenv.lookup "orig" = some idx_o)
+    (h_shape_n : ∃ ps body cenv, newClosure = .closure ps body cenv ∧
+                  cenv.lookup "num?" = some idx_n)
+    (h_bc : newClosure ≠ .builtinBaseApply)
+    -- The runtime state post-installation:
+    (T_post : TowerState) (ptable : PolicyTable)
+    (h_len : admit_heap.length ≤ T_post.heap.length)
+    (h_agree : HeapAgreeAt [idx_o, idx_n] admit_heap T_post.heap)
+    -- newClosure is installed at level+1's base-apply:
+    (upEnv : Env) (idx_ba : Nat)
+    (h_env : T_post.envAt? (level + 1) = some upEnv)
+    (h_lookup : upEnv.lookup "base-apply" = some idx_ba)
+    (h_cell : T_post.heap[idx_ba]? = some newClosure)
+    (h_depth : level + 1 < Tower.maxDepth)
+    (h_mat : T_post.levels.length > level + 1)
+    -- CE side conditions on T_post:
+    (op : Val) (operands : List Val)
+    (h_heap : HeapValid T_post.heap)
+    (h_op : ValValid op T_post.heap)
+    (h_operands : ListValValid operands T_post.heap)
+    (h_old_valid : ValValid .builtinBaseApply T_post.heap)
+    (h_new_valid : ValValid newClosure T_post.heap)
+    (h_ptable : PolicyTableRespectsBisimT ptable)
+    (h_lvl_pol : ∀ p, T_post.policyAt? level = some p → PolicyRespectsBisimT p)
+    (h_env_valid : ∀ n env, T_post.envAt? n = some env → EnvValid env T_post.heap)
+    (h_pol_bisim : ∀ n p, T_post.policyAt? n = some p → PolicyRespectsBisimT p)
+    (h_env_bisim : ∀ n env, T_post.envAt? n = some env → EnvVis env env T_post.heap T_post.heap)
+    (h_heap_deep : HeapDeep T_post.heap)
+    (h_op_deep : ValDeep op T_post.heap)
+    (h_operands_deep : ListValDeep operands T_post.heap)
+    (h_env_deep : ∀ n env, T_post.envAt? n = some env → EnvDeep env T_post.heap)
+    (h_pt_shift : PolicyTableRespectsShift T_post.heap.length [op, listToVal operands] ptable)
+    (h_pol_shift : ∀ n p, T_post.policyAt? n = some p →
+                    PolicyRespectsShift T_post.heap.length [op, listToVal operands] p)
+    -- If the builtin path succeeds:
+    (fuel : Nat) (r : Val) (T' : TowerState)
+    (h_call : applyDirect fuel ptable level op operands T_post = some (r, T')) :
+    -- The applyVia (which now routes through multn) produces a bisim-equivalent result:
+    ∃ fuel' T'' r',
+      applyVia (fuel' + 1) ptable level op operands T_post = some (r', T'') ∧
+      ValVis_weak r r' T'.heap T''.heap ∧
+      T'.policyAt? level = T''.policyAt? level ∧
+      HeapValid T''.heap ∧
+      T_post.heap.length ≤ T''.heap.length := by
+  have h_ce_at : CE_weak_strong_at level [idx_o, idx_n] admit_heap
+                   .builtinBaseApply newClosure :=
+    multnApproval_at_proof level admit_heap env metaEnv index newClosure
+      h_admit idx_o idx_n h_shape_o h_shape_n
+  exact ce_apply_bisim_builtin_at level ptable op operands T_post
+    newClosure h_bc upEnv idx_ba h_env h_lookup h_cell h_depth h_mat
+    [idx_o, idx_n] admit_heap h_ce_at h_len h_agree
+    h_heap h_op h_operands h_old_valid h_new_valid
+    h_ptable h_lvl_pol h_env_valid h_pol_bisim h_env_bisim
+    h_heap_deep h_op_deep h_operands_deep h_env_deep
+    h_pt_shift h_pol_shift fuel r T' h_call
