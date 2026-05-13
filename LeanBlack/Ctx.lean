@@ -104,7 +104,11 @@ theorem EvalEquiv.trans {M N P : Expr}
 
 These are concrete `EvalEquiv` proofs that hold across all states.
 They demonstrate the framework and act as building blocks for
-constructing β-equivalences via `EvalEquiv.trans`. -/
+constructing β-equivalences via `EvalEquiv.trans`. The β-redex /
+`.letE` pair is *not* in this list — it depends on the surrounding
+state (specifically, `builtinBaseApplyAt level T'` for the post-
+`v_expr` state), so the natural shape there is a conditional
+`EvalEquivAt`. -/
 
 /-- `eval (.seq [e]) ≡ eval e`: a single-element seq is observably
     the same as its content. The fuel offsets by 1 but
@@ -121,6 +125,68 @@ theorem EvalEquiv.seq_singleton (e : Expr) : EvalEquiv (.seq [e]) e := by
   · rintro ⟨k, h_some⟩
     refine ⟨k + 1, ?_⟩
     simp only [eval]; exact h_some
+
+/-- `eval (.seq []) ≡ eval (.quote .nilV)`: the empty seq is
+    observationally equivalent to a quoted nil. -/
+theorem EvalEquiv.seq_nil : EvalEquiv (.seq []) (.quote .nilV) := by
+  intro ptable level env T v T'
+  constructor
+  · rintro ⟨k, h_some⟩
+    cases k with
+    | zero => simp [eval] at h_some
+    | succ k' =>
+        simp only [eval] at h_some
+        exact ⟨k' + 1, by simp only [eval, closedValB]; exact h_some⟩
+  · rintro ⟨k, h_some⟩
+    cases k with
+    | zero => simp [eval] at h_some
+    | succ k' =>
+        simp only [eval, closedValB] at h_some
+        exact ⟨k' + 1, by simp only [eval]; exact h_some⟩
+
+/-- `eval (.ifte (.bool true) t e) ≡ eval t`: the `if` of a true
+    literal reduces to its then-branch. -/
+theorem EvalEquiv.ifte_true (t e : Expr) :
+    EvalEquiv (.ifte (.bool true) t e) t := by
+  intro ptable level env T v T'
+  constructor
+  · rintro ⟨k, h_some⟩
+    cases k with
+    | zero => simp [eval] at h_some
+    | succ k' =>
+        cases k' with
+        | zero => simp [eval] at h_some
+        | succ k'' =>
+            simp only [eval] at h_some
+            exact ⟨k'' + 1, h_some⟩
+  · rintro ⟨k, h_some⟩
+    cases k with
+    | zero => simp [eval] at h_some
+    | succ k' =>
+        refine ⟨k' + 2, ?_⟩
+        simp only [eval]; exact h_some
+
+/-- `eval (.ifte (.bool false) t e) ≡ eval e`: the `if` of a false
+    literal reduces to its else-branch. -/
+theorem EvalEquiv.ifte_false (t e : Expr) :
+    EvalEquiv (.ifte (.bool false) t e) e := by
+  intro ptable level env T v T'
+  constructor
+  · rintro ⟨k, h_some⟩
+    cases k with
+    | zero => simp [eval] at h_some
+    | succ k' =>
+        cases k' with
+        | zero => simp [eval] at h_some
+        | succ k'' =>
+            simp only [eval] at h_some
+            exact ⟨k'' + 1, h_some⟩
+  · rintro ⟨k, h_some⟩
+    cases k with
+    | zero => simp [eval] at h_some
+    | succ k' =>
+        refine ⟨k' + 2, ?_⟩
+        simp only [eval]; exact h_some
 
 /-! ## Plug compositionality
 

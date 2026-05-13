@@ -670,6 +670,19 @@ the hole sits in any non-`.lam` position. Only `.lam`
 (closure-syntactic-refinement issue) is deferred; every other
 position in the `Expr` tree is covered.
 
+The **unconditional witness library** provides concrete
+`EvalEquiv` proofs that compose with `SimpleCtx.plug_cong` via
+`trans`: `seq_singleton` (`.seq [e] ≡ e`), `seq_nil`
+(`.seq [] ≡ .quote .nilV`), `ifte_true`
+(`.ifte (.bool true) t e ≡ t`), `ifte_false`
+(`.ifte (.bool false) t e ≡ e`). For each, combining with
+`SimpleCtx.plug_cong` yields a contextually-quantified
+equivalence — i.e., a constant-fold / β-reduction valid in any
+position. The general β-redex / `.letE` pair is *not* in this
+library: it depends on `builtinBaseApplyAt level T'`, so the
+natural form is conditional (`EvalEquivAt`), which is the next
+piece.
+
 ## 12. Reading order for the source
 
 If you want to dig into `LeanBlack/ProofBased.lean`, the file is
