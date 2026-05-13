@@ -24,15 +24,20 @@ lake exe demos                # 29/29 — reflection demos
 lake exe proofBasedSmoke      # 18/18 — proof-based integration scenes
 ```
 
-Proof-based admission lives in three files:
+Proof-based admission lives in four files:
 
 - [`LeanBlack/ProofBased.lean`](LeanBlack/ProofBased.lean) — the
   library: `CE_weak_strong`, `ApprovedModification`, `approvedPolicy`,
   the soundness theorem, the identity constructors, W1.
+- [`LeanBlack/HeapAgree.lean`](LeanBlack/HeapAgree.lean) —
+  `HeapAgreeAt` (selective heap-prefix relation),
+  `CE_weak_strong_at` (selective-premise CE predicate), and
+  `multnApproval_at_proof` — the multn approval under the
+  weakened premise, consumable post-mutation. See §11.6.
 - [`LeanBlack/ContextualBeta.lean`](LeanBlack/ContextualBeta.lean) —
-  operational β-redex factoring and the CE→β bridge. Connects an
-  `approvedPolicy` admission to a runtime β-equivalence statement.
-  See §11.5.
+  operational β-redex factoring and the CE→β bridges (full-prefix
+  + selective). Connects an `approvedPolicy` admission to a
+  runtime β-equivalence statement. See §11.5.
 - [`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) — runnable scenes
   showing `approvedPolicy` installed at a level and gating a real
   `.set` during tower evaluation. **This is where you see the
@@ -529,27 +534,47 @@ contextual lift would ask — sit outside the bridge's reach.
 
 ### What the contextual lift requires
 
-The multn proof's actual cell lookups (in `multnExact_*` in
-`Policies.lean`) only read the prim cells (`num?`, `*`, …), never
-the base-apply cell. The `HeapPrefix` premise is **stronger than
-necessary** — it demands content-equality on cells the proof
-doesn't read.
+The multn proof's actual cell lookups (via `multnExactPolicy_implies_InstallFacts`
+in `Policies.lean`) only read the closure's captured `orig` and
+`num?` indices — never the base-apply cell. The `HeapPrefix`
+premise is **stronger than necessary** — it demands content-equality
+on cells the proof doesn't read.
 
-Three possible unblocks, in roughly decreasing scope:
+### §11.6. Selective-premise CE — `HeapAgree.lean` (the unblock)
 
-1. **Weaken `HeapPrefix`** to a selective form (content-equality
-   on a specified index set; length-extension overall). Refactor
-   `CE_weak_strong` to carry an explicit dependency set. Re-prove
-   the multn theorem under the weaker premise. The cleanest fix.
-2. **Add a `CE_weak_strong_stable` predicate** robust to
-   base-apply mutations, with a bridge from existing approvals.
-   Decouples the change from `Policies.lean`.
-3. **Hand-redo the multn argument** at post-mutation heaps,
-   treating each approval's bisim claim as a local fact. Most
-   local in scope; least general.
+[`LeanBlack/HeapAgree.lean`](LeanBlack/HeapAgree.lean) implements
+the weakening, sorry-free. Key definitions and theorems:
 
-Any of these unblocks the L4 / T1 path from the proof sketch in the
-file's docstring.
+- `HeapAgreeAt indices h₁ h₂` — content-equality at the specified
+  indices, no constraint on other cells.
+- `HeapAgreeAt.update_disjoint` — heap-update at index `j ∉ indices`
+  preserves agreement. The lemma that makes post-mutation lifting
+  work.
+- `CE_weak_strong_at level indices h_ref old new` — the
+  selective-premise CE predicate. Same conclusion as
+  `CE_weak_strong`, but premise is `HeapAgreeAt indices` +
+  `length_le` instead of `HeapPrefix`.
+- `InstallFacts_heap_agree_cells` — transports `InstallFacts`
+  across `HeapAgreeAt` at the closure's `orig` and `num?` indices.
+- **`multnApproval_at_proof`** — the multn approval re-proved
+  under `CE_weak_strong_at`. Mirrors `multnApproval`'s proof body
+  almost verbatim; only the `InstallFacts` transport line changes
+  (from `InstallFacts_heap_extend` to `InstallFacts_heap_agree_cells`).
+
+[`LeanBlack/ContextualBeta.lean`](LeanBlack/ContextualBeta.lean)
+adds the matching bridge:
+
+- **`ce_apply_bisim_builtin_at`** — same as `ce_apply_bisim_builtin`
+  but consumes `CE_weak_strong_at indices` with a `HeapAgreeAt
+  indices h_ref T.heap` witness. Usable post-admission: the .set
+  mutates `idx_ba`; under the `installMultnOneUp` pattern (which
+  allocates `orig` via `.letE`), `idx_ba ∉ [idx_o, idx_n]`, so
+  `update_disjoint` keeps the agreement intact and the bridge
+  fires.
+
+Net effect: the CE certificate now flows past admission. What
+remains for full contextual β is L4's parallel-bisim invariant
+threaded through eval — the pieces it consumes are now in place.
 
 ## 12. Reading order for the source
 
