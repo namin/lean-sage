@@ -1,61 +1,54 @@
 # TUTORIAL — proof-based admission in lean-sage
 
-A hands-on walkthrough of proof-based admission. By the end, you'll
-understand:
+A hands-on walkthrough. The goal: by the end you can construct
+kernel-checked `ApprovedModification`s, install them, and read the
+soundness theorems that say what your modifications guarantee.
 
-- What an `ApprovedModification` is and why its `proof` field is
-  load-bearing.
-- How `approvedPolicy` plugs proof-bearing admission into the existing
-  `BlackPolicy` interface.
-- What `CE_weak_strong` is and why we needed it.
-- How to construct an approval (the identity case, two flavors).
-- The W1 convergence statements and what they actually claim.
-- What's still open and where to start.
-
-If you want the architectural rationale instead, read
+For the *what's been proved* summary, see [`README.md`](README.md).
+For architectural rationale, see [`DESIGN.md`](DESIGN.md) /
 [`DESIGN_PROOF.md`](DESIGN_PROOF.md).
+
+## What you'll be able to do by the end
+
+1. **Construct a vacuous identity approval** — verify the kernel
+   really type-checks `CE_weak` proofs and pipes them through the
+   policy interface (§5).
+2. **Construct a closure-identity approval** — non-vacuous, but
+   trivial enough to be one screen of Lean (§6).
+3. **Construct the multn approval** — the worked example, by invoking
+   `multnExact_soundForCE_first_install_tower` inside the proof field
+   (§8).
+4. **Read the Wand-defeat statement** — `((λx. x) 0)` and `0` evaluate
+   to the same value under any gated policy table (§9).
+5. **Run the end-to-end pipeline** — gate installed, `(set! base-apply
+   multn)` admitted, `(2 3 4) ⇒ 24` returned (§10).
 
 ## 0. Setup
 
 ```bash
-lake build                    # builds the library + all three exes
-lake exe smoke                # 8/8  — structural-policy smoke
-lake exe demos                # 29/29 — reflection demos
-lake exe proofBasedSmoke      # 18/18 — proof-based integration scenes
+lake build                    # library + three executables
+lake exe smoke                # 4 scenes, 8 tests  — structural-policy
+lake exe demos                # 12 scenes, 29 tests — reflection capabilities
+lake exe proofBasedSmoke      # 7 scenes, 18 tests — proof-based admission
 ```
 
-Proof-based admission lives in six files:
+Proof-based admission lives in:
 
 - [`LeanBlack/ProofBased.lean`](LeanBlack/ProofBased.lean) — the
   library: `CE_weak_strong`, `ApprovedModification`, `approvedPolicy`,
-  the soundness theorem, the identity constructors, W1.
-- [`LeanBlack/HeapAgree.lean`](LeanBlack/HeapAgree.lean) —
-  `HeapAgreeAt` (selective heap-prefix relation),
-  `CE_weak_strong_at` (selective-premise CE predicate), and
-  `multnApproval_at_proof` — the multn approval under the
-  weakened premise, consumable post-mutation. See §11.6.
-- [`LeanBlack/ContextualBeta.lean`](LeanBlack/ContextualBeta.lean) —
-  operational β-redex factoring and the CE→β bridges (full-prefix
-  + selective). Connects an `approvedPolicy` admission to a
-  runtime β-equivalence statement. See §11.5.
-- [`LeanBlack/EvalFuelMono.lean`](LeanBlack/EvalFuelMono.lean) —
-  fuel monotonicity: success at fuel `n` is preserved at every
-  fuel `m ≥ n`, for all four mutually-recursive evaluation
-  functions. The arithmetic enabler for fuel-juggling inside L4
-  and contextual β. See §11.7.
-- [`LeanBlack/Ctx.lean`](LeanBlack/Ctx.lean) — term contexts +
-  `EvalEquiv` observational equivalence + per-constructor
-  congruence lemmas (`.set`, `.em`, `.letEVal`, `.letEBody`,
-  `.ifteCond`). Includes `SimpleCtx`, the sub-language with full
-  congruence coverage. See §11.8.
+  the soundness theorem, the identity / closure-identity / multn
+  constructors, Wand-defeat.
 - [`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) — runnable scenes
-  showing `approvedPolicy` installed at a level and gating a real
-  `.set` during tower evaluation. **This is where you see the
-  integration with the rest of lean-sage.**
+  showing `approvedPolicy` gating a real `.set` during tower
+  evaluation. **This is where you see the integration end-to-end.**
 
-Proof-based admission is purely additive on top of the structural-
-policy world; the only change to existing files was dropping a
-`private` on a preservation lemma in `Soundness.lean`.
+(Three companion files — `HeapAgree.lean`, `ContextualBeta.lean`,
+`EvalFuelMono.lean`, `Ctx.lean` — carry the in-progress contextual-β
+lift. Deferred to §11.)
+
+Proof-based admission is purely additive on the structural-policy
+world; the only change to existing files was dropping a `private`
+on a preservation lemma in `Soundness.lean`.
 
 ## 1. The idea in two sentences
 
@@ -64,9 +57,9 @@ admission is a Boolean function deciding whether to admit a
 `(set! ...)` based on the modification's *structural shape*. With
 proof-based admission, an admission is a Lean term of type
 `CE_weak_strong level heap oldVal newVal` — a soundness proof for the
-specific modification. The kernel type-checks the proof at construction
-time; if it doesn't type-check, no admission value exists. The two
-admission paths coexist in the same `PolicyTable`.
+specific modification. The kernel type-checks the proof at
+construction time; if it doesn't type-check, no admission value
+exists. The two admission paths coexist in the same `PolicyTable`.
 
 ## 2. The architecture in three definitions
 
@@ -92,8 +85,8 @@ def approvedPolicy (approvals : List ApprovedModification) : BlackPolicy :=
     approvals.any fun am => am.matches ctx oldVal newVal
 ```
 
-At runtime, a `.set` is admitted iff some approval in the list matches
-on `(level, heap-prefix, oldVal, newVal)`. The match is structural
+A `.set` is admitted iff some approval in the list matches on
+`(level, heap-prefix, oldVal, newVal)`. The match is structural
 (`Val.beq` for the values, `decide` for the level, length-prefix for
 the heap).
 
@@ -105,17 +98,17 @@ theorem approvedPolicy_soundForCE_weak_strong
     BlackPolicy.SoundForCE_weak_strong level (approvedPolicy approvals)
 ```
 
-For any list of approvals all bound to the same level, the
-runtime gate is sound for `CE_weak_strong` at that level. Every
-admission has a `CE_weak_strong` witness derivable from the matching
-approval's `proof` field.
+For any list of approvals all bound to the same level, the runtime
+gate is sound for `CE_weak_strong` at that level: every admission has
+a `CE_weak_strong` witness derivable from the matching approval's
+`proof` field.
 
 ## 3. How it slots into the existing runtime
 
-This is the part of the story easiest to miss reading
-`ProofBased.lean` in isolation: **`approvedPolicy` is just a
-`BlackPolicy`**. Nothing in the rest of lean-sage changes; the new
-file extends the *construction* of policies, not the runtime.
+The part easiest to miss reading `ProofBased.lean` in isolation:
+**`approvedPolicy` is just a `BlackPolicy`**. Nothing in the rest of
+lean-sage changes; the new file extends the *construction* of
+policies, not the runtime.
 
 ```text
                      (existing infrastructure)
@@ -137,55 +130,32 @@ file extends the *construction* of policies, not the runtime.
                   (kernel type-checks at construction time)
 ```
 
-A `BlackPolicy` is just a function `MutationCtx → Val → Val → Bool`.
-The runtime gate fires inside `eval`'s `.set` rule (see
-[`LeanBlack/Eval.lean`](LeanBlack/Eval.lean):87, `gate := T.policyAt?
-level`). `approvedPolicy approvals` is a `BlackPolicy` — it takes the
-same arguments, returns a `Bool`. From the runtime's perspective,
-it's interchangeable with `acceptAllPolicy` or `multnExactPolicy`.
+`approvedPolicy approvals` has the same type as `acceptAllPolicy` and
+`multnExactPolicy`. From the runtime's perspective, all three are
+interchangeable. The difference is *construction*: an approval can
+only be built if the kernel accepts a `CE_weak_strong` proof. So the
+boolean the runtime sees is *backed by* a proof, even though the
+runtime itself doesn't consult the proof.
 
-What's different is *construction*: an approval can only be built if
-the kernel accepts a `CE_weak_strong` proof. So the boolean the
-runtime sees is *backed by* a proof, even though the runtime itself
-doesn't consult the proof.
-
-[`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) demonstrates the
-integration end-to-end. Scene 1 installs
-`approvedPolicy [identityApproval 1 [] .builtinBaseApply]` at level 1
-via `(em (installPolicy 0))`, runs `(em (set! base-apply base-apply))`,
-and watches the `.set` go through the gate, find a match, and admit.
-Scene 2 attempts a non-matching mutation; the gate finds no match
-and refuses. Both scenes also check that arithmetic is preserved
-afterward.
-
-```bash
-$ lake exe proofBasedSmoke
-Scene 1: proof-bearing admission — identity mod ADMITTED
-  OK  (em (set! base-apply base-apply)) ⇒ bool(true): ...
-  OK  post-admit, (+ 1 2) still 3: ...
-
-Scene 2: proof-bearing admission — non-matching mod REFUSED
-  OK  (em (set! base-apply (lam … 42))) ⇒ bool(false): ...
-  OK  post-refuse, (+ 1 2) still 3 (no mod in effect): ...
-```
-
-That's the full integration. The next sections explain how the proof
-field is constructed.
+[`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) Scenes 1–2 show the
+integration: an identity approval is installed at level 1, a matching
+`.set` admits, a non-matching `.set` refuses, arithmetic is preserved
+in both cases.
 
 ## 4. Why `CE_weak_strong`?
 
 `Policies.lean` already defines `CE_weak` — a per-level
 conservative-extension predicate. But it quantifies over test states
-`T` with only `HeapValid` / `ValValid` shape. The headline soundness
-theorem in `Policies.lean` —
-`multnExact_soundForCE_first_install_tower` — requires Deep validity
-(`HeapDeep T.heap`, etc.) and Shift-respect on the test state. So
-`CE_weak`-shaped approvals cannot be constructed by invoking that
-theorem.
+`T` with only `HeapValid` / `ValValid` shape. The multn soundness
+theorem `multnExact_soundForCE_first_install_tower` requires *Deep*
+validity (`HeapDeep T.heap`, etc.) and Shift-respect on the test
+state. So `CE_weak`-shaped approvals cannot be constructed by
+invoking that theorem.
 
-`CE_weak_strong` extends `CE_weak`'s hypothesis chain with the missing
-Deep + Shift premises, matching exactly what the multn theorem's proof
-needs. Same conclusion shape; more hypotheses on the test state.
+`CE_weak_strong` extends `CE_weak`'s hypothesis chain with the
+missing Deep + Shift premises, matching exactly what the multn
+theorem's proof needs. Same conclusion shape; more hypotheses on the
+test state.
 
 ```lean
 def CE_weak_strong (level : Nat) (h_ref : Heap) (old new : Val) : Prop :=
@@ -195,20 +165,20 @@ def CE_weak_strong (level : Nat) (h_ref : Heap) (old new : Val) : Prop :=
     HeapDeep T.heap → ValDeep op T.heap → ... → -- (new: Deep)
     PolicyTableRespectsShift ... → ... →        -- (new: Shift)
     callAsBaseApply fuel ptable level old op operands T = some (r, T') →
-    ∃ fuel' T'' r', ...                          -- (same conclusion)
+    ∃ fuel' T'' r', ...                         -- (same conclusion)
 ```
 
-There's a trivial weakening `CE_weak_to_strong : CE_weak → CE_weak_strong`
-(discard the extra hypotheses), which lets the existing identity and
-structural-policy machinery feed into the new predicate without
-rework.
+A trivial weakening `CE_weak_to_strong : CE_weak → CE_weak_strong`
+(discard the extra hypotheses) lets the existing identity and
+structural-policy machinery feed into the new predicate.
 
-## 5. Constructing your first approval (vacuous)
+## 5. Your first approval — vacuous identity
 
-The simplest possible `CE_weak_strong` proof: the identity modification
-at a `.num n` value. Calling `.num n` as base-apply hits
-`applyDirect_num_returns_none`, so the `callAsBaseApply ... = some
-(r, T')` premise is unsatisfiable and the conclusion follows vacuously.
+The simplest possible `CE_weak_strong` proof: the identity
+modification at a `.num n` value. Calling `.num n` as base-apply hits
+`applyDirect_num_returns_none`, so the
+`callAsBaseApply ... = some (r, T')` premise is unsatisfiable and the
+conclusion follows vacuously.
 
 ```lean
 theorem CE_weak_num_identity (level : Nat) (h_ref : Heap) (n : Int) :
@@ -221,7 +191,7 @@ theorem CE_weak_num_identity (level : Nat) (h_ref : Heap) (n : Int) :
   exact Option.noConfusion h_call
 ```
 
-We wrap it into an approval:
+Wrap it:
 
 ```lean
 def numIdentityApproval (level : Nat) (heap : Heap) (n : Int) :
@@ -229,7 +199,7 @@ def numIdentityApproval (level : Nat) (heap : Heap) (n : Int) :
   identityApproval level heap (.num n)
 ```
 
-And demo it through `approvedPolicy`:
+And demo through `approvedPolicy`:
 
 ```lean
 def smokeIdentityCtx : MutationCtx :=
@@ -239,7 +209,6 @@ def smokeIdentityCtx : MutationCtx :=
 def smokeIdentityApprovals : List ApprovedModification :=
   [numIdentityApproval 0 [] 42]
 
--- The policy admits a matching .set; refuses a non-matching one.
 example : approvedPolicy smokeIdentityApprovals
               smokeIdentityCtx (.num 42) (.num 42) = true := by decide
 
@@ -247,22 +216,22 @@ example : approvedPolicy smokeIdentityApprovals
               smokeIdentityCtx (.num 42) (.num 7)  = false := by decide
 ```
 
-This is the "plumbing smoke" — it validates that the kernel really does
-accept a hand-built `CE_weak` term and pipe it through the policy.
+This is the "plumbing smoke" — it validates that the kernel really
+does accept a hand-built `CE_weak` term and pipe it through the
+policy.
 
-## 6. A more substantive approval (closure identity)
+## 6. A substantive approval — closure identity
 
 `CE_weak_refl` generalizes the identity case to any value `v` — but
 the proof is no longer vacuous. The proof picks `(fuel', T'', r') :=
-(fuel, T', r)` (i.e., the new call IS the old call), then needs:
+(fuel, T', r)` (the new call IS the old call), then needs:
 
 - `ValVis_weak r r T'.heap T'.heap` — bisim of the result with itself.
 - `HeapValid T'.heap` — preservation of heap validity.
 - `T.heap.length ≤ T'.heap.length` — monotonicity.
 
-These come from `callAsBaseApply_preserves` (a wrapper around the
-public `applyDirect_preserves_self_invariants` in `Soundness.lean`)
-plus `ValVis_aux_self_extend` + `ValVis_aux_to_weak`.
+These come from `callAsBaseApply_preserves` plus `ValVis_aux_self_extend` +
+`ValVis_aux_to_weak`.
 
 ```lean
 theorem CE_weak_refl (level : Nat) (h_ref : Heap) (v : Val) :
@@ -278,7 +247,7 @@ theorem CE_weak_refl (level : Nat) (h_ref : Heap) (v : Val) :
   exact ValVis_aux_to_weak _ _ _ _ _ (by simpa using h_strong)
 ```
 
-The approval, with `CE_weak.to_strong` to widen to `CE_weak_strong`:
+The approval:
 
 ```lean
 def identityApproval (level : Nat) (heap : Heap) (v : Val) :
@@ -293,71 +262,18 @@ And demo:
 def trivialClosure : Val :=
   .closure ["op", "args"] (.var "op") .nil
 
-def smokeClosureApprovals : List ApprovedModification :=
-  [identityApproval 0 [] trivialClosure]
-
-example : approvedPolicy smokeClosureApprovals
+example : approvedPolicy [identityApproval 0 [] trivialClosure]
               smokeIdentityCtx trivialClosure trivialClosure = true := by
   decide
 ```
 
-This exercises the *operator-wrap* branch of `callAsBaseApply` (the
-non-`.builtinBaseApply` case). The arity check, foldl alloc, and body
-eval all run — but since `new = old = v`, the call is its own
-conservative extension.
+This exercises the *operator-wrap* branch of `callAsBaseApply`.
 
-## 7. W1: convergent obs-equivalence under proof-bearing admission
+## 7. The multn approval — the worked example
 
-A weak existential observational equivalence: under proof-bearing
-admission, there exist syntactically-distinct expressions that
-converge to the same value. This is a convergent form (same eval
-result at some fuel), not full contextual equivalence over all
-eval contexts. It is the easiest piece of the Wand-defeat story
-to mechanize directly; the contextual lift is informal but
-substantive (see "What's still open").
-
-```lean
-def ObsEquivConverges (M N : Expr) : Prop :=
-  ∃ fuel v,
-    evalProgram fuel [acceptAllPolicy] M = some v ∧
-    evalProgram fuel [acceptAllPolicy] N = some v
-
-theorem wand_defeated_existential (_approvals : List ApprovedModification) :
-    ∃ M N : Expr, M ≠ N ∧ ObsEquivConverges M N := by
-  refine ⟨.app [.lam ["x"] (.var "x"), .num 0], .num 0, ?_, ?_⟩
-  · intro h; cases h
-  · refine ⟨100, .num 0, ?_, ?_⟩ <;> native_decide
-```
-
-**Reading**: for any list of proof-bearing approvals in scope, the
-β-redex `((λx. x) 0)` and its contractum `.num 0` are non-equal as
-`Expr` constructors but converge to the same value at fuel 100. The
-existence of admissions doesn't disturb β.
-
-**Why `_approvals` is unused**: the witness pair contains no `.set`,
-so the policy gate isn't consulted during eval. The theorem documents
-that admissions are non-disturbing; it doesn't claim the admissions
-participate in the computation.
-
-**Why `[acceptAllPolicy]` and not `[approvedPolicy approvals]`**:
-`native_decide` needs a closed term to compile. The strengthening to
-the gated form, with the β-redex witness preserved, is
-`wand_defeated_existential_gated_beta` in §9 below, bridged through
-the `AllPureIndep` policy-independence lemma.
-
-**The DecidableEq machinery**: `native_decide` for `Option Val`
-equality requires `DecidableEq Val`. Lean 4 doesn't auto-derive
-`DecidableEq` for mutually-recursive inductives (`Val`/`Expr`/`Env`),
-so `ProofBased.lean` builds the instance manually from the existing
-`Val.beq` + `val_beq_eq` (in `Black.lean`) plus a freshly-proved
-mutual reflexivity (`val_beq_self`, `expr_beq_self`, `env_beq_self`).
-
-## 8. The multn approval
-
-The headline worked example: an `ApprovedModification` for the multn
-closure, constructed by invoking
-`multnExact_soundForCE_first_install_tower` inside the
-`CE_weak_strong` proof.
+The headline. An `ApprovedModification` for the multn closure,
+constructed by invoking `multnExact_soundForCE_first_install_tower`
+inside the `CE_weak_strong` proof:
 
 ```lean
 def multnApproval
@@ -377,21 +293,19 @@ Two pieces of machinery made this work:
    content-preserving `HeapPrefix` extension. This is why
    `ApprovedModification.matches` checks **content-prefix** (not just
    length) and `CE_weak_strong` carries `HeapPrefix h_ref T.heap`.
+
 2. **Fuel split.** `multnExact_soundForCE_first_install_tower`
    requires `fuel ≥ 2`. `CE_weak_strong` quantifies over arbitrary
    `fuel`. The proof case-analyzes:
-   - `fuel = 0`: `applyDirect 0` returns `none`, vacuous.
-   - `fuel = 1`: by case on `op`, the call succeeds only for
-     `op = .prim p` (other constructors give `none`). For the prim
-     subcase, we "bump" fuel to 2 (`applyDirect_prim_fuel_bump` —
-     `applyDirect ≥ 1` on `.prim` is fuel-independent), then invoke
-     the multn theorem.
+   - `fuel = 0`: vacuous (`applyDirect 0` returns `none`).
+   - `fuel = 1`: by case on `op`, succeeds only for `op = .prim p`.
+     For the prim subcase, "bump" fuel to 2 via
+     `applyDirect_prim_fuel_bump`, then invoke the multn theorem.
    - `fuel ≥ 2`: invoke directly.
 
-[`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) Scene 3 builds a
-sample admission state (`sampleAdmitHeap`, `sampleAdmitCenv`,
-`sampleMultnClosure`), constructs the approval via `multnApproval`,
-and verifies `approvedPolicy` admits/refuses correctly:
+[`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) Scene 3 builds a sample
+admission state, constructs the approval, and verifies the gate
+admits/refuses correctly:
 
 ```
 Scene 3: multn approval constructs + matches
@@ -400,424 +314,132 @@ Scene 3: multn approval constructs + matches
 ```
 
 The "admits" line is the evidence the abstract names: the kernel
-type-checked the `CE_weak_strong` proof (which threads through
-fuel splits and the existing multn soundness theorem), and the
-runtime gate accepts the admission.
+type-checked the `CE_weak_strong` proof, the runtime gate accepts
+the admission.
 
-For the end-to-end runtime — actually firing this approval through
-`evalProgram` and observing `(2 3 4) ⇒ 24` — see Scenes 8 (level 1)
-and 9 (level 2) below.
+## 8. Wand defeat — β-equivalence under gated reflection
 
-## 9. The `Pure` policy-independence lemma + strengthened β-redex W1
-
-The `AllPureIndep` lemma — proved sorry-free — establishes that
-`eval` (and the mutually-recursive `evalList`/`applyVia`/`applyDirect`)
-are policy-table-independent for `Pure` expressions in a `PureHeap`
-context. `Pure` rules out `.set` and `.installPolicy`; everything
-else (including `.em`/`.app`/`.letE`/`.primApp`/`.seq`) thread the
-policy without consulting it.
+The convergent existential statement: under proof-bearing admission,
+the β-redex `((λx. x) 0)` and the contractum `0` are observationally
+equivalent at the top level.
 
 ```lean
-def Pure : Expr → Bool := ...        -- no .set, no .installPolicy
-def PureVal : Val → Bool := ...      -- closures have Pure bodies; .cons recurses
-def PureHeap (h : Heap) : Prop := ∀ i v, h[i]? = some v → PureVal v = true
+def ObsEquivConvergesGated (approvals : List ApprovedModification)
+    (M N : Expr) : Prop :=
+  ∃ fuel v,
+    evalProgram fuel [approvedPolicy approvals] M = some v ∧
+    evalProgram fuel [approvedPolicy approvals] N = some v
 
-theorem allPureIndep : ∀ fuel, AllPureIndep fuel  -- joint induction on fuel
-```
-
-The proof is ~1000 LOC of joint induction with auxiliary preservation
-lemmas (`PureHeap_append`, `materialize_preserves_PureHeap`,
-`Heap_alloc_preserves_PureHeap`, `foldl_allocStep_preserves_PureHeap`,
-`PureVal_listToVal`, `valToList_PureValList`, `applyPrim_PureVal`).
-With it in hand, **β-redex W1 strengthens**:
-
-```lean
 theorem wand_defeated_existential_gated_beta
     (approvals : List ApprovedModification) :
-    ∃ M N : Expr, M ≠ N ∧ ObsEquivConvergesGated approvals M N := by
-  refine ⟨.app [.lam ["x"] (.var "x"), .num 0], .num 0, ?_, ?_⟩
-  · intro h; cases h
-  · refine ⟨100, .num 0, ?_, ?_⟩
-    · rw [evalProgram_pure_indep _ (by decide) 100
-            [approvedPolicy approvals] [acceptAllPolicy]]
-      native_decide
-    · simp [evalProgram, eval]; rfl
+    ∃ M N : Expr, M ≠ N ∧ ObsEquivConvergesGated approvals M N
 ```
 
-The β-redex narrative is now formal in the convergent sense: the
-β-redex `(λx. x) 0` and its contractum `.num 0` evaluate to the
-same value under any gated policy table, proved sorry-free. The
-full contextual lift (∀ context C, evalProgram (C[M]) = evalProgram
-(C[N])) is not formalized — see "What's still open".
+Read: for any list of proof-bearing approvals, the β-redex and its
+contractum are non-equal as `Expr` constructors but converge to the
+same value under any gated policy table. **The existence of
+admissions doesn't disturb β.**
 
-## 10. End-to-end multn through the proof-based gate
+The bridge is `AllPureIndep` (also sorry-free): `eval` is
+policy-table-independent for `Pure` expressions (no `.set`, no
+`.installPolicy`). The β-redex is `Pure`, so the choice of policy
+table doesn't affect its evaluation.
 
-Scenes 8 and 9 in [`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) run
-the full pipeline through `evalProgram`: gate installed, gated
-`set!` fires and is admitted by the kernel-checked approval, and
-the post-admission application returns `24` (level 1 directly,
-level 2 via `(em (2 3 4))` dispatched through level-2's now-multn
-base-apply). The trick is making the approval's `newVal` byte-equal
-what `eval` constructs at the `.lam` rule: since `freshLevelEnv` is
-a deterministic Lean function, re-running it in pure code yields
-the same cenv the evaluator captures, so `Val.beq` byte-equality
-falls out of definitional equality — no runtime instrumentation
-needed.
+This is the convergent form; full contextual obs-equivalence (∀
+context C) is in progress — see §11.
 
-## 11. What's still open
+## 9. End-to-end through the gate
 
-**The contextual obs-equivalence lift.** The W1 statements in §7 and
-§9 are about convergent obs-equivalence (M and N evaluate to the
-same value at the top level). Full contextual obs-equivalence —
-`∀ C : Expr → Expr, evalProgram (C[M]) = evalProgram (C[N])` — is
-not in Lean. The informal argument lifts cleanly (any admitted
-modification preserves call-trace bisim, so no context can
-distinguish β-equivalent pairs through the gated runtime), but the
-universal quantification over `C` is not yet a theorem.
+Scenes 8 and 9 in `ProofBasedSmoke.lean` run the full pipeline:
+gate installed, gated `set!` admitted by the kernel-checked approval,
+post-admission application returns 24 (level 1 directly, level 2 via
+`(em (2 3 4))` dispatched through level-2's now-multn base-apply).
 
-`LeanBlack/ContextualBeta.lean` is a first step toward this lift —
-see §11.5.
+The trick is making the approval's `newVal` byte-equal what `eval`
+constructs at the `.lam` rule: since `freshLevelEnv` is a
+deterministic Lean function, re-running it in pure code yields the
+same cenv the evaluator captures, so `Val.beq` byte-equality falls
+out of definitional equality — no runtime instrumentation needed.
 
-## 11.5. ContextualBeta — operational β and the CE→β bridge
+## 10. Recap — what you can now state
 
-[`LeanBlack/ContextualBeta.lean`](LeanBlack/ContextualBeta.lean) adds
-three sorry-free theorems that connect the kernel infrastructure to
-β-equivalence statements directly (rather than going through
-`allPureIndep`).
+You can write Lean code that produces:
 
-**`eval_beta_builtin`** (L1). At sufficient fuel, with level+1's
-`base-apply` cell still bound to `.builtinBaseApply` and level+1
-materialized below `Tower.maxDepth`:
+- An `ApprovedModification` whose `proof` field discharges
+  `CE_weak_strong` (via `numIdentityApproval`, `identityApproval`, or
+  `multnApproval`).
+- A `BlackPolicy` from a list of approvals (`approvedPolicy`).
+- A soundness invocation `approvedPolicy_soundForCE_weak_strong` that
+  gives you a `CE_weak_strong` witness for every admitted
+  modification at runtime.
+- A `wand_defeated_existential_gated_beta` instance — β-equivalence
+  survives under the gated policy table.
 
-```lean
-eval (n + 3) ptable level (.app [.lam [x] body, v_expr]) env T
-  = eval n ptable level body
-      (Env.cons x T'.heap.length env)
-      { T' with heap := T'.heap ++ [v_val] }
-```
+And run `lake exe proofBasedSmoke` to see the end-to-end pipeline
+admitting/refusing in real time.
 
-— provided `v_expr` evaluates to `(v_val, T')` at fuel `n+1`. Pure
-operational unfolding through `.app` / `.lam` / `applyVia`-builtin /
-`applyDirect`-closure. No CE consumed.
+That's the proof-based half of lean-sage. The structural-policy half
+(`multnExactPolicy` + `multnExact_soundForCE_first_install_tower`) is
+covered in [`DESIGN.md`](DESIGN.md) and exercised by
+`lake exe smoke` + `lake exe demos`.
 
-**`ce_apply_bisim_builtin`** (CE→β bridge). Given a `CE_weak_strong`
-certificate for the user-installed `base-apply` over the current heap,
-the apply path produces a bisim-equivalent result to the
-counterfactual builtin apply. Threads the full 16-condition CE
-premise stack and consumes the certificate once.
+## 11. Beyond the basics — contextual β (in progress)
 
-**`admission_applyVia_bisim_builtin`** (admission corollary). Same
-conclusion as above, but with the CE certificate replaced by
-`approvedPolicy approvals ctx .builtinBaseApply bc = true` + an
-`am.level = level` invariant on `approvals`. This is the first place
-in the repo where `approvedPolicy`-admission flows into a β-equivalence
-statement at the runtime.
+The W1 statement in §8 is *convergent* obs-equivalence (M and N
+evaluate to the same value at the top level). Full *contextual*
+obs-equivalence — `∀ C : Expr → Expr, evalProgram (C[M]) =
+evalProgram (C[N])` — is in progress. The pieces:
 
-### What this changes vs. the prior W1 story
+- [`LeanBlack/EvalFuelMono.lean`](LeanBlack/EvalFuelMono.lean) — fuel
+  monotonicity for all four mutually-recursive eval functions. The
+  arithmetic enabler for fuel-juggling inside the cross-side bisim
+  and the contextual β bridges.
+- [`LeanBlack/Ctx.lean`](LeanBlack/Ctx.lean) — term contexts +
+  `EvalEquiv` observational equivalence + per-constructor
+  congruence lemmas. The clean half (`EasyCtx`, `WideCtx`,
+  `SimpleCtx`) covers every `Expr`-tree position except `.lam`,
+  which is deferred because of closure-syntactic refinement.
+- [`LeanBlack/ContextualBeta.lean`](LeanBlack/ContextualBeta.lean) —
+  operational β-redex factoring (`eval_beta_builtin`) and CE→β
+  bridges (`ce_apply_bisim_builtin`,
+  `admission_applyVia_bisim_builtin`). The first place where
+  `approvedPolicy` admission flows into a β-equivalence statement
+  with CE consumed (rather than the policy-irrelevant `AllPureIndep`
+  path).
+- [`LeanBlack/HeapAgree.lean`](LeanBlack/HeapAgree.lean) — selective
+  heap-prefix relation `HeapAgreeAt` and `CE_weak_strong_at`
+  predicate, weakening the CE premise from full-prefix to
+  agreement-at-specific-cells. Lets the CE certificate survive past
+  the admission moment (where the full-prefix premise breaks because
+  the base-apply cell changes).
 
-- `wand_defeated_existential_gated_beta` (§9) proves β for one
-  fixed pair `((λx. x) 0)` ≡ `0`, via `allPureIndep` — the policy is
-  never actually consulted because the redex is pure.
-- The bridge proves β-equivalence for **any** closure call going
-  through an admitted user `base-apply`, with CE actually flowing
-  into the conclusion. It just fires at one specific moment.
-
-### Why "one specific moment"
-
-The bridge fires where `HeapPrefix am.heap T.heap` holds. By
-construction this holds at the admission moment (the `.set` step
-itself, before the heap update commits — `ctx.heap = T.heap` and
-`am.heap` content-prefix-matches `ctx.heap`).
-
-After the `.set` commits, `T_post.heap = T.heap.update idx_ba bc`.
-Since `idx_ba < am.heap.length`, the content-prefix property breaks
-on the base-apply cell:
-
-```text
-am.heap[idx_ba]    = .builtinBaseApply   -- (in am's snapshot)
-T_post.heap[idx_ba] = bc                  -- (after the .set commits)
-```
-
-`CE_weak_strong_heap_mono` cannot lift the certificate to
-`T_post.heap`. So future β-equivalence questions — the kind a
-contextual lift would ask — sit outside the bridge's reach.
-
-### What the contextual lift requires
-
-The multn proof's actual cell lookups (via `multnExactPolicy_implies_InstallFacts`
-in `Policies.lean`) only read the closure's captured `orig` and
-`num?` indices — never the base-apply cell. The `HeapPrefix`
-premise is **stronger than necessary** — it demands content-equality
-on cells the proof doesn't read.
-
-### §11.6. Selective-premise CE — `HeapAgree.lean` (the unblock)
-
-[`LeanBlack/HeapAgree.lean`](LeanBlack/HeapAgree.lean) implements
-the weakening, sorry-free. Key definitions and theorems:
-
-- `HeapAgreeAt indices h₁ h₂` — content-equality at the specified
-  indices, no constraint on other cells.
-- `HeapAgreeAt.update_disjoint` — heap-update at index `j ∉ indices`
-  preserves agreement. The lemma that makes post-mutation lifting
-  work.
-- `CE_weak_strong_at level indices h_ref old new` — the
-  selective-premise CE predicate. Same conclusion as
-  `CE_weak_strong`, but premise is `HeapAgreeAt indices` +
-  `length_le` instead of `HeapPrefix`.
-- `InstallFacts_heap_agree_cells` — transports `InstallFacts`
-  across `HeapAgreeAt` at the closure's `orig` and `num?` indices.
-- **`multnApproval_at_proof`** — the multn approval re-proved
-  under `CE_weak_strong_at`. Mirrors `multnApproval`'s proof body
-  almost verbatim; only the `InstallFacts` transport line changes
-  (from `InstallFacts_heap_extend` to `InstallFacts_heap_agree_cells`).
-
-[`LeanBlack/ContextualBeta.lean`](LeanBlack/ContextualBeta.lean)
-adds the matching bridge:
-
-- **`ce_apply_bisim_builtin_at`** — same as `ce_apply_bisim_builtin`
-  but consumes `CE_weak_strong_at indices` with a `HeapAgreeAt
-  indices h_ref T.heap` witness. Usable post-admission: the .set
-  mutates `idx_ba`; under the `installMultnOneUp` pattern (which
-  allocates `orig` via `.letE`), `idx_ba ∉ [idx_o, idx_n]`, so
-  `update_disjoint` keeps the agreement intact and the bridge
-  fires.
-
-Net effect: the CE certificate now flows past admission. What
-remains for full contextual β is L4's parallel-bisim invariant
-threaded through eval — the pieces it consumes are now in place.
-
-### §11.7. Fuel monotonicity — `EvalFuelMono.lean`
-
-[`LeanBlack/EvalFuelMono.lean`](LeanBlack/EvalFuelMono.lean) closes
-a small but load-bearing gap: the operational β-redex factoring in
-§11.5 fixes a specific fuel for the redex (`n+3`) and another for
-the contractum (`n`). To equate the two inside a containing
-context, the surrounding `eval`s on each side need to be reconciled
-at a common fuel.
-
-- **`EvalFuelBump n`** — joint claim: success at fuel `n` implies
-  success at fuel `n+1` (same value, same final tower state) for
-  all four mutually-recursive functions.
-- **`evalFuelBump_zero`** — base case, vacuous (no function
-  succeeds at fuel 0).
-- **`evalFuelBump_succ`** — inductive step, joint induction on the
-  outer constructor (per-`Expr` for `eval`, per-`List` shape for
-  `evalList`, per-`Val` for `applyDirect`, sequential for
-  `applyVia`). Structurally parallel to
-  `ProofBased.lean`'s `allPureIndep_succ`, but with a one-step
-  fuel-bump claim and no `Pure` precondition. All cases proven,
-  including `.set` and `.installPolicy` (which `allPureIndep_succ`
-  skips via `Pure = false`).
-- **`evalFuelBump`** — combines base and step.
-- **`eval_fuel_mono`**, **`evalList_fuel_mono`**,
-  **`applyVia_fuel_mono`**, **`applyDirect_fuel_mono`** — the
-  user-facing corollaries. For any `n ≤ m`, success at fuel `n`
-  implies success at fuel `m`. Proved by `Nat.le.induction` on the
-  bump.
-
-These corollaries are the input to L4's joint-induction setup:
-fuel can be juggled freely while threading the cross-side
-invariant, without committing to a single fuel value up front.
-
-The first concrete consumer is **`eval_beta_builtin_fuel_lift`** in
-`ContextualBeta.lean`. `eval_beta_builtin` is stated at a specific
-fuel pair (`n+3` for the redex, `n` for the contractum); the lift
-re-states the conclusion with quantified fuel on each side
-(`k ≥ n+3`, `m ≥ n`), pushing the alignment to the call site.
-
-A second, more substantive consumer is **`beta_letE_conv_equiv`**:
-the conditional β-redex / `.letE` convergence-existential
-equivalence. Under the `eval_beta_builtin` conditions, the
-existential `(∃ k, eval k β-redex = some(v, T_final))` is
-equivalent to `(∃ k, eval k .letE = some(v, T_final))`. The
-companion lemma **`eval_letE`** unfolds `.letE` in the
-`eval_beta_builtin` shape (body in extended env+heap, at fuel `n`),
-making both sides reduce to the same body eval. The proof aligns
-the two fuel offsets via `eval_fuel_mono` and reconciles the
-post-`v_expr` states via determinism. This is the practical
-β-equivalence base case — what would feed a conditional
-`EvalEquivAt` framework to give fully contextual β.
-
-### §11.8. Contextual β scaffolding — `Ctx.lean`
-
-[`LeanBlack/Ctx.lean`](LeanBlack/Ctx.lean) opens the contextual-β
-track. The shape:
-
-- **`Ctx`** — term contexts with a single hole, one constructor per
-  `Expr` shape with a recursive sub-expression position. Includes
-  `.hole`, `.ifteCond`/`.ifteThen`/`.ifteElse`, `.lam`, `.app pre · post`,
-  `.set`, `.em`, `.primAppFun`/`.primAppArg`, `.letEVal`/`.letEBody`,
-  `.seq pre · post`.
-- **`Ctx.plug : Ctx → Expr → Expr`** — fills the hole.
-- **`EvalEquiv M N`** — observational equivalence in
-  convergence-existential form: `∀ initial state, ∀ outcome,
-  (∃ k, eval k M = some outcome) ↔ (∃ k, eval k N = some outcome)`.
-  Equivalent under `eval_fuel_mono` to "agree at all sufficient fuel".
-- `EvalEquiv.refl` / `.symm` / `.trans` — equivalence relation.
-
-The substantive content is the per-`Ctx`-constructor congruence
-lemmas: `EvalEquiv M N → EvalEquiv (C M) (C N)` for one wrapper at
-a time. Thirteen non-trivial cases are proven:
-**`plug_set`**, **`em_cong`**, **`letEVal_cong`**, **`letEBody_cong`**,
-**`ifteCond_cong`**, **`ifteThen_cong`**, **`ifteElse_cong`**,
-**`appHead_cong`**, **`appArg_cong`**, **`primAppFun_cong`**,
-**`primAppArg_cong`**, **`seqHead_cong`**, **`seqTail_cong`** (plus
-the trivial `plug_hole`). The argument-position cases (`appArg`,
-`primAppArg`) use **`evalList_EvalEquiv`** — a list-traversal
-congruence helper: if `M ≡ N`, then `evalList (pre ++ M :: post)`
-and `evalList (pre ++ N :: post)` produce the same outcomes.
-
-The proof template:
-1. unfold one `eval` step (`simp only [eval]`),
-2. case-split on the sub-eval at the hole position,
-3. apply the `EvalEquiv` hypothesis to lift the M-side sub-eval to
-   the N-side,
-4. use `eval_fuel_mono` to align fuels when re-assembling.
-
-**`SimpleCtx`** is the sub-language whose constructors all have
-proven congruence lemmas (14 in total including hole);
-**`SimpleCtx.plug_cong`** lifts `EvalEquiv` through any
-`SimpleCtx` by induction. This is the clean half of T1 — the
-contextually-quantified β statement for the sub-fragment where
-the hole sits in any non-`.lam` position. Only `.lam`
-(closure-syntactic-refinement issue) is deferred; every other
-position in the `Expr` tree is covered.
-
-The **unconditional witness library** provides concrete
-`EvalEquiv` proofs that compose with `SimpleCtx.plug_cong` via
-`trans`: `seq_singleton` (`.seq [e] ≡ e`), `seq_nil`
-(`.seq [] ≡ .quote .nilV`), `ifte_true`
-(`.ifte (.bool true) t e ≡ t`), `ifte_false`
-(`.ifte (.bool false) t e ≡ e`). For each, combining with
-`SimpleCtx.plug_cong` yields a contextually-quantified
-equivalence — i.e., a constant-fold / β-reduction valid in any
-position.
-
-### §11.9. Conditional contextual β — `EvalEquivAt` + `EasyCtx`
-
-The general β-redex / `.letE` pair depends on
-`builtinBaseApplyAt level T'`, so the natural form is *conditional*.
-[`LeanBlack/Ctx.lean`](LeanBlack/Ctx.lean) provides this:
-
-- **`StatePred := Nat → Env → TowerState → Prop`** — a state
-  predicate.
-- **`EvalEquivAt P M N`** — `M` and `N` are observationally
-  equivalent at every state satisfying `P`. `EvalEquiv` is the
-  special case `EvalEquivAt (fun _ _ _ => True)`;
-  `EvalEquiv.toEvalEquivAt` lifts strict witnesses to any `P`.
-- Equivalence relation (`refl` / `symm` / `trans`).
-- **Six "easy" congruence lemmas** at the `EvalEquivAt P` level —
-  the cases where the hole's sub-eval happens at the same outer
-  state, so `P` propagates trivially: `set_cong`, `ifteCond_cong`,
-  `letEVal_cong`, `appHead_cong`, `primAppFun_cong`, `seqHead_cong`.
-- **Eight "hard" congruence lemmas** with `P`-preservation
-  hypotheses: `letEBody_cong`, `em_cong`, `ifteThen_cong`,
-  `ifteElse_cong`, `seqTailFirst_cong`, `appArg_cong`,
-  `primAppArg_cong`, `seqTail_cong`. Each takes an explicit
-  hypothesis that `P` is preserved by the relevant pre-hole
-  sub-eval.
-- **`PIsClosedUnderEval P`** — the common-case preservation
-  property: `P` is preserved by any successful evaluation at the
-  same `env`/`level`.
-- **`evalList_EvalEquivAt`** — list-traversal congruence helper,
-  the conditional analog of `evalList_EvalEquiv`.
-- **`EasyCtx`** (7 ctors) — `EasyCtx.plug_cong_at` lifts
-  `EvalEquivAt P` with no preservation hypothesis.
-- **`WideCtx`** (12 ctors) — `WideCtx.plug_cong_at` lifts
-  `EvalEquivAt P` given `PIsClosedUnderEval P`. Adds `.ifteThen`,
-  `.ifteElse`, `.appArg`, `.primAppArg`, `.seqTail` to `EasyCtx`'s
-  coverage.
-
-The remaining cases needing a *different* preservation hypothesis
-are `.letEBody` (env-extension across the binding) and `.em`
-(level-shift). Both have standalone congruence lemmas; bundling
-them into a `MediumCtx` would require a record of per-binder
-preservation witnesses.
-
-With **`beta_letE_conv_equiv`** (in `ContextualBeta.lean`) as the
-concrete base-case witness under L1 conditions, the wrapping is
-done via:
-
-- **`BetaLetEReady v_expr`** — the L1 conditions packaged as a
-  `StatePred`.
-- **`beta_letE_EvalEquivAt`** — the base case in `EvalEquivAt`
-  form: `EvalEquivAt (BetaLetEReady v_expr) (β-redex) (.letE)`.
-  Direct one-liner consuming `beta_letE_conv_equiv`.
-- **`contextual_beta_easy`** — *the headline T1 deliverable for
-  the easy half*: for any easy context `C : EasyCtx` and any
-  `(x, body, v_expr)`, `C.plug (β-redex)` and `C.plug (.letE)`
-  are observationally equivalent at every state satisfying
-  `BetaLetEReady v_expr`. One-line proof:
-  `EasyCtx.plug_cong_at C (beta_letE_EvalEquivAt x body v_expr)`.
-
-### Specialized to `wand_defeated_existential_gated_beta`'s pair
-
-For the specific β-redex/`.letE` pair `((λx. x) 0)` and
-`.letE x 0 x`, `BetaLetEReady_num_iff` simplifies the precondition
-to a pure state property (`level + 1 < Tower.maxDepth`,
-`T.levels.length > level + 1`, `builtinBaseApplyAt level T`) —
-captured as **`BuiltinReady`**. Then:
-
-- **`beta_letE_num_EvalEquivAt`** — `EvalEquivAt BuiltinReady` for
-  literal `v_expr = .num i`.
-- **`wand_beta_ctx_easy_builtin`** — *the cleanest contextual β
-  statement for the wand pair*: under `BuiltinReady`, the
-  equivalence holds in any easy context.
-
-### Materialization gap
-
-`BuiltinReady` requires level+1 to be materialized at the
-β-redex's evaluation point. `initTower` has only level 0
-materialized, so the predicate fails at evalProgram's starting
-state — even though the β-redex's `applyVia` would materialize
-level+1 internally. Closing this gap requires deriving a "post-
-materialize" version of `BetaLetEReady`; deferred. Workaround:
-state the equivalence at level ≥ 1 (sub-evaluations inside an
-`.em`) where the tower is naturally pre-materialized.
+The headline near-result: **`contextual_beta_easy`** (in `Ctx.lean`)
+— for any `EasyCtx` and any `(x, body, v_expr)`, `C.plug (β-redex)`
+and `C.plug (.letE)` are observationally equivalent at every state
+satisfying `BetaLetEReady v_expr`. This is the contextually-quantified
+β statement for the easy-context sub-language. What remains is
+threading the L4 parallel-bisim invariant through `eval` to lift to
+arbitrary contexts.
 
 ## 12. Reading order for the source
 
-If you want to dig into `LeanBlack/ProofBased.lean`, the file is
-already structured top-to-bottom for sequential reading:
+If you want to dig into `LeanBlack/ProofBased.lean`, it's structured
+top-to-bottom for sequential reading:
 
 1. `DecidableEq` machinery (mutual `*_beq_self` + instances).
-2. `HeapPrefix` + helpers (`length_le`, `refl`, `trans`, `getElem?`).
+2. `HeapPrefix` + helpers.
 3. `CE_weak_strong` predicate + `CE_weak_to_strong` weakening.
 4. `BlackPolicy.SoundForCE_weak_strong` abbrev.
 5. `ApprovedModification` structure.
-6. `ApprovedModification.matches` (content-prefix check) +
-   `approvedPolicy` runtime gate.
+6. `ApprovedModification.matches` + `approvedPolicy` runtime gate.
 7. `structural_policy_yields_approval` (bridge from existing
-   `SoundForCE_weak` to the new predicate).
+   `SoundForCE_weak`).
 8. `CE_weak_strong_heap_mono` + `approvedPolicy_soundForCE_weak_strong`
    (the headline soundness).
-9. `CE_weak_num_identity` + `numIdentityApproval` (vacuous identity).
-10. Plumbing smoke (`smokeIdentityCtx`, `smokeIdentityApprovals`, the
-    `example`s).
-11. `callAsBaseApply_preserves` + `CE_weak_refl` + `identityApproval`
-    (closure-identity).
-12. Closure-identity demo (`trivialClosure`, `smokeClosureApprovals`).
-13. `ObsEquivConverges` + `wand_defeated_existential` (W1, baseline).
-14. `ObsEquivConvergesGated` + `wand_defeated_existential_gated`
-    (W1, gated, `.ifte` witness).
-15. **`Pure` policy-independence**: `Pure`/`PureVal`/`PureHeap`
-    predicates, auxiliary preservation lemmas
-    (`PureHeap_append`, `freshLevelEnv_preserves_PureHeap`,
-    `materialize_preserves_PureHeap`, `Heap_alloc_preserves_PureHeap`,
-    `foldl_allocStep_preserves_PureHeap`, `PureVal_listToVal`,
-    `valToList_PureValList`, `applyPrim_PureVal`), `AllPureIndep`
-    statement, `allPureIndep_zero` (base), `allPureIndep_succ`
-    (inductive step), `allPureIndep` (wrapper),
-    `evalProgram_pure_indep`, and
-    `wand_defeated_existential_gated_beta` (β-redex witness under
-    `[approvedPolicy approvals]`).
-16. **Multn approval**: `InstallFacts.heap_extend` (via
-    `OrigBoundIn_heap_extend` and `NumQBoundIn_heap_extend`),
-    `applyDirect_prim_fuel_bump`,
-    `callAsBaseApply_one_builtin_succeeds_implies_prim`, and
-    `multnApproval` itself. Exercised in
-    `ProofBasedSmoke.lean` Scene 3.
+9. Identity (vacuous + reflexive) approvals + plumbing smoke.
+10. Wand defeat (W1 baseline, gated, gated-β via `AllPureIndep`).
+11. Multn approval (the worked example), exercised in Scene 3.
 
-Cross-references to `Policies.lean` are throughout — they show how the
-existing structural-policy machinery feeds into the proof-based
+Cross-references to `Policies.lean` are throughout — they show how
+the existing structural-policy machinery feeds into the proof-based
 reading.

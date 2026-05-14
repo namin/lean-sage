@@ -1,228 +1,197 @@
 # lean-sage
 
-A synthesis of [`lean-grey`](../lean-grey/) (abstract infinite tower with
-proved governance coherence) and [`lean-green`](../lean-green/) (Black-faithful
-heap+closure+`set!` interpreter with CakeML-style value bisimulation).
+A reflective tower of interpreters in Lean 4 where modifications to the
+`base-apply` rule carry kernel-checked proofs of conservative
+extension. Black-faithful (heap + closure + `set!`), with
+CakeML-style value bisimulation underwriting the soundness arguments.
 
-**Status: 0 sorries.** ~15k LOC of library (8 files in `LeanBlack/`)
-+ ~1200 LOC of demo executables. Smoke 8/8 passing. Demos 29/29
-passing across 12 scenes. `proofBasedSmoke` 18/18 passing across 7
-scenes (identity admit, identity refuse, multn approval, disaster
-demo, verified compose, custom modification, cross-level approval).
-All headline theorems proved.
+**All theorems sorry-free.** Lean toolchain v4.20.0.
 
-## What this is
+## What has been proved
 
-A **tower-indexed reflective interpreter** for a Black-style language:
-nested `(em (em ...))` programs, real `set! base-apply` cells reaching
-through arbitrarily many materialized levels, single global heap, per-level
-envs and policies. The cross-level reflection cascade — modifying level N+k's
-apply rule from level N — is fully formalized with mechanized soundness
-proofs.
+Five user-facing results.
 
-## Headline theorems (all proved)
+### 1. Substrate stays CE-coherent under any program
 
-| Theorem | What it says |
-|---|---|
-| `eval_tower_safe` (Soundness.lean) | `eval` preserves `TowerCE` and `SafeEvolution` jointly. The 4-way mutual induction over `eval`/`evalList`/`applyVia`/`applyDirect`. The synthesis of lean-grey's tower-conservativeness with lean-green's CE-soundness. |
-| `frame_tower` (Frame.lean) | Cross-side framing: bisim-related inputs ⇒ bisim-related outputs across `eval`/`evalList`/`applyVia`/`applyDirect`, threading the `WFCtxT` 13-field invariant. Tower-aware port of lean-green's `frame`. |
-| `applyDirect_heap_extend_weak` (Frame.lean) | Prefix-extension: `applyDirect` succeeds with a `ValVis_weak`-related result on the prefix-extended state. Discharged via `shift_respect`. |
-| `shift_respect` (Frame.lean) | `eval`/`evalList`/`applyVia`/`applyDirect` all commute with `shift_state`. ~750 LOC of case analysis × 4 mutual clauses. The technical engine for `applyDirect_heap_extend_weak`. |
-| `materialize_shift_commutes` (Bisim.lean) | `(shift_state T).materialize n = (T.materialize n).map shift_state`. The lemma that lets `.em` and `applyVia` commute with shift in `shift_respect`. |
-| `multnExact_soundForCE_first_install_tower` (Policies.lean) | Tower-aware port of lean-green's headline: a `multnExactPolicy`-admitted modification at first install conservatively extends `builtinBaseApply` for `CE_weak`. Combines numerical case (vacuous) and non-numerical case (substantive trace + framing). |
-| `safeEvolution_necessary` (Soundness.lean) | Counterexample: without per-level policy soundness, `eval` can produce a `T'` that doesn't conservatively extend `T`. Concrete witness via a diverging-closure bad-mod. |
+```
+eval_tower_safe   (Soundness.lean)
+```
 
-## Cross-level reflection in action
+For any expression — including reflective ones using `(em ...)` and
+`(set! base-apply ...)` at any depth — evaluation against a substrate
+satisfying the `SafeEvolution` invariant produces a substrate that
+still satisfies it, and the two are related by `TowerCE`. The gate's
+per-modification check propagates through any depth of reflection.
+
+### 2. multn conservatively extends the baseline
+
+```
+multnExact_soundForCE_first_install_tower   (Policies.lean)
+multnApproval                               (ProofBased.lean)
+```
+
+The kernel-checked approval certifies that installing the multn
+wrapper at level 1 preserves baseline behavior on non-numeric
+operators and extends it on numeric ones: `(+ 1 2) ⇒ 3` survives,
+`(2 3 4) ⇒ 24` is the strict extension. The wrapper's `orig`
+fall-through is what makes the CE proof go through, and the bridge
+lemma `multnExactPolicy_implies_InstallFacts` lifts the runtime
+admission to the propositional facts the soundness theorem needs.
+
+### 3. Without the gate, CE fails
+
+```
+safeEvolution_necessary   (Soundness.lean)
+```
+
+Concrete counterexample. Under `acceptAll`, a malicious "constant-zero"
+modification breaks `(+ 1 2)`. The gate is genuinely load-bearing —
+this is the converse of Theorem 1.
+
+### 4. β-equivalence survives gated reflection (Wand defeat)
+
+```
+wand_defeated_existential_gated_beta   (ProofBased.lean)
+```
+
+`((λx. x) 0)` and `0` evaluate to the same value under
+`[approvedPolicy approvals]` for any list of approvals. The β-redex
+and its contractum are observationally equivalent at the top level,
+**with proof-bearing admissions in scope**. Reflection doesn't
+collapse equational reasoning the way it does ungated (per Wand 1998).
+
+Bridged via `AllPureIndep` (also sorry-free): `eval` is
+policy-table-independent for `Pure` expressions.
+
+### 5. Proof-based admission slots into the runtime
+
+```
+approvedPolicy_soundForCE_weak_strong   (ProofBased.lean)
+```
+
+`approvedPolicy approvals` is a `BlackPolicy` — the runtime treats it
+identically to any other policy. From the outside, a `.set` admitted
+under it is no different from one admitted by `multnExactPolicy`. The
+difference is *construction*: an approval only exists if the kernel
+type-checked its CE proof.
+
+## What this backs (vs. the LICS abstract)
+
+The artifact backs the highlighted instance in the
+[reasonable-reflection abstract](https://github.com/namin/reasonable-reflection):
+
+| Dimension          | Realization                                                            |
+|--------------------|------------------------------------------------------------------------|
+| Substrate kind     | Reflective tower of interpreters (heap + closure + `set! base-apply`)  |
+| Modification kind  | `set!` on the `base-apply` heap cell                                   |
+| Evidence kind      | Kernel-checked Lean proof (`CE_weak_strong`)                           |
+| Policy             | Per-modification conservative extension                                 |
+| Guarantee          | Substrate is always a conservative extension of the base               |
+| Reflective depth   | Multi-level: `(em (em (set! ...)))` modifies deeper levels             |
+
+CakeML-style value bisimulation (Kumar 2016 §3) underwrites the CE
+proofs: closures are related pointwise through their captured
+environments. `Bisim.lean` + `Frame.lean` carry this infrastructure.
+
+## Honest scope (what's not claimed)
+
+- **`CE_weak`, not strict `CE`.** The headline CE conclusion is
+  `_weak` — closures' captured environments aren't required to be
+  Lean-equal, only bisim-related. See [`lean-green/WAND.md`](../lean-green/WAND.md)
+  for the technical reason.
+- **multn at first install only.** The headline theorem covers
+  `oldVal = .builtinBaseApply`. Multi-install (a second wrapper
+  installing over multn) is *admissible at runtime* via the
+  `oldVal`-parametric bridge lemma, but the headline soundness
+  theorem isn't yet wrapped for the multi-install case.
+- **Full contextual β-equivalence is in progress.** The
+  `wand_defeated_existential_gated_beta` result is *convergent*
+  obs-equivalence (M and N evaluate to the same value at the top
+  level). The contextual lift (`∀ context C, eval (C[M]) = eval (C[N])`)
+  is covered for an `EasyCtx`/`WideCtx` sub-language of contexts
+  (`Ctx.lean`), excluding `.lam`. See `TUTORIAL.md` §11.
+- **No installable per-level policy is exposed at the public
+  interface.** `installPolicy` exists in the substrate but lean-sage's
+  headline theorems quantify over a fixed `verifiedTable`, and the
+  "policy at level N is itself reflectively modifiable" axis from the
+  abstract is captured only by multi-level `set!`-on-`base-apply`, not
+  by recursive policy installation.
+
+## Running it
+
+```bash
+lake build               # library + three executables
+lake exe smoke           # 4 scenes, 8 tests   — structural-policy
+lake exe demos           # 12 scenes, 29 tests — reflection capabilities
+lake exe proofBasedSmoke # 7 scenes, 18 tests  — proof-based admission
+```
+
+Sample output (multn at level 2 via cross-level reflection):
 
 ```
 $ lake exe smoke
-Scene 1: level 0 baseline
-  OK  (+ 1 2): expected num(3), got num(3)
-  OK  (2 3 4): expected <none>, got <none>
-
-Scene 2: single-level reflection (lean-green parity)
-  OK  install + (2 3 4): expected num(24), got num(24)
-  OK  install + (+ 1 2): expected num(3), got num(3)
-
 Scene 3: two-level reflection (the new thing)
   OK  install-2up + (em (2 3 4)): expected num(24), got num(24)
   OK  install-2up + (2 3 4): expected <none>, got <none>
-
-Scene 4: governance
-  OK  ungoverned bad-mod breaks +: expected num(0), got num(0)
-  OK  rejectAll @ level 1 saves +: expected num(3), got num(3)
 ```
 
 ```
-$ lake exe demos
-Demo 1: Doubling wrapper (every num result × 2)
-Demo 2: Identity wrapper (transparency check)
-Demo 3: Tripler (multn variant)
-Demo 4: Compose multn THEN doubling   ⇒ (2 3 4)=48, (+ 1 2)=6
-Demo 5: Compose doubling THEN multn   ⇒ (2 3 4)=24, (+ 1 2)=6
-Demo 6: Three-level meta-meta (install at L2, observe at L1)
-Demo 7: Constant wrapper (everything ⇒ 42)
-Demo 8: Inspection wrappers (apply returns op, or args, not result)
-        ⇒ `(+ 1 2)` returns prim(+); `(car (+ 7 11 13))` returns num(7).
-Demo 9: Self-modifying wrapper (1st call orig; future calls swap to const 999)
-        Wrapper body does `(em (set! base-apply ...))` to overwrite itself.
-Demo 10: Lazy multn (auto-installs proper multn after first num op)
-        Adaptive meta-programming: behavior shifts based on runtime usage.
-Demo 11: Three-level governance (L2 reject default protects L1)
-        `(em (em (set! base-apply X)))` refused under L2's default rejectAll.
-Demo 12: Selective fail (num-only wrapper kills non-num applications)
-```
-
-All 29 sub-tests pass. Each demo highlights a different reflective capability:
-
-**Scene 3** is the headline new capability: `multn` is installed at level 2
-(via `(em (em ...))` from level 0), making level 1's `applyVia` route through
-the wrapper. The cross-level cascade — a level-2 `set!` reshaping how level 1
-dispatches — is what lean-green's stage-1 `metaEnv-of-meta-is-self`
-simplification couldn't express.
-
-**Demo 4 vs Demo 5** — multiple installs **compose**: each new install's
-`orig` captures the prior `base-apply`, so the order of installs determines
-the dispatch chain.
-
-**Demo 8** — apply is **first-class**: a wrapper can return the operator or
-the arg list instead of computing a result. Useful as a `quote`-like
-inspection of dispatched calls.
-
-**Demo 9** — **self-modifying code at the apply-rule level**: the wrapper's
-body does `(em (set! base-apply ...))`, replacing itself. The first call uses
-the captured `orig`; subsequent calls go through the new wrapper. This is
-only expressible because closures' bodies can reach back into meta-mutation.
-
-**Demo 10** — **adaptive meta-programming**: a wrapper that detects a
-condition (here: numeric op) and, on first match, installs a more
-specialized wrapper. Subsequent calls go through the specialized one. Like
-JIT specialization but at the apply-rule level.
-
-**Demo 11** — **defense-in-depth from the safe default**: `materializeStep`
-defaults newly-materialized levels to `rejectAllPolicy`. Even if the user
-admits level-1 mutations, level-2 mutations are still refused unless
-explicitly accepted. Demonstrated by an attempted level-2 install of a
-constant-666 wrapper that's blocked by the default.
-
-## Architecture (one paragraph)
-
-A `TowerState` is a global heap plus a list of per-level `LevelState`s, each
-holding an env and a policy. `(em body)` at level N materializes level N+1
-(allocating fresh primitive cells + a fresh `base-apply` cell) and evaluates
-`body` at level N+1. `(set! x e)` at level N gates via level N's policy if the
-target cell is bound at the level-N root env (the architectural marker for
-"meta-level mutation"). `(installPolicy n)` at level N replaces level N's
-policy. `applyVia` at level N looks up `base-apply` in level (N+1)'s env and
-dispatches through whatever value is there — `builtinBaseApply` (default,
-recursive primitive dispatch) or a closure (the meta-level apply rule).
-
-The single global heap is the load-bearing simplification vs. DESIGN.md's
-initial sketch: it lets a closure created at level N+1 (via `set!`) be
-dispatched from level N without translating its captured env idxes — those
-idxes refer to the same backing store regardless of dispatch level. This is
-consistent with lean-green (one heap, level-uniform allocation discipline).
-
-## Files
-
-| File | LOC | Notes |
-|---|---|---|
-| `Black.lean` | 452 | Val/Expr/Env, Heap ops, primitives, MutationCtx, BlackPolicy. Includes `val_beq_eq`, `expr_beq_eq`, `env_beq_eq`, `valToList_listToVal`. |
-| `Tower.lean` | 839 | LevelState, TowerState, materialization, accessors, `RunState := TowerState` shim. `primPairs` is `@[irreducible]`. All Tower lemmas proved: `setPolicyAt`/`updateHeap`/`alloc`/`materialize` preservation; `materialize_envAt?_preserves`; `materialize_heap_grows`; `materialize_heap_extends`; `materialize_cross_side_*`; `freshLevelEnv_*`; `buildBindings_*` foldl helpers. |
-| `Eval.lean` | 226 | Tower-indexed `eval`/`evalList`/`applyVia`/`applyDirect`. |
-| `Bisim.lean` | 4505 | Depth-indexed `ValVis`/`EnvVis` + weak variants, `ValValid`/`EnvValid`/`HeapValid`, heap-extension/in-place-update preservation, `HeapEvolution`, `ListValVis`/`ListValValid`, `bool_false_iff` characterizations, `applyPrim` bisim, alloc-chain bisim, `bisim_imp_eq`, `ValVis_trans`, `AllBelow`/`Deep` predicates. **Shift apparatus**: `shift_idx`/`shift_val`/`shift_env`/`shift_listVal`/`shift_heap`/`shift_state` (tower-aware), injectivity, identity-on-AllBelow, lookup/getElem? commutativity, `shift_heap_update`/`shift_heap_append`/`shift_heap_id_of_deep`, `valVis_weak_self_shift`, `PolicyRespectsShift`/`PolicyTableRespectsShift`, `shift_applyPrim`, `Tower-shift commutativity` (`shift_state_envAt?`/`policyAt?`/`setPolicyAt`/`updateHeap`/`alloc`), `allocStep_foldl_shift`, `buildBindings_foldl_shift`, `freshLevelEnv_heap_shift`/`env_shift`, `materializeStep_shift_commutes`/`iter_shift_commutes`/`materialize_shift_commutes`. |
-| `Frame.lean` | 4948 | `PolicyRespectsBisimT`, `PolicyTableRespectsBisimT`. Single-side materialize preservation lemmas. Tower-aware `WFCtxT` (13 fields), `TowerCross` (12 fields), `FrameStmtT`, `frame_tower` (the framing theorem, all 4 mutual clauses, all 13 expression cases proved). `all_preserves_envAt` (mutual conjunction). `heap_mono` (4-way mutual induction over fuel). `policy_shift_preserved` (4-way mutual). `shift_respect` (the 4-way commutativity proof). `applyDirect_heap_extend_weak` (prefix-extension, derived via `shift_respect` + `frame_tower` self-bisim). |
-| `Soundness.lean` | 1990 | `TowerCE`, `SafeEvolution`. `TowerCE` helpers (`refl`/`trans`/`of_heap_eq`/`of_heap_extends`/`lift_source`/`weaken_h_ref`). `Expr.IsAtomic` and `eval_atomic_T_unchanged`. `HeapValid_alloc_one`, `EnvValid_cons_alloc`, self-invariant preservation lemmas. `safeEvolution_necessary` (concrete counterexample). `all_tower_safe` (the 4-way mutual safety theorem). `eval_tower_safe` (wrapper). |
-| `Policies.lean` | 611 | Tower-aware `callAsBaseApply`, per-level `CE`/`CE_weak`, `BlackPolicy.SoundForCE`/`_weak`, `numGuardPolicy`/`multnExactPolicy` definitions + shape lemmas, `verifiedTable`. `OrigBoundIn`/`NumQBoundIn`/`InstallFacts`/`RuntimeWF` (tower-aware install-protocol structures). `multnExactPolicy_implies_InstallFacts` (bridge lemma). `multn_closure_body_unfolds` (closure-body trace). `multnExact_CE_num_case_vacuous` (vacuous numerical case). `multnExact_CE_nonnum_case` (substantive non-numerical case via `applyDirect_heap_extend_weak`). `multnExact_soundForCE_first_install_tower` (the headline). |
-| `ProofBased.lean` | 1898 | Proof-based admission. `DecidableEq` for Val/Expr/Env (mutual `*_beq_self` + instance derivation from existing `*_beq_eq`). `HeapPrefix` predicate + lemmas (`length_le`, `refl`, `trans`, `getElem?`). `CE_weak_strong` predicate (with content-prefix premise) + `CE_weak_to_strong` weakening + `BlackPolicy.SoundForCE_weak_strong` abbrev. `ApprovedModification` structure (proof field is `CE_weak_strong`-typed; matches checks content-prefix). `approvedPolicy` runtime gate. `structural_policy_yields_approval`. `CE_weak_strong_heap_mono`, `approvedPolicy_soundForCE_weak_strong` (headline soundness). `CE_weak_num_identity` + `numIdentityApproval` (vacuous identity). `callAsBaseApply_preserves` + `CE_weak_refl` + `identityApproval` (closure-identity). `ObsEquivConverges` + `wand_defeated_existential` (W1, baseline). `ObsEquivConvergesGated` + `wand_defeated_existential_gated` (W1, gated, `.ifte` witness). **`Pure`/`PureVal`/`PureHeap` predicates + auxiliary preservation lemmas (`PureHeap_append`, `materialize_preserves_PureHeap`, `Heap_alloc_preserves_PureHeap`, `foldl_allocStep_preserves_PureHeap`, `applyPrim_PureVal`, `valToList_PureValList`) + `AllPureIndep` (mutual policy-independence lemma, proved sorry-free via joint induction on fuel) + `evalProgram_pure_indep` + `wand_defeated_existential_gated_beta`** (β-redex W1 under the gated policy table, the keynote-grade narrative formalized). `InstallFacts.heap_extend` via `OrigBoundIn_heap_extend` + `NumQBoundIn_heap_extend`, `applyDirect_prim_fuel_bump`, `callAsBaseApply_one_builtin_succeeds_implies_prim`, `multnApproval` (the worked multn case, proved sorry-free). |
-| `Smoke.lean` | 176 | 4 scenes, 8 tests. |
-| `Demos.lean` | 508 | 12 demos, 29 tests. Doubling, identity, tripler, install-composition (multn-then-double, double-then-multn), three-level meta-meta, constant wrapper, inspection (return op/args), self-modifying wrapper, lazy multn (adaptive), three-level governance, selective fail. |
-| `ProofBasedSmoke.lean` | 551 | 7 scenes, 18 tests. Identity admit + arithmetic preservation; non-matching mod refuse; multn approval constructs + matches; disaster demo (doubling wrapper refused, with/without governance contrast); verified compose ([identity, multn] coexist, soundness proved); custom modification (logging-multn variant admitted via same multnApproval template); cross-level approval (multn at level 2, multi-level policy table). |
-| `DESIGN.md` | — | Architectural rationale (the structural-policy half), decisions, scope. |
-| `DESIGN_PROOF.md` | — | Proof-based admission design + status. |
-| `TUTORIAL.md` | — | Hands-on walkthrough of proof-based admission. |
-
-## Build
-
-```bash
-lake build               # library + all three executables
-lake exe smoke           # 4 scenes, 8 tests
-lake exe demos           # 12 scenes, 29 tests
-lake exe proofBasedSmoke # 7 scenes, 18 tests
-```
-
-Pinned to `leanprover/lean4:v4.20.0` via `lean-toolchain` (matches lean-green).
-
-```bash
 $ grep -c "sorry$" LeanBlack/*.lean
-LeanBlack/Bisim.lean:0
-LeanBlack/Black.lean:0
-LeanBlack/Eval.lean:0
-LeanBlack/Frame.lean:0
-LeanBlack/Policies.lean:0
-LeanBlack/ProofBased.lean:0
-LeanBlack/Soundness.lean:0
-LeanBlack/Tower.lean:0
+LeanBlack/Bisim.lean:0       LeanBlack/Black.lean:0
+LeanBlack/Eval.lean:0        LeanBlack/Frame.lean:0
+LeanBlack/Policies.lean:0    LeanBlack/ProofBased.lean:0
+LeanBlack/Soundness.lean:0   LeanBlack/Tower.lean:0
 ```
+
+## File map
+
+**User-facing.**
+
+| File | Purpose |
+|------|---------|
+| [`Smoke.lean`](Smoke.lean) | Structural-policy smoke runner |
+| [`Demos.lean`](Demos.lean) | 12 reflection capabilities (cross-level cascade, composition, adaptive wrappers) |
+| [`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) | Proof-based scenes incl. end-to-end multn through the kernel gate |
+| [`TUTORIAL.md`](TUTORIAL.md) | Hands-on walkthrough — start here to build your first approval |
+| [`DESIGN.md`](DESIGN.md) | Architectural rationale (structural-policy half) |
+| [`DESIGN_PROOF.md`](DESIGN_PROOF.md) | Proof-based admission design |
+
+**Library** (dependency order; internal lemmas live here).
+
+| File | Carries |
+|------|---------|
+| `LeanBlack/Black.lean` | `Val`/`Expr`/`Env`, heap, primitives, `BlackPolicy` |
+| `LeanBlack/Tower.lean` | `Substrate` as `List Level`, materialization |
+| `LeanBlack/Eval.lean` | Tower-indexed mutual `eval`/`evalList`/`applyVia`/`applyDirect` |
+| `LeanBlack/Bisim.lean` | CakeML-style value bisimulation, shift apparatus |
+| `LeanBlack/Frame.lean` | Cross-side framing — the technical engine for CE |
+| `LeanBlack/Soundness.lean` | `TowerCE`, `SafeEvolution`, `eval_tower_safe` (theorem 1) + necessity counterexample (theorem 3) |
+| `LeanBlack/Policies.lean` | Structural policies + multn soundness (theorem 2's structural half) |
+| `LeanBlack/ProofBased.lean` | `ApprovedModification`, proof-based gate, multn approval (theorem 2's proof-bearing half), Wand defeat (theorem 4), soundness (theorem 5) |
+
+**Contextual-β infrastructure** (in progress; supports the scope-extension of theorem 4):
+
+`LeanBlack/EvalFuelMono.lean`, `LeanBlack/Ctx.lean`,
+`LeanBlack/ContextualBeta.lean`, `LeanBlack/HeapAgree.lean`.
 
 ## What you can do with it
 
 The reflective rewiring of `base-apply` lets you:
 
-- **Redefine function application** at any level, with the redefinition
-  taking effect at all lower levels (or specific levels via `(em ...)` chains).
-  See `multn` (Smoke Scene 2), `doublingWrapper` (Demos 1), `triplerWrapper`
-  (Demos 3).
-- **Compose modifications**: each new install captures the prior `base-apply`
-  as `orig`. Demos 4-5 show that order matters; the dispatch chain reflects
-  the install order.
-- **Reach across multiple levels**: an `(em (em ...))` from level 0 affects
-  level 1's apply rule via level 2's `base-apply`. Smoke Scene 3 and
-  Demos 6.
-- **Govern the modifications**: `BlackPolicy` gates `set!` on meta-env cells.
-  `multnExactPolicy` admits exactly the multn shape with the correct install
-  protocol; `rejectAllPolicy` (the safe default for newly-materialized levels)
-  refuses everything. Smoke Scene 4 demonstrates the contrast.
-- **Prove your modifications safe**: the `multnExact_soundForCE_first_install_tower`
-  headline certifies that any `multnExactPolicy`-admitted modification at
-  first install conservatively extends `builtinBaseApply` for CE_weak
-  (non-num operators behave identically; num operators get the multn fold).
+- **Redefine function application** at any level (`multn` at level 1,
+  cross-level via `(em ...)`-chains).
+- **Compose modifications** — each new install captures the prior
+  `base-apply` as `orig`; install order determines the dispatch chain
+  (Demos 4–5 demonstrate).
+- **Reach across levels** — `(em (em ...))` from level 0 affects
+  level 1's apply rule via level 2's `base-apply` (Smoke Scene 3,
+  Demos 6).
+- **Govern with proof-bearing admissions** — build an
+  `ApprovedModification` whose `proof` field discharges
+  `CE_weak_strong`; the kernel type-checks it, the runtime gate uses
+  it like any other policy.
+- **Verify the modification is safe** — the multn case is fully
+  worked-through; identity, closure-identity, and structural-policy
+  bridges are also available as approval templates.
 
-See [`DESIGN.md`](DESIGN.md) for the full architectural rationale.
-
-## Proof-based admission
-
-A second admission path alongside the structural-policy world above:
-extend `.set` admission from "Boolean policy decides on structural
-shape" to "Lean term proves per-modification soundness." An
-`ApprovedModification` bundles `(level, heap, oldVal, newVal)` with a
-`CE_weak_strong` proof; the kernel type-checks the proof at
-construction time. The runtime gate `approvedPolicy` is just a
-`BlackPolicy` — it slots into a `PolicyTable` and gets installed at a
-level via `(installPolicy n)` exactly like any other policy.
-
-Headline addition: `wand_defeated_existential` — the existential
-equational-theory defeat. β-equivalent terms remain observationally
-equivalent even with proof-based admissions in scope. Three forms,
-all proved sorry-free:
-
-- `wand_defeated_existential` — baseline, `[acceptAllPolicy]` table,
-  β-redex witness, `native_decide`.
-- `wand_defeated_existential_gated` — gated `[approvedPolicy approvals]`,
-  `.ifte`-style witness, `simp + rfl`.
-- `wand_defeated_existential_gated_beta` — **gated `[approvedPolicy
-  approvals]` with the β-redex witness** (the keynote-grade
-  statement), bridged through the `AllPureIndep` policy-independence
-  lemma.
-
-The `AllPureIndep` lemma (also proved sorry-free) establishes that
-`eval` is policy-table-independent for `Pure` expressions
-(no `.set`, no `.installPolicy`) — i.e., reflection-policy choices
-don't affect pure functional code.
-
-```bash
-lake exe proofBasedSmoke   # 7 scenes, 18 tests
-```
-
-See [`DESIGN_PROOF.md`](DESIGN_PROOF.md) for the design and
-[`TUTORIAL.md`](TUTORIAL.md) for a hands-on walkthrough.
+See [`TUTORIAL.md`](TUTORIAL.md) for the hands-on path through these.
