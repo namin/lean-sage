@@ -100,10 +100,16 @@ environments. `Bisim.lean` + `Frame.lean` carry this infrastructure.
   Lean-equal, only bisim-related. See [`lean-green/WAND.md`](../lean-green/WAND.md)
   for the technical reason.
 - **multn at first install only.** The headline theorem covers
-  `oldVal = .builtinBaseApply`. Multi-install (a second wrapper
-  installing over multn) is *admissible at runtime* via the
-  `oldVal`-parametric bridge lemma, but the headline soundness
-  theorem isn't yet wrapped for the multi-install case.
+  `oldVal = .builtinBaseApply`. The proof-based gate
+  (`approvedPolicy_soundForCE_weak_strong`) supports multi-install at
+  the type level — a list of approvals admits sequential `.set`s as
+  long as each `(oldVal, newVal)` pair has its own CE proof — but no
+  scene currently exercises a concrete multi-install chain
+  (`bbApply → multn → some-other-wrapper`), since that would require
+  a CE proof of `multn → some-other-wrapper` that isn't in the
+  codebase. ProofBasedSmoke Scene 5 ("verified compose") demonstrates
+  the related-but-distinct case: one list with multiple approvals,
+  each independently admitting a different `.set`.
 - **Full contextual β-equivalence is in progress.** The
   `wand_defeated_existential_gated_beta` result is *convergent*
   obs-equivalence (M and N evaluate to the same value at the top
