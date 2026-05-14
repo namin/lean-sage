@@ -12,6 +12,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: leanprover/lean-action@v1
-      - run: lake exe smoke
-      - run: lake exe demos
-      - run: lake exe proofBasedSmoke
+      - name: Smoke
+        run: |
+          lake exe smoke | tee /tmp/smoke.out
+          ! grep "XX " /tmp/smoke.out
+      - name: Demos
+        run: |
+          lake exe demos | tee /tmp/demos.out
+          ! grep "XX " /tmp/demos.out
+      - name: ProofBasedSmoke
+        run: |
+          lake exe proofBasedSmoke | tee /tmp/proofBasedSmoke.out
+          ! grep "XX " /tmp/proofBasedSmoke.out
+      - name: Verify no sorries
+        run: |
+          ! grep -rn "sorry$" LeanBlack/
