@@ -600,7 +600,7 @@ private theorem envAt?_isSome_iff (T : TowerState) (n : Nat) :
   · intro h
     rw [Option.isSome_iff_exists] at h
     obtain ⟨_, h_eq⟩ := h
-    rw [Option.map_eq_some] at h_eq
+    rw [Option.map_eq_some_iff] at h_eq
     obtain ⟨_, h_some, _⟩ := h_eq
     exact (List.getElem?_eq_some_iff.mp h_some).1
   · intro h_lt

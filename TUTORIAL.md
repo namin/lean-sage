@@ -17,11 +17,14 @@ For architectural rationale, see [`DESIGN.md`](DESIGN.md) /
    trivial enough to be one screen of Lean (§6).
 3. **Construct the multn approval** — the worked example, by invoking
    `multnExact_soundForCE_first_install_tower` inside the proof field
-   (§8).
+   (§7).
 4. **Read the Wand-defeat statement** — `((λx. x) 0)` and `0` evaluate
-   to the same value under any gated policy table (§9).
+   to the same value under any gated policy table (§8).
 5. **Run the end-to-end pipeline** — gate installed, `(set! base-apply
-   multn)` admitted, `(2 3 4) ⇒ 24` returned (§10).
+   multn)` admitted, `(2 3 4) ⇒ 24` returned (§9).
+6. **Compose admissions into a CE chain** — install multn, then
+   identity-delegate on top of it; both admit, the chain is
+   CE-extending (§10).
 
 ## 0. Setup
 
@@ -29,7 +32,7 @@ For architectural rationale, see [`DESIGN.md`](DESIGN.md) /
 lake build                    # library + three executables
 lake exe smoke                # 4 scenes, 8 tests  — structural-policy
 lake exe demos                # 12 scenes, 29 tests — reflection capabilities
-lake exe proofBasedSmoke      # 7 scenes, 18 tests — proof-based admission
+lake exe proofBasedSmoke      # 10 scenes, 27 tests — proof-based admission
 ```
 
 Proof-based admission lives in:
@@ -38,11 +41,19 @@ Proof-based admission lives in:
   library: `CE_weak_strong`, `ApprovedModification`, `approvedPolicy`,
   the soundness theorem, the identity / closure-identity / multn
   constructors, Wand-defeat.
+- [`LeanBlack/Compose.lean`](LeanBlack/Compose.lean) —
+  `ValVis_weak` / `CE_weak` / `CE_weak_strong` transitivity. The
+  *global guarantee across composed admissions*: a chain of
+  approved admissions yields a final apply value CE-related back to
+  `bbApply`.
+- [`LeanBlack/IdentityDelegate.lean`](LeanBlack/IdentityDelegate.lean)
+  — `identityDelegate_CE_of_closure` + `identityDelegateApproval`.
+  The concrete second link in a CE chain (see §10 below).
 - [`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) — runnable scenes
   showing `approvedPolicy` gating a real `.set` during tower
   evaluation. **This is where you see the integration end-to-end.**
 
-(Three companion files — `HeapAgree.lean`, `ContextualBeta.lean`,
+(Four companion files — `HeapAgree.lean`, `ContextualBeta.lean`,
 `EvalFuelMono.lean`, `Ctx.lean` — carry the in-progress contextual-β
 lift. Deferred to §11.)
 
@@ -361,29 +372,108 @@ deterministic Lean function, re-running it in pure code yields the
 same cenv the evaluator captures, so `Val.beq` byte-equality falls
 out of definitional equality — no runtime instrumentation needed.
 
-## 10. Recap — what you can now state
+## 10. Composing admissions — the chain `bbApply → multn → identity-delegate`
+
+The abstract's *global guarantee across composed admissions* is
+mechanized via the composition theorem `CE_weak_strong_trans` in
+[`LeanBlack/Compose.lean`](LeanBlack/Compose.lean). Given two
+CE-extending admissions at the same level, the chain is itself
+CE-extending end-to-end:
+
+```lean
+theorem CE_weak_strong_trans
+    {level : Nat} {h_ref : Heap} {v_a v_b v_c : Val}
+    (h1 : CE_weak_strong level h_ref v_a v_b)
+    (h2 : CE_weak_strong level h_ref v_b v_c) :
+    -- ... (full premises threading)
+    -- ∃ chained admission with v_c CE-related to v_a.
+```
+
+The composition uses `ValVis_aux_weak_trans` (depth-indexed value-
+bisim transitivity, also in `Compose.lean`) to compose the two
+`ValVis_weak`-related results into one.
+
+### A concrete second link: `identity-delegate-on-closure`
+
+[`LeanBlack/IdentityDelegate.lean`](LeanBlack/IdentityDelegate.lean)
+builds the simplest non-trivial second link in a CE chain: a wrapper
+whose body is `(orig op args)` — pure delegation to the captured
+`orig`. As an admission on top of any closure (e.g., a multn already
+installed), it's a CE of that closure: every call falls through to
+`orig` and returns the same result, modulo the heap allocation the
+wrapper-form invocation incurs.
+
+```lean
+theorem identityDelegate_CE_of_closure
+    (level : Nat) (h_ref : Heap) (origVal : Val) (cenv : Env) (idx_o : Nat)
+    (h_not_bbApply : origVal ≠ .builtinBaseApply)
+    (h_lookup_o : cenv.lookup "orig" = some idx_o)
+    (h_heap_o : h_ref[idx_o]? = some origVal) :
+    CE_weak_strong level h_ref origVal
+      (.closure ["op", "args"] identityDelegateBody cenv)
+```
+
+The proof bridges (a) the wrapper's body trace (which unfolds to
+`applyDirect origVal [op, listToVal operands]` at the alloc'd state)
+and (b) `applyDirect_heap_extend_weak` (which lifts the
+hypothesis-side direct call from `T` to `T_alloc`). The `Deep`
+validity premises that the heap-extend lemma needs are derived from
+the `HeapDeep T.heap` premise via the fact that `origVal` sits at
+`idx_o` in `T.heap`.
+
+The companion constructor `identityDelegateApproval` packages this
+into an `ApprovedModification` you can drop into an `approvedPolicy`
+list.
+
+### Running the chain
+
+[`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) Scene 10 exercises the
+chain end-to-end at the gate level:
+
+```
+Scene 10: composed admission chain bbApply → multn → identity-delegate
+  OK  step 1 (bbApply → multn): expected true, got true
+  OK  step 2 (multn → identity-delegate): expected true, got true
+  OK  step 2 refuses doubling (no matching approval): expected false, got false
+```
+
+The composed approvals list `[runtimeMultnApprovalLevel1,
+runtimeIdentityDelegateApproval]` admits both `.set` operations on
+the same `base-apply` cell sequentially. A wrong-shape
+modification at step 2 is refused — the gate doesn't just admit
+anything once multn is installed.
+
+This is the abstract's "admissions compose at a single gate" claim
+backed by a concrete chain.
+
+## 11. Recap — what you can now state
 
 You can write Lean code that produces:
 
 - An `ApprovedModification` whose `proof` field discharges
-  `CE_weak_strong` (via `numIdentityApproval`, `identityApproval`, or
-  `multnApproval`).
+  `CE_weak_strong` (via `numIdentityApproval`, `identityApproval`,
+  `multnApproval`, or `identityDelegateApproval`).
 - A `BlackPolicy` from a list of approvals (`approvedPolicy`).
 - A soundness invocation `approvedPolicy_soundForCE_weak_strong` that
   gives you a `CE_weak_strong` witness for every admitted
   modification at runtime.
+- A `CE_weak_strong_trans` invocation composing two admissions at the
+  same level into a chained CE-extending substrate.
 - A `wand_defeated_existential_gated_beta` instance — β-equivalence
   survives under the gated policy table.
 
-And run `lake exe proofBasedSmoke` to see the end-to-end pipeline
-admitting/refusing in real time.
+And run `lake exe proofBasedSmoke` to see the full pipeline (10
+scenes, 27 tests) admitting / refusing / composing in real time.
 
 That's the proof-based half of lean-sage. The structural-policy half
 (`multnExactPolicy` + `multnExact_soundForCE_first_install_tower`) is
 covered in [`DESIGN.md`](DESIGN.md) and exercised by
 `lake exe smoke` + `lake exe demos`.
 
-## 11. Beyond the basics — contextual β (in progress)
+For a single entry-point exposing just the public API, see
+[`LeanBlack/Public.lean`](LeanBlack/Public.lean).
+
+## 12. Beyond the basics — contextual β (in progress)
 
 The W1 statement in §8 is *convergent* obs-equivalence (M and N
 evaluate to the same value at the top level). Full *contextual*
@@ -421,7 +511,7 @@ satisfying `BetaLetEReady v_expr`. This is the contextually-quantified
 threading the L4 parallel-bisim invariant through `eval` to lift to
 arbitrary contexts.
 
-## 12. Reading order for the source
+## 13. Reading order for the source
 
 If you want to dig into `LeanBlack/ProofBased.lean`, it's structured
 top-to-bottom for sequential reading:

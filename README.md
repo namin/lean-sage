@@ -143,7 +143,7 @@ environments. `Bisim.lean` + `Frame.lean` carry this infrastructure.
 lake build               # library + three executables
 lake exe smoke           # 4 scenes, 8 tests   — structural-policy
 lake exe demos           # 12 scenes, 29 tests — reflection capabilities
-lake exe proofBasedSmoke # 10 scenes, 21 tests — proof-based admission
+lake exe proofBasedSmoke # 10 scenes, 27 tests — proof-based admission
 ```
 
 Sample output (multn at level 2 via cross-level reflection):

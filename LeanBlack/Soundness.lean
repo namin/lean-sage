@@ -271,7 +271,7 @@ private theorem getElem?_append_singleton_self (h : Heap) (v : Val) :
     (h ++ [v])[h.length]? = some v := by
   induction h with
   | nil => rfl
-  | cons _ tail ih => simpa using ih
+  | cons _ tail ih => simp [ih]
 
 /-- EnvValid is preserved by extending with a binding to a fresh
     allocation. EnvValid asks `i < h.length`; for the new binding

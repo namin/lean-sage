@@ -7,3 +7,4 @@ import LeanBlack.Policies
 import LeanBlack.Soundness
 import LeanBlack.Compose
 import LeanBlack.IdentityDelegate
+import LeanBlack.Public

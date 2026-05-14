@@ -107,7 +107,7 @@ private theorem HeapValid_append_closed (h : Heap) (extras : Heap)
     have heq : (h ++ extras)[i]? = extras[i - h.length]? :=
       List.getElem?_append_right hi'
     rw [heq] at hp
-    have h_in : v ∈ extras := List.getElem?_mem hp
+    have h_in : v ∈ extras := List.mem_of_getElem? hp
     exact closedValB_ValValid v (h ++ extras) (h_extras v h_in)
 
 /-- Every cell in `primPairs` is a closed value. Proved by `decide`
