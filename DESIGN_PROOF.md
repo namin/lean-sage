@@ -1,47 +1,17 @@
 # DESIGN_PROOF.md — proof-based admission
 
-The design for proof-based admission: extend lean-sage's admission gate
-to accept *per-modification soundness proofs* alongside the proposed
-mutation, so that admission is "kernel type-checks this proof" rather
-than "the mutation matches a structural shape with a meta-theorem
-attached."
-
-This document scopes the architectural change, names the load-bearing
-pieces, and flags the open work. Proof-based admission is purely
-additive on top of the structural-policy world (the `multnExactPolicy`
+This document explains the rationale for the proof-based admission
+layer (`CE_weak_strong` / `ApprovedModification` / `approvedPolicy`)
+on top of the substrate (whose architecture is in
+[`DESIGN.md`](DESIGN.md)). Proof-based admission is purely additive
+on top of the structural-policy world (the `multnExactPolicy`
 family); both admission paths coexist in the same `PolicyTable`.
 
-## Status (as of 2026-05-10)
+For the current state of what's mechanized and the headline theorem
+list, see [`README.md`](README.md). For a hands-on walkthrough, see
+[`TUTORIAL.md`](TUTORIAL.md).
 
-Most of the design has shipped. See [`TUTORIAL.md`](TUTORIAL.md) for
-a hands-on walkthrough.
-
-| Item | Status |
-|---|---|
-| `ApprovedModification` structure | shipped |
-| `approvedPolicy` runtime policy | shipped |
-| `CE_weak_strong` (the proof-based predicate) | shipped |
-| `approvedPolicy_soundForCE_weak_strong` (headline soundness) | proved |
-| Identity demos (vacuous + closure) | shipped |
-| **Multn approval (worked example)** | **proved sorry-free** |
-| W1 (existential equational defeat) | **proved** (baseline-policy form) |
-| Parameterized W1 (under `[approvedPolicy approvals]`, `.ifte` witness) | **proved** (`wand_defeated_existential_gated`) |
-| Scene A (end-to-end with multn) | partial — `multnApproval` constructs + matches verified in `ProofBasedSmoke.lean` Scene 3 |
-| **Scene B (custom modification)** | **shipped** — `loggingMultnApproval` in `ProofBasedSmoke.lean` Scene 6; same multn proof template applied to a closure with side effects |
-| **Scene C (compile-time refusal)** | **shipped** — `ProofBasedSmoke.lean` Scene 4: doubling wrapper refused at runtime, documented compile-time-failure block |
-| **Verified compose** | **shipped** — `ProofBasedSmoke.lean` Scene 5: `[identity, multn]` coexist, soundness proved |
-| **Cross-level approval (level 2)** | **shipped** — `ProofBasedSmoke.lean` Scene 7: `multnApproval` at level 2, multi-level policy table with per-level soundness |
-| **NoSet/Pure policy-independence lemma** | **proved sorry-free** — `AllPureIndep` fully proved by joint induction on fuel across eval/evalList/applyVia/applyDirect (all 13 Expr cases × 2 clauses, all Val cases for applyVia/applyDirect, plus auxiliary preservation lemmas for materialize/alloc/applyPrim/valToList). |
-| **Parameterized W1 (β-redex witness)** | **proved** — `wand_defeated_existential_gated_beta` uses the β-redex `((λx.x) 0)` vs `.num 0` under `[approvedPolicy approvals]`. Bridges through `evalProgram_pure_indep` (the application of `AllPureIndep` at the program level) and `native_decide` on the closed baseline case. |
-| W2 / W3 | out of scope; future work |
-
-All deferred items have file/line pointers and effort estimates in
-`LeanBlack/ProofBased.lean`'s docstrings and the *Open work* section
-below.
-
-## Design (original — most of which has shipped)
-
-## Why
+## Why proof-based admission?
 
 The structural-policy admission discipline (`multnExactPolicy` and
 friends) makes a `BlackPolicy` a Boolean function `MutationCtx → Val
@@ -58,230 +28,165 @@ shape has to be foreseen and codified by a structural policy author.
 Ad-hoc modifications are unadmissible.
 
 Proof-bearing admission inverts this. The proposer ships
-*(modification, proof-of-CE_weak)*; the kernel type-checks the proof.
-Modifications need no pre-registered policy. Structural policies stay
-useful as **proof templates** (amortizing per-shape proofs across many
-admissions), but they are no longer the only admission path.
+*(modification, proof-of-CE_weak_strong)*; the kernel type-checks the
+proof. Modifications need no pre-registered policy. Structural
+policies stay useful as **proof templates** (amortizing per-shape
+proofs across many admissions), but they are no longer the only
+admission path.
 
 This is the "proof-theoretic" tier of the keynote's assurance lattice,
 realized concretely.
 
-## What proof-based admission claims
-
-1. **CE_weak as a standalone Lean predicate.** Extract the
-   conservative-extension-under-bisimulation property from its current
-   per-policy formulation in `Policies.lean` into a uniform predicate
-   `CE_weak_holds : MutationCtx → Val → Val → Prop` (working name)
-   statable for any candidate modification.
-2. **A proof-bearing admission record.** `ApprovedModification`
-   (working name) bundles a target, a new value, and a Lean term of
-   type `CE_weak_holds ctx oldVal newVal`. Construction requires the
-   proof; the kernel type-checks it.
-3. **A runtime policy that admits exactly approved modifications.**
-   `approvedPolicy` (working name) admits a `.set` iff it matches an
-   `ApprovedModification` in scope. Composes with the existing
-   `BlackPolicy` interface — no change to `Black.lean`'s `.set` rule.
-4. **A pathway for hand-written modifications.** Two or three example
-   modifications shipped with their hand-written CE_weak proofs:
-   - `multn` (proof reuses the existing
-     `multnExact_soundForCE_first_install_tower`);
-   - one or two further modifications not matching any structural
-     policy in the table, with their own bespoke proofs.
-5. **The disaster demo, sharpened.** A modification *without* a valid
-   proof (e.g. replacing `base-apply` with `fun _ _ => 0`) cannot be
-   constructed as an `ApprovedModification` — the soundness field
-   either has the wrong type or requires `sorry`. The build refuses.
-6. **W1 (existential equational-theory defeat) as a target theorem.**
-   The proof-based hypothesis makes W1 directly tractable: "under
-   any modification admitted via the proof-based path, no context
-   distinguishes a β-redex from its contractum" — because the proof
-   *is* the hypothesis the W1 argument needs. The case-by-case lift
-   from operational to universal that's hard with structural-only
-   admission falls out here.
-
-## Architecture
-
-```
-lean-sage/
-├── LeanBlack/
-│   ├── Black.lean             # UNCHANGED — Val, Expr, .set rule, MutationCtx
-│   ├── Tower.lean             # UNCHANGED — tower mechanics
-│   ├── Eval.lean              # UNCHANGED — tower-indexed eval
-│   ├── Bisim.lean             # UNCHANGED — ValVis, ValVis_weak, frame_tower
-│   ├── Frame.lean             # UNCHANGED — shift_respect, framing infrastructure
-│   ├── Soundness.lean         # UNCHANGED — TowerCE, SafeEvolution, eval_tower_safe
-│   ├── Policies.lean          # REFACTOR — extract CE_weak_holds as standalone predicate;
-│   │                          # existing multnExactPolicy + theorem become a worked example
-│   │                          # of constructing a proof for the proof-bearing API
-│   └── ProofBased.lean        # NEW — ApprovedModification, approvedPolicy,
-│                              # installApproved API
-├── Demos.lean                 # UPDATED — adds proof-bearing demo scenes
-├── Smoke.lean                 # UPDATED — adds proof-bearing smoke
-└── DESIGN_PROOF.md            # this file
-```
-
-## The new types
+## The architecture in three definitions
 
 ```lean
 namespace LeanBlack
 
-/-- CE_weak as a uniform predicate on (context, old value, new value).
-This is the semantic property a proof-bearing admission must witness.
-Spelled out so it does not bake in install-protocol specifics from
-`InstallFacts`/`RuntimeWF`; those become *sufficient conditions*
-provable for specific shapes, not part of the predicate. -/
-def CE_weak_holds (ctx : MutationCtx) (oldVal newVal : Val) : Prop :=
-  ∀ fuel ptable op operands metaEnv s r s',
-    callAsBaseApply fuel ptable oldVal op operands metaEnv s = some (r, s') →
-    ∃ fuel' s'' r',
-      callAsBaseApply fuel' ptable newVal op operands metaEnv s = some (r', s'') ∧
-      ValVis_weak r r' s'.heap s''.heap ∧
-      HeapValid s''.heap ∧ s.heap.length ≤ s''.heap.length
+/-- CE_weak_strong: the proof-bearing soundness predicate. -/
+def CE_weak_strong (level : Nat) (h_ref : Heap) (old new : Val) : Prop :=
+  ∀ fuel ptable op operands T r T',
+    HeapPrefix h_ref T.heap →
+    HeapValid T.heap → ValValid op T.heap → ListValValid operands T.heap →
+    ValValid old T.heap → ValValid new T.heap →
+    -- ... validity / bisim / shift premises (full list in ProofBased.lean) ...
+    callAsBaseApply fuel ptable level old op operands T = some (r, T') →
+    ∃ fuel' T'' r',
+      callAsBaseApply fuel' ptable level new op operands T = some (r', T'') ∧
+      ValVis_weak r r' T'.heap T''.heap ∧
+      T'.policyAt? level = T''.policyAt? level ∧
+      HeapValid T''.heap ∧
+      T.heap.length ≤ T''.heap.length
 
 /-- A modification admitted via proof-bearing admission. The `proof`
-field is the load-bearing certificate: Lean's type checker refuses
-construction without a valid term of the soundness type. -/
+    field is the load-bearing certificate: Lean's type checker refuses
+    construction without a valid term of the soundness type. -/
 structure ApprovedModification where
-  target  : String
-  ctx     : MutationCtx
+  level   : Nat
+  heap    : Heap
   oldVal  : Val
   newVal  : Val
-  proof   : CE_weak_holds ctx oldVal newVal
+  proof   : CE_weak_strong level heap oldVal newVal
 
 /-- A runtime policy that admits a `.set` iff it matches an approved
-modification in scope. -/
+    modification in scope. -/
 def approvedPolicy (approvals : List ApprovedModification) : BlackPolicy :=
-  fun ctx oldVal newVal =>
-    approvals.any fun am =>
-      am.target == ctx.target && /* equality checks on ctx, oldVal, newVal */ ...
+  fun ctx oldVal newVal => approvals.any (·.matches ctx oldVal newVal)
 
 end LeanBlack
 ```
 
-Notes:
-- `CE_weak_holds`'s exact form is the technical refactor work. It must
-  be statable in a way that's both *uniform across modifications* and
-  *provable* from the lemmas Bisim/Frame/Policies already establish.
-- `approvedPolicy` is just a structural policy that happens to enumerate
-  approvals. The `BlackPolicy` interface is unchanged; this is one new
-  entry in the verified table.
-- `ApprovedModification.proof` is in `Prop`; equality of the proof
-  doesn't matter for admission, only its *existence*.
+The key division of labor:
 
-## What changes in `Policies.lean`
+- **`CE_weak_strong`** is a uniform predicate on `(level, h_ref,
+  old, new)`. It does not bake in install-protocol specifics
+  (`InstallFacts`/`RuntimeWF`); those become *sufficient conditions*
+  provable for specific shapes, not part of the predicate. The exact
+  premise list lives in `ProofBased.lean`.
 
-Today `Policies.lean` defines:
+- **`ApprovedModification.proof`** is in `Prop` — equality of the
+  proof doesn't matter for admission, only its *existence*. Lean's
+  kernel ensures no `ApprovedModification` value can be constructed
+  without a valid proof.
 
-- `BlackPolicy.SoundForCE_weak` — a per-policy predicate (the policy
-  is sound for CE_weak).
-- `multnExactPolicy` — a specific structural policy.
-- `multnExact_soundForCE_first_install_tower` — a theorem stating
-  this specific policy is sound, *under install-protocol side
-  conditions* bundled in `InstallFacts` and `RuntimeWF`.
+- **`approvedPolicy`** is just a `BlackPolicy`. From the runtime's
+  perspective, it's interchangeable with `acceptAllPolicy` or
+  `multnExactPolicy`. The difference is *how the boolean was
+  computed* — backed by a proof, even though the runtime itself
+  doesn't consult the proof.
 
-The refactor:
+## Relationship to the structural-policy path
 
-1. **Lift `CE_weak_holds` to a `(ctx, oldVal, newVal)` predicate** (not
-   parameterized by a policy). The current `SoundForCE_weak` predicate
-   becomes "for every `.set` this policy admits, `CE_weak_holds`
-   holds for the corresponding mutation."
-2. **Rewrite `multnExact_soundForCE_first_install_tower`** to conclude
-   `CE_weak_holds ctx .builtinBaseApply newClosure` (rather than the
-   per-policy form). The hypothesis side stays unchanged; only the
-   conclusion shape changes.
-3. **Build the multn-shape proof in the proof-bearing form**: given a
-   closure `v` matching multn-shape and the install-protocol facts
-   (`InstallFacts`, `RuntimeWF`, deep-validity, shift-respect — all
-   already in `Policies.lean`), construct
-   `proof : CE_weak_holds ctx .builtinBaseApply v`. This is the
-   reusable proof template for any multn-shape admission.
+Both paths live in the same `PolicyTable`. A proposer chooses:
 
-After the refactor, `multnExactPolicy` and the structural-policy table
-are still around as a fast path, but each is a *function from
-structural admission to `CE_weak_holds` proof*, not an opaque
-soundness theorem.
+1. **Structural** (`multnExactPolicy`): use a pre-registered policy
+   whose soundness has been proved once for all admissions of that
+   shape. Fast path. Restricted to pre-foreseen shapes.
 
-## Demos
+2. **Proof-bearing** (`approvedPolicy approvals`): supply the proof
+   yourself. Per-modification cost; no shape restriction.
 
-Three scenes in `Demos.lean`:
+`structural_policy_yields_approval` (in `ProofBased.lean`) is the
+bridge: any modification admitted by a CE-weak-sound structural
+policy can be lifted into an `ApprovedModification`. So the structural
+path is a proof-amortization layer on top of the proof-bearing
+discipline, not an alternative to it.
 
-### Scene A — proof-bearing multn
+## Composition across admissions
 
-Construct an `ApprovedModification` for multn by invoking the
-multn-shape proof template. Install `approvedPolicy [multnApproval]`.
-Run a program that does `(em (set! base-apply <multn>))`. The
-runtime gate admits because the modification matches the approval,
-which exists because the kernel accepted its proof.
+`approvedPolicy_soundForCE_weak_strong` (in `ProofBased.lean`) is
+per-admission. The *global* guarantee the LICS abstract names — "the
+substrate is always a conservative extension of the base, across
+composed admissions" — needs `CE_weak_strong_trans` (in
+`Compose.lean`): chained CE-extending admissions compose into a
+CE-extending substrate.
 
-### Scene B — proof-bearing custom modification
+The chain is concretely realized in `IdentityDelegate.lean` +
+`ProofBasedSmoke.lean` Scene 10: `bbApply → multn →
+identity-delegate-on-multn`, both `.set` operations admitted by a
+single `approvedPolicy` with two approvals.
 
-A modification that does *not* match `multnExactPolicy` (e.g. extends
-`base-apply` to handle a new tagged value, or implements a different
-gimmick). The proposer writes the soundness proof by hand. Construct
-an `ApprovedModification` from it. Install and run. Admits.
+This is where the proof-based admission discipline delivers what
+structural-only admission can't: a chain of arbitrary CE-extending
+modifications, each with its own proof, gated uniformly.
 
-### Scene C — refusal at compile time
+## Disaster demo
 
-A modification that does *not* preserve CE_weak (e.g.
-`fun _ _ => 0`). The proposer cannot construct an `ApprovedModification`
-without `sorry`, because the soundness type is unprovable. The build
-fails on uncommenting. The disaster demo lives at the level of "this
-file doesn't compile," not "this run gives the wrong answer."
+A modification that does *not* preserve CE_weak_strong (e.g. a
+doubling wrapper, where `(+ 1 2)` becomes `6` instead of `3`)
+cannot be constructed as an `ApprovedModification` — the
+`CE_weak_strong` proof field has no inhabitant. The build refuses,
+not at runtime, but at proof-construction time.
 
-## What this gets the keynote
+`ProofBasedSmoke.lean` Scene 4 demonstrates this: the doubling
+wrapper is refused at admission (the `approvedPolicy` returns
+`false`); under the un-governed `acceptAll` path, the same wrapper
+breaks `(+ 1 2)`. The disaster is real and the gate is genuinely
+load-bearing — see also `safeEvolution_necessary` in `Soundness.lean`
+for the meta-level counterexample.
 
-- **The "proof-theoretic" gate tier is concrete.** The runtime check
-  is structural (matches an approval); the *admission of approvals*
-  goes through Lean's kernel type-checking the proof. This is exactly
-  what the keynote's assurance-lattice column means by
-  "proof-theoretic."
-- **The disaster demo is sharper.** With structural-only admission,
-  the disaster is "without `multnExactPolicy`, a bad mod gets
-  through" — but the policy world is the safe one. With proof-based
-  admission, the disaster is "without a valid proof, the modification
-  literally won't compile." The failure mode is at the build, not at
-  runtime.
-- **W1 becomes provable.** The universal-quantification W1 says ∃
-  non-α terms no context distinguishes under any CE_weak-sound
-  admission. The proof-based hypothesis *is* the universal: every
-  admission carries a CE_weak proof; therefore every admission
-  preserves β-behavior; therefore no context built from admitted
-  modifications distinguishes a β-redex from its contractum. This is
-  the path that structural-only admission couldn't take.
+## Wand defeat (W1)
 
-## Open work, in order
+The "Wand 1998" thread says: in an ungated reflective system,
+β-equivalence collapses to α-equivalence (everything is
+distinguishable). The proof-based discipline defeats this for the
+gated case.
 
-1. **Refactor `CE_weak_holds` to a uniform `(ctx, old, new)`
-   predicate.** Engineering, ~1–2 days.
-2. **Port `multnExact_soundForCE_first_install_tower` to conclude the
-   new predicate.** Light; mostly threading through the existing
-   proof. ~1 day.
-3. **Implement `ApprovedModification` + `approvedPolicy`.** Small,
-   structural. ~half a day.
-4. **Scene A.** ~half a day (mostly putting together existing pieces).
-5. **Scene B.** The hard part — a bespoke modification with a
-   bespoke proof. ~2–3 days depending on the modification chosen.
-   Recommend something narrow: a new tag handled at apply, or a
-   closure that wraps existing dispatch.
-6. **Scene C.** Trivial once Scene A works; just attempt construction
-   and watch it fail.
-7. **W1.** State and prove. The proof should be a few pages of Lean
-   once the architecture is in place; the load-bearing fact is
-   "every admitted modification preserves β by hypothesis."
+`wand_defeated_existential_gated_beta` in `ProofBased.lean` proves
+the convergent form: `((λx.x) 0)` and `0` evaluate to the same value
+under `[approvedPolicy approvals]` for any list of approvals.
+β-equivalence survives gated reflection.
 
-Total: 1–2 focused weeks. Substantially less than the LLM-cascade
-path; LLM proposer can be a later v3 reusing this architecture.
+The bridge is `AllPureIndep`: `eval` is policy-table-independent for
+`Pure` expressions (no `.set`, no `.installPolicy`). β-redexes are
+`Pure`; therefore the choice of policy table doesn't affect their
+evaluation; therefore the β-redex and its contractum converge to the
+same value under any policy table.
+
+W2 (βη ⊆ ≃_obs) and W3 (lattice monotonicity comparing different
+proof-based admission paths) are out of scope. The contextual lift
+of W1 — `∀ context C, evalProgram (C[M]) = evalProgram (C[N])` for
+β-equivalent `M`, `N` — is in progress: `EasyCtx` /
+`WideCtx` cover most positions; `.lam` is deferred for closure-
+syntactic refinement reasons. See `Ctx.lean` /
+`ContextualBeta.lean` / `HeapAgree.lean` / `EvalFuelMono.lean`.
 
 ## What proof-based admission does NOT claim
 
-- **W2 (βη ⊆ ≃_obs).** The βη induction is open; W1 doesn't
-  generalize to W2 for free.
+- **Full contextual W1 (βη / contexts with `.lam`).** In progress;
+  not in the public API yet.
+
+- **W2 (βη ⊆ ≃_obs).** Out of scope. The βη induction is open.
+
 - **W3 (lattice monotonicity).** Comparing different proof-based
   admission paths is its own problem; not addressed.
-- **LLM proposer.** Future work; the architecture supports it (the
+
+- **LLM proposer.** Future work. The architecture supports it (the
   LLM ships the proof along with the modification), but the current
   implementation is purely manual.
-- **A cleaner statement of `CE_weak_holds`.** The proposed form above
-  is a starting point; finding the right uniform formulation is part
-  of the refactor work. The actual landed predicate is named
-  `CE_weak_strong` and lives in `LeanBlack/ProofBased.lean`.
+
+- **General multi-install for the *structural* path.** The
+  `multnExact_soundForCE_first_install_tower` headline covers
+  `oldVal = .builtinBaseApply`. The proof-based path handles
+  composition via `CE_weak_strong_trans`; the structural variant
+  would need either a tightened `multnExactPolicy` num-branch or new
+  num-case trace lemmas.

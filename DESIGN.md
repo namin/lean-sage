@@ -1,4 +1,4 @@
-# lean-black — design
+# lean-sage — design
 
 A synthesis of [`lean-grey`](https://github.com/namin/lean-grey) (abstract infinite tower, governance
 coherence proved) and [`lean-green`](https://github.com/namin/lean-green) (Black-faithful
@@ -6,10 +6,11 @@ heap+closure+`set!`, value bisimulation à la CakeML). The goal is a single
 formalization that is **both** infinite-and-reflective-in-its-governance **and**
 operationally-faithful-to-Black.
 
-> 13,571 LOC of library + 684 LOC of demo executables, 0 sorries. Headline
-> theorems proved: `eval_tower_safe`, `frame_tower`, `shift_respect`,
-> `applyDirect_heap_extend_weak`, `multnExact_soundForCE_first_install_tower`,
-> `safeEvolution_necessary`. Smoke 8/8 + Demos 29/29 across 12 scenes.
+> Zero sorries across the library. For the user-facing headline theorems
+> and test counts, see [`README.md`](README.md). This file covers the
+> architectural rationale for the substrate; for the rationale behind
+> proof-based admission (the `ApprovedModification` / `approvedPolicy`
+> layer), see [`DESIGN_PROOF.md`](DESIGN_PROOF.md).
 
 ## What each parent gives
 
@@ -82,7 +83,7 @@ lean-grey has `(em e) | (install n) | (installPolicy n)`. lean-green has
 `(install n)` is dropped: the abstract `mods`-table indirection was a stand-in
 for "real Black-source modification", and we now have the real thing.
 
-## The headline theorem
+## The headline theorem (substrate-side)
 
 ```
 eval_tower_safe :
@@ -109,6 +110,11 @@ is preserved through `.em`. The proof goes via the 4-way mutual induction
 `all_tower_safe`, which jointly preserves `TowerCE` and `SafeEvolution` for
 `eval`/`evalList`/`applyVia`/`applyDirect`. `eval_tower_safe` is a wrapper
 projecting the `eval` clause.
+
+This is one of six headline theorems in the public API; the other five
+(multn CE, necessity counterexample, Wand defeat, proof-based admission
+soundness, CE composition) are listed in [`README.md`](README.md) and
+re-exported by [`LeanBlack/Public.lean`](LeanBlack/Public.lean).
 
 ## What got ported from lean-green, what got built fresh
 
@@ -150,9 +156,11 @@ projecting the `eval` clause.
   `shift_respect`).
 - `all_tower_safe` (the 4-way mutual safety theorem) and `eval_tower_safe`.
 
-**Final tally:** 13,571 LOC of library. Of that, roughly 4–5K is verbatim or
-near-verbatim port from lean-green, ~9K is tower-aware adaptation or
-genuinely new.
+**Final tally:** ~15k LOC of library (substrate). Roughly 4–5k is
+verbatim or near-verbatim port from lean-green, ~9k is tower-aware
+adaptation or genuinely new. Additional ~500 LOC of public-API +
+composition + chain-link wrappers landed later — see
+`Compose.lean`, `IdentityDelegate.lean`, `Public.lean`.
 
 ## What we deliberately do NOT change
 
@@ -195,38 +203,50 @@ genuinely new.
    tower extension — a *meta-meta* modification proposed at level N+1 to
    govern how level N+1 admits level-N modifications — is a follow-up.
 
-## Actual layout
+## Layout
 
 ```
-lean-black/
-├── lakefile.lean                 — library + smoke + demos executables
+lean-sage/
+├── lakefile.lean                 — library + smoke + demos + proofBasedSmoke executables
 ├── lean-toolchain                — leanprover/lean4:v4.20.0
 ├── LeanBlack.lean                — top-level imports
 ├── LeanBlack/
-│   ├── Black.lean         (452)  — Val/Expr/Env, Heap, primitives, MutationCtx, BlackPolicy, val_beq
-│   ├── Tower.lean         (839)  — TowerState, LevelState, materialize, setPolicyAt
-│   ├── Eval.lean          (226)  — eval/evalList/applyVia/applyDirect, tower-indexed
-│   ├── Bisim.lean        (4505)  — ValVis*, ValValid, HeapEvolution, applyPrim bisim, AllBelow/Deep, full shift apparatus, materialize-shift commutativity
-│   ├── Frame.lean        (4948)  — WFCtxT (13 fields), frame_tower, all_preserves_envAt, heap_mono, policy_shift_preserved, shift_respect, applyDirect_heap_extend_weak
-│   ├── Policies.lean      (611)  — callAsBaseApply, CE/CE_weak, multnExactPolicy, InstallFacts, RuntimeWF, multn_closure_body_unfolds, multnExact_soundForCE_first_install_tower
-│   └── Soundness.lean    (1990)  — TowerCE, SafeEvolution, all_tower_safe, eval_tower_safe, safeEvolution_necessary
-├── Smoke.lean             (176)  — 4 scenes, 8 tests (nested-em + set! demos)
-├── Demos.lean             (508)  — 12 scenes, 29 tests (doubling, identity, tripler, composition, three-level meta-meta, inspection, self-modifying, lazy multn, three-level governance, selective fail)
-├── DESIGN.md
-└── README.md
+│   ├── Black.lean                — Val/Expr/Env, Heap, primitives, MutationCtx, BlackPolicy, val_beq
+│   ├── Tower.lean                — TowerState, LevelState, materialize, setPolicyAt
+│   ├── Eval.lean                 — eval/evalList/applyVia/applyDirect, tower-indexed
+│   ├── Bisim.lean                — ValVis*, ValValid, HeapEvolution, applyPrim bisim, AllBelow/Deep, full shift apparatus, materialize-shift commutativity
+│   ├── Frame.lean                — WFCtxT, frame_tower, heap_mono, policy_shift_preserved, shift_respect, applyDirect_heap_extend_weak
+│   ├── Policies.lean             — callAsBaseApply, CE/CE_weak, multnExactPolicy, InstallFacts, RuntimeWF, multnExact_soundForCE_first_install_tower
+│   ├── Soundness.lean            — TowerCE, SafeEvolution, all_tower_safe, eval_tower_safe, safeEvolution_necessary
+│   ├── ProofBased.lean           — CE_weak_strong, ApprovedModification, approvedPolicy, multnApproval, Wand defeat (see DESIGN_PROOF.md)
+│   ├── Compose.lean              — ValVis_weak / CE_weak / CE_weak_strong transitivity (composition across admissions)
+│   ├── IdentityDelegate.lean     — identityDelegate_CE_of_closure + identityDelegateApproval (concrete second link in a CE chain)
+│   ├── Public.lean               — single-file entry point exposing the headline API
+│   └── (contextual-β WIP)        — EvalFuelMono.lean, Ctx.lean, ContextualBeta.lean, HeapAgree.lean
+├── Smoke.lean                    — structural-policy smoke
+├── Demos.lean                    — 12 reflection-capability demos
+├── ProofBasedSmoke.lean          — proof-based scenes incl. end-to-end multn + chain demo (Scene 10)
+├── README.md                     — headline theorems + how to run
+├── TUTORIAL.md                   — hands-on walkthrough
+├── DESIGN.md                     — this file (substrate architecture)
+└── DESIGN_PROOF.md               — proof-based admission rationale
 ```
 
-`Tower` ended up first-order (`List LevelState` with `Tower.maxDepth = 16`
-runtime cap). No coinduction needed; the infinite tower is mathematical
-idealization, not a literal type. `(em ...)` past `maxDepth` returns `none`
-just like fuel exhaustion.
+For test counts and command lines, see [`README.md`](README.md).
 
-`MutationCtx` gained a `level : Nat` field (one of the proposed options) so
-policies see the full level context.
+## Carved-in choices
 
-`(installPolicy n)` at level N replaces level N's own policy — consistent
-with lean-grey's choice.
+- **First-order tower.** `Tower.maxDepth = 16` runtime cap; `(em ...)`
+  past that returns `none` like fuel exhaustion. No coinduction needed;
+  the infinite tower is mathematical idealization, not a literal type.
 
-`(set! base-apply e)` at level N freezes `T.policyAt? level` at the start
-of `.set` (same TOCTOU defense lean-green uses), then applies the gate to
-the post-RHS tower state.
+- **`MutationCtx.level`.** `MutationCtx` gained a `level : Nat` field
+  so policies see the full level context.
+
+- **`(installPolicy n)` at level N replaces level N's own policy** —
+  consistent with lean-grey's choice.
+
+- **`.set` gate freezes at entry.** `(set! base-apply e)` at level N
+  freezes `T.policyAt? level` at the start of `.set` (same TOCTOU
+  defense lean-green uses), then applies the gate to the post-RHS
+  tower state.
