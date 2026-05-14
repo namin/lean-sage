@@ -75,6 +75,20 @@ under it is no different from one admitted by `multnExactPolicy`. The
 difference is *construction*: an approval only exists if the kernel
 type-checked its CE proof.
 
+### 6. CE composes — global guarantee across admissions
+
+```
+CE_weak_strong_trans   (Compose.lean)
+```
+
+The conservative-extension relation between apply values is
+transitive: if `v_a → v_b` and `v_b → v_c` are each CE_weak_strong,
+then `v_a → v_c` is CE_weak_strong. Combined with #5, this gives the
+abstract's *global property across composed admissions*: any chain of
+approved admissions at a level yields a final apply value that is
+CE-related back to `bbApply`. Underlying lemma:
+`ValVis_aux_weak_trans` (depth-indexed value-bisim transitivity).
+
 ## What this backs (vs. the LICS abstract)
 
 The artifact backs the highlighted instance in the
@@ -99,17 +113,18 @@ environments. `Bisim.lean` + `Frame.lean` carry this infrastructure.
   `_weak` — closures' captured environments aren't required to be
   Lean-equal, only bisim-related. See [`lean-green/WAND.md`](../lean-green/WAND.md)
   for the technical reason.
-- **multn at first install only.** The headline theorem covers
-  `oldVal = .builtinBaseApply`. The proof-based gate
-  (`approvedPolicy_soundForCE_weak_strong`) supports multi-install at
-  the type level — a list of approvals admits sequential `.set`s as
-  long as each `(oldVal, newVal)` pair has its own CE proof — but no
-  scene currently exercises a concrete multi-install chain
-  (`bbApply → multn → some-other-wrapper`), since that would require
-  a CE proof of `multn → some-other-wrapper` that isn't in the
-  codebase. ProofBasedSmoke Scene 5 ("verified compose") demonstrates
-  the related-but-distinct case: one list with multiple approvals,
-  each independently admitting a different `.set`.
+- **multn at first install only (the worked example).** The
+  structural `multnExact_soundForCE_first_install_tower` covers
+  `oldVal = .builtinBaseApply`. Composition across admissions —
+  the *global guarantee across composed admissions* the abstract
+  names — is now mechanized: `CE_weak_strong_trans` (in
+  `Compose.lean`) proves that chained CE_weak_strong relations
+  compose, so any sequence of approved admissions yields a final
+  apply value that is CE_weak_strong-related back to `bbApply`. What
+  remains is constructing a *concrete* second approval (e.g., a CE
+  proof of `multn → logging-multn`) to demonstrate a non-trivial
+  chain end-to-end; the framework supports it, no scene currently
+  builds one.
 - **Full contextual β-equivalence is in progress.** The
   `wand_defeated_existential_gated_beta` result is *convergent*
   obs-equivalence (M and N evaluate to the same value at the top
@@ -174,6 +189,7 @@ LeanBlack/Soundness.lean:0   LeanBlack/Tower.lean:0
 | `LeanBlack/Soundness.lean` | `TowerCE`, `SafeEvolution`, `eval_tower_safe` (theorem 1) + necessity counterexample (theorem 3) |
 | `LeanBlack/Policies.lean` | Structural policies + multn soundness (theorem 2's structural half) |
 | `LeanBlack/ProofBased.lean` | `ApprovedModification`, proof-based gate, multn approval (theorem 2's proof-bearing half), Wand defeat (theorem 4), soundness (theorem 5) |
+| `LeanBlack/Compose.lean` | `ValVis_weak` / `CE_weak` / `CE_weak_strong` transitivity (theorem 6) — composition across admissions |
 
 **Contextual-β infrastructure** (in progress; supports the scope-extension of theorem 4):
 
