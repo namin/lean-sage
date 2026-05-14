@@ -34,6 +34,7 @@ import LeanBlack.Black
 import LeanBlack.Tower
 import LeanBlack.Eval
 import LeanBlack.ProofBased
+import LeanBlack.IdentityDelegate
 
 open LeanBlack
 
@@ -636,6 +637,109 @@ def test_sceneB_preserves_level0 : Option Val :=
     .seq [installApprovedAt2, installMultnTwoUp,
           .app [.num 2, .num 3, .num 4]]
 
+/-! ## Scene 10: composed admission chain — `bbApply → multn → identity-delegate`
+
+    Two sequential `.set` operations, each gated by the proof-based
+    kernel:
+
+    1. `.set base-apply multn` — admitted by `multnApproval` (oldVal
+       = `bbApply`).
+    2. `.set base-apply identity-delegate` — admitted by
+       `identityDelegateApproval` (oldVal = the multn closure
+       installed in step 1).
+
+    This demonstrates the *global guarantee across composed
+    admissions* (`CE_weak_strong_trans` in `Compose.lean`) by
+    instantiating it with a concrete second link. Both approvals
+    coexist in a single approvals list; the runtime gate admits each
+    `.set` independently. -/
+
+/-- Heap at step 1's admission time (level-1 heap + the orig=bbApply
+    cell from the first `letE`). Same as Scene 8's `runtimeHeapLevel1`. -/
+def chainHeapAfterStep1Alloc : Heap := runtimeHeapLevel1
+
+/-- Heap after step 1's `.set` commits (cell 27 in level1Heap becomes
+    multn). The `.set` only updates; the orig cell from step 1's letE
+    remains at idx `level1Heap.length`. -/
+def chainHeapAfterStep1Set : Heap :=
+  chainHeapAfterStep1Alloc.set 27 runtimeMultnClosureLevel1
+
+/-- Heap at step 2's admission time: step 1's post-set state + step 2's
+    `letE`-alloc'd orig cell holding the current base-apply (= multn). -/
+def chainHeapAtStep2Admission : Heap :=
+  chainHeapAfterStep1Set ++ [runtimeMultnClosureLevel1]
+
+/-- Step 2's identity-delegate closure: cenv binds `orig` to the
+    `letE`-allocated cell at `level1Heap.length + 1`. -/
+def runtimeIdentityDelegateCenv : Env :=
+  .cons "orig" (level1Heap.length + 1) level1Env
+
+def runtimeIdentityDelegateClosure : Val :=
+  .closure ["op", "args"] identityDelegateBody runtimeIdentityDelegateCenv
+
+/-- Heap-recorded view at step 2's admission. The approval's `h_heap_o`
+    discharges via direct list-index computation. -/
+theorem chainHeapAtStep2Admission_lookup_orig :
+    chainHeapAtStep2Admission[level1Heap.length + 1]? =
+      some runtimeMultnClosureLevel1 := by
+  unfold chainHeapAtStep2Admission
+  rw [List.getElem?_append_right]
+  · simp [chainHeapAfterStep1Set, chainHeapAfterStep1Alloc, runtimeHeapLevel1]
+  · simp [chainHeapAfterStep1Set, chainHeapAfterStep1Alloc, runtimeHeapLevel1]
+
+theorem chainHeapAtStep2Admission_cenv_lookup_orig :
+    runtimeIdentityDelegateCenv.lookup "orig" = some (level1Heap.length + 1) := by
+  rfl
+
+theorem chainHeapAtStep2Admission_multn_not_bbApply :
+    runtimeMultnClosureLevel1 ≠ .builtinBaseApply := by
+  intro h; cases h
+
+/-- Step 2's approval: identity-delegate-on-multn. -/
+def runtimeIdentityDelegateApproval : ApprovedModification :=
+  identityDelegateApproval 1 chainHeapAtStep2Admission
+    runtimeIdentityDelegateCenv (level1Heap.length + 1)
+    runtimeMultnClosureLevel1
+    chainHeapAtStep2Admission_multn_not_bbApply
+    chainHeapAtStep2Admission_cenv_lookup_orig
+    chainHeapAtStep2Admission_lookup_orig
+
+/-- The composed approvals list: step 1's multn approval + step 2's
+    identity-delegate approval. -/
+def chainApprovals : List ApprovedModification :=
+  [runtimeMultnApprovalLevel1, runtimeIdentityDelegateApproval]
+
+/-- Gate verification for step 1: at step 1's admission state,
+    `approvedPolicy chainApprovals` admits `.set base-apply` from
+    `bbApply` to the multn closure. -/
+def chainStep1Ctx : MutationCtx :=
+  { target := "base-apply", heap := chainHeapAfterStep1Alloc,
+    env := .cons "orig" level1Heap.length level1Env,
+    metaEnv := .nil, index := 27, level := 1 }
+
+def test_chain_step1_admit : Bool :=
+  approvedPolicy chainApprovals chainStep1Ctx
+    .builtinBaseApply runtimeMultnClosureLevel1
+
+/-- Gate verification for step 2: at step 2's admission state,
+    `approvedPolicy chainApprovals` admits `.set base-apply` from
+    the multn closure to the identity-delegate closure. -/
+def chainStep2Ctx : MutationCtx :=
+  { target := "base-apply", heap := chainHeapAtStep2Admission,
+    env := runtimeIdentityDelegateCenv,
+    metaEnv := .nil, index := 27, level := 1 }
+
+def test_chain_step2_admit : Bool :=
+  approvedPolicy chainApprovals chainStep2Ctx
+    runtimeMultnClosureLevel1 runtimeIdentityDelegateClosure
+
+/-- A wrong-shape modification at step 2 is refused: the gate doesn't
+    just admit anything once multn is installed. -/
+def test_chain_step2_refuses_doubling : Bool :=
+  let doubling : Val := .closure ["op", "args"] (.var "op") .nil
+  approvedPolicy chainApprovals chainStep2Ctx
+    runtimeMultnClosureLevel1 doubling
+
 def main : IO Unit := do
   IO.println "Scene 1: proof-bearing admission — identity mod ADMITTED"
   runOne "(em (set! base-apply base-apply)) ⇒ bool(true)"
@@ -691,3 +795,8 @@ def main : IO Unit := do
          "num(24)"    test_sceneB_compute
   runOne "post-admit, level-0 (2 3 4) still <none> (unchanged)"
          "<none>"     test_sceneB_preserves_level0
+  IO.println ""
+  IO.println "Scene 10: composed admission chain bbApply → multn → identity-delegate"
+  IO.println s!"  {if test_chain_step1_admit then "OK " else "XX "} step 1 (bbApply → multn): expected true, got {test_chain_step1_admit}"
+  IO.println s!"  {if test_chain_step2_admit then "OK " else "XX "} step 2 (multn → identity-delegate): expected true, got {test_chain_step2_admit}"
+  IO.println s!"  {if test_chain_step2_refuses_doubling then "XX " else "OK "} step 2 refuses doubling (no matching approval): expected false, got {test_chain_step2_refuses_doubling}"

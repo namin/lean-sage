@@ -115,16 +115,15 @@ environments. `Bisim.lean` + `Frame.lean` carry this infrastructure.
   for the technical reason.
 - **multn at first install only (the worked example).** The
   structural `multnExact_soundForCE_first_install_tower` covers
-  `oldVal = .builtinBaseApply`. Composition across admissions —
-  the *global guarantee across composed admissions* the abstract
-  names — is now mechanized: `CE_weak_strong_trans` (in
-  `Compose.lean`) proves that chained CE_weak_strong relations
-  compose, so any sequence of approved admissions yields a final
-  apply value that is CE_weak_strong-related back to `bbApply`. What
-  remains is constructing a *concrete* second approval (e.g., a CE
-  proof of `multn → logging-multn`) to demonstrate a non-trivial
-  chain end-to-end; the framework supports it, no scene currently
-  builds one.
+  `oldVal = .builtinBaseApply`. Composition across admissions is
+  mechanized via `CE_weak_strong_trans` (`Compose.lean`); a concrete
+  second link (`identityDelegate_CE_of_closure` in
+  `IdentityDelegate.lean`) plugs into the chain, and Scene 10 of
+  `ProofBasedSmoke.lean` exercises the full chain
+  (`bbApply → multn → identity-delegate-on-multn`) end-to-end at the
+  gate level. Stronger non-trivial wrappers
+  (`multn → logging-multn`, etc.) need their own CE proofs but slot
+  into the same chain machinery.
 - **Full contextual β-equivalence is in progress.** The
   `wand_defeated_existential_gated_beta` result is *convergent*
   obs-equivalence (M and N evaluate to the same value at the top
@@ -144,7 +143,7 @@ environments. `Bisim.lean` + `Frame.lean` carry this infrastructure.
 lake build               # library + three executables
 lake exe smoke           # 4 scenes, 8 tests   — structural-policy
 lake exe demos           # 12 scenes, 29 tests — reflection capabilities
-lake exe proofBasedSmoke # 7 scenes, 18 tests  — proof-based admission
+lake exe proofBasedSmoke # 10 scenes, 21 tests — proof-based admission
 ```
 
 Sample output (multn at level 2 via cross-level reflection):
@@ -190,6 +189,7 @@ LeanBlack/Soundness.lean:0   LeanBlack/Tower.lean:0
 | `LeanBlack/Policies.lean` | Structural policies + multn soundness (theorem 2's structural half) |
 | `LeanBlack/ProofBased.lean` | `ApprovedModification`, proof-based gate, multn approval (theorem 2's proof-bearing half), Wand defeat (theorem 4), soundness (theorem 5) |
 | `LeanBlack/Compose.lean` | `ValVis_weak` / `CE_weak` / `CE_weak_strong` transitivity (theorem 6) — composition across admissions |
+| `LeanBlack/IdentityDelegate.lean` | `identityDelegate_CE_of_closure` + `identityDelegateApproval` — concrete second link in a CE chain |
 
 **Contextual-β infrastructure** (in progress; supports the scope-extension of theorem 4):
 
