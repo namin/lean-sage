@@ -111,7 +111,7 @@ environments. `Bisim.lean` + `Frame.lean` carry this infrastructure.
 
 - **`CE_weak`, not strict `CE`.** The headline CE conclusion is
   `_weak` — closures' captured environments aren't required to be
-  Lean-equal, only bisim-related. See [`lean-green/WAND.md`](../lean-green/WAND.md)
+  Lean-equal, only bisim-related. See [`lean-green/WAND.md`]([https://github.com/namin/lean-green/blob/main/WAND.md](https://github.com/namin/lean-green/blob/main/WAND.md#why-the-headline-ce-statement-is-_weak))
   for the technical reason.
 - **multn at first install only (the worked example).** The
   structural `multnExact_soundForCE_first_install_tower` covers
