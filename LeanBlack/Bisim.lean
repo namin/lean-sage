@@ -3115,7 +3115,7 @@ def ListVal.AllBelow (cutoff : Nat) : List Val → Prop
 theorem Env.AllBelow.mono {cutoff cutoff' : Nat} (h_le : cutoff ≤ cutoff') :
     ∀ {env : Env}, Env.AllBelow cutoff env → Env.AllBelow cutoff' env
   | .nil,           _   => trivial
-  | .cons _ _ rest, ⟨h_idx, h_rest⟩ =>
+  | .cons _ _ _rest, ⟨h_idx, h_rest⟩ =>
       ⟨Nat.lt_of_lt_of_le h_idx h_le, Env.AllBelow.mono h_le h_rest⟩
 
 theorem Val.AllBelow.mono {cutoff cutoff' : Nat} (h_le : cutoff ≤ cutoff') :
@@ -3126,7 +3126,7 @@ theorem Val.AllBelow.mono {cutoff cutoff' : Nat} (h_le : cutoff ≤ cutoff') :
   | .sym _,            _ => trivial
   | .prim _,           _ => trivial
   | .builtinBaseApply, _ => trivial
-  | .cons x y,         ⟨hx, hy⟩ =>
+  | .cons _x _y,       ⟨hx, hy⟩ =>
       ⟨Val.AllBelow.mono h_le hx, Val.AllBelow.mono h_le hy⟩
   | .closure _ _ _,    h => Env.AllBelow.mono h_le h
 
@@ -3159,7 +3159,7 @@ def HeapDeep (h : Heap) : Prop :=
 theorem EnvDeep.toAllBelow : ∀ {env : Env} {h : Heap},
     EnvDeep env h → Env.AllBelow h.length env
   | Env.nil,           _, _   => trivial
-  | Env.cons _ _ rest, _, ⟨h_idx, h_rest⟩ =>
+  | Env.cons _ _ _rest, _, ⟨h_idx, h_rest⟩ =>
       ⟨h_idx, EnvDeep.toAllBelow h_rest⟩
 
 theorem ValDeep.toAllBelow : ∀ {v : Val} {h : Heap},
@@ -3170,7 +3170,7 @@ theorem ValDeep.toAllBelow : ∀ {v : Val} {h : Heap},
   | .sym _,            _, _ => trivial
   | .prim _,           _, _ => trivial
   | .builtinBaseApply, _, _ => trivial
-  | .cons x y,         _, ⟨hx, hy⟩ =>
+  | .cons _x _y,       _, ⟨hx, hy⟩ =>
       ⟨ValDeep.toAllBelow hx, ValDeep.toAllBelow hy⟩
   | .closure _ _ _,    _, h => EnvDeep.toAllBelow h
 
@@ -3183,7 +3183,7 @@ theorem ListValDeep.toAllBelow : ∀ {vs : List Val} {h : Heap},
 theorem EnvDeep.length_mono : ∀ {env : Env} {h h' : Heap},
     EnvDeep env h → h.length ≤ h'.length → EnvDeep env h'
   | Env.nil,           _, _, _, _   => trivial
-  | Env.cons _ _ rest, _, _, ⟨h_idx, h_rest⟩, h_le =>
+  | Env.cons _ _ _rest, _, _, ⟨h_idx, h_rest⟩, h_le =>
       ⟨Nat.lt_of_lt_of_le h_idx h_le, EnvDeep.length_mono h_rest h_le⟩
 
 theorem ValDeep.length_mono : ∀ {v : Val} {h h' : Heap},
@@ -3194,7 +3194,7 @@ theorem ValDeep.length_mono : ∀ {v : Val} {h h' : Heap},
   | .sym _,            _, _, _,  _   => trivial
   | .prim _,           _, _, _,  _   => trivial
   | .builtinBaseApply, _, _, _,  _   => trivial
-  | .cons x y,         _, _, ⟨hx, hy⟩, h_le =>
+  | .cons _x _y,       _, _, ⟨hx, hy⟩, h_le =>
       ⟨ValDeep.length_mono hx h_le, ValDeep.length_mono hy h_le⟩
   | .closure _ _ _,    _, _, hev, h_le => EnvDeep.length_mono hev h_le
 
@@ -3710,7 +3710,7 @@ theorem shift_heap_getElem? (cutoff : Nat) (padding h : Heap) (i : Nat)
     exact sh_get i
 
 theorem shift_idx_lt_shift_heap_length (cutoff : Nat) (padding h : Heap) (idx : Nat)
-    (h_cutoff : cutoff ≤ h.length) (h_idx_lt : idx < h.length) :
+    (_h_cutoff : cutoff ≤ h.length) (h_idx_lt : idx < h.length) :
     shift_idx cutoff padding.length idx < (shift_heap cutoff padding h).length := by
   rw [shift_heap_length]
   unfold shift_idx
@@ -3738,7 +3738,7 @@ theorem shift_heap_getElem?_padding (cutoff : Nat) (padding h : Heap) (k : Nat)
   rw [h_take_len]
 
 theorem shift_heap_update_length' (cutoff : Nat) (padding h : Heap) (idx : Nat) (v : Val)
-    (h_cutoff : cutoff ≤ h.length) :
+    (_h_cutoff : cutoff ≤ h.length) :
     (shift_heap cutoff padding (h.update idx v)).length
       = (shift_heap cutoff padding h).length := by
   rw [shift_heap_length, shift_heap_length, Heap.update_length]

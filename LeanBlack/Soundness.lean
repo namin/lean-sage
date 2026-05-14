@@ -91,10 +91,10 @@ def TowerCE (T T' : TowerState) : Prop :=
     `EnvValid cenv T.heap` requirement; `.num`/`.bool`/`.nilV`/`.sym`/
     `.cons` cases are vacuous (applyDirect returns none on these). -/
 theorem TowerCE.refl (T : TowerState)
-    (hh : HeapValid T.heap)
-    (h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
-    (h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
-    (h_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap) :
+    (_hh : HeapValid T.heap)
+    (_h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
+    (_h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+    (_h_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap) :
     TowerCE T T := by
   intro n idx oldApply newApply h_lookup h_old h_new
   have h_eq : oldApply = newApply := by
@@ -109,8 +109,8 @@ theorem TowerCE.refl (T : TowerState)
     have := ValVis_aux_self_extend d op T₀.heap [] hh_T₀ hv_op
     simpa using this
   have h_lvv_self : ListValVis operands operands T₀.heap T₀.heap := by
-    clear h_call hh hv_op h_pol_resp_T₀ h_levs_T₀ h_resp_all_T₀
-          h_bisim_T₀ h_pt h_lookup h_old h_new h_vv_op_self h_levs h_resp_all h_bisim
+    clear h_call _hh hv_op h_pol_resp_T₀ h_levs_T₀ h_resp_all_T₀
+          h_bisim_T₀ h_pt h_lookup h_old h_new h_vv_op_self _h_levs _h_resp_all _h_bisim
           hv_oldApply hv_oldApply'
     induction operands with
     | nil => trivial
@@ -389,7 +389,7 @@ private theorem TowerCE_trans (T T_mid T'' : TowerState)
     (h_mono_23 : T_mid.heap.length ≤ T''.heap.length)
     (h_levs_mono_12 : ∀ n env, T.envAt? n = some env → T_mid.envAt? n = some env)
     (h_hh_mid : HeapValid T_mid.heap)
-    (h_hh_T'' : HeapValid T''.heap)
+    (_h_hh_T'' : HeapValid T''.heap)
     (h12 : TowerCE T T_mid)
     (h23 : TowerCE T_mid T'') :
     TowerCE T T'' := by
@@ -664,58 +664,58 @@ private theorem ValValid_valToList :
     `Frame.all_preserves_envAt`'s shape. -/
 private theorem all_tower_safe (fuel : Nat) :
     -- eval clause
-    (∀ (ptable : PolicyTable) (h_pt : PolicyTableRespectsBisimT ptable)
+    (∀ (ptable : PolicyTable) (_h_pt : PolicyTableRespectsBisimT ptable)
        (level : Nat) (exp : Expr) (env : Env) (T : TowerState)
-       (hh : HeapValid T.heap)
-       (hev : EnvValid env T.heap)
-       (h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
-       (h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
-       (h_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap)
-       (h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
-       (h_env_self : EnvVis env env T.heap T.heap)
-       (h_safe : SafeEvolution ptable T)
+       (_hh : HeapValid T.heap)
+       (_hev : EnvValid env T.heap)
+       (_h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
+       (_h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+       (_h_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap)
+       (_h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
+       (_h_env_self : EnvVis env env T.heap T.heap)
+       (_h_safe : SafeEvolution ptable T)
        (v : Val) (T' : TowerState),
       eval fuel ptable level exp env T = some (v, T') →
       TowerCE T T' ∧ SafeEvolution ptable T') ∧
     -- evalList clause
-    (∀ (ptable : PolicyTable) (h_pt : PolicyTableRespectsBisimT ptable)
+    (∀ (ptable : PolicyTable) (_h_pt : PolicyTableRespectsBisimT ptable)
        (level : Nat) (exps : List Expr) (env : Env) (T : TowerState)
-       (hh : HeapValid T.heap)
-       (hev : EnvValid env T.heap)
-       (h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
-       (h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
-       (h_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap)
-       (h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
-       (h_env_self : EnvVis env env T.heap T.heap)
-       (h_safe : SafeEvolution ptable T)
+       (_hh : HeapValid T.heap)
+       (_hev : EnvValid env T.heap)
+       (_h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
+       (_h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+       (_h_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap)
+       (_h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
+       (_h_env_self : EnvVis env env T.heap T.heap)
+       (_h_safe : SafeEvolution ptable T)
        (vs : List Val) (T' : TowerState),
       evalList fuel ptable level exps env T = some (vs, T') →
       TowerCE T T' ∧ SafeEvolution ptable T' ∧ ListValValid vs T'.heap) ∧
     -- applyVia clause
-    (∀ (ptable : PolicyTable) (h_pt : PolicyTableRespectsBisimT ptable)
+    (∀ (ptable : PolicyTable) (_h_pt : PolicyTableRespectsBisimT ptable)
        (level : Nat) (op : Val) (args : List Val) (T : TowerState)
-       (hh : HeapValid T.heap)
-       (hv_op : ValValid op T.heap)
-       (hv_args : ListValValid args T.heap)
-       (h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
-       (h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
-       (h_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap)
-       (h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
-       (h_safe : SafeEvolution ptable T)
+       (_hh : HeapValid T.heap)
+       (_hv_op : ValValid op T.heap)
+       (_hv_args : ListValValid args T.heap)
+       (_h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
+       (_h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+       (_h_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap)
+       (_h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
+       (_h_safe : SafeEvolution ptable T)
        (r : Val) (T' : TowerState),
       applyVia fuel ptable level op args T = some (r, T') →
       TowerCE T T' ∧ SafeEvolution ptable T' ∧ ValValid r T'.heap) ∧
     -- applyDirect clause
-    (∀ (ptable : PolicyTable) (h_pt : PolicyTableRespectsBisimT ptable)
+    (∀ (ptable : PolicyTable) (_h_pt : PolicyTableRespectsBisimT ptable)
        (level : Nat) (op : Val) (args : List Val) (T : TowerState)
-       (hh : HeapValid T.heap)
-       (hv_op : ValValid op T.heap)
-       (hv_args : ListValValid args T.heap)
-       (h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
-       (h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
-       (h_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap)
-       (h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
-       (h_safe : SafeEvolution ptable T)
+       (_hh : HeapValid T.heap)
+       (_hv_op : ValValid op T.heap)
+       (_hv_args : ListValValid args T.heap)
+       (_h_levs : ∀ n env, T.envAt? n = some env → EnvValid env T.heap)
+       (_h_resp_all : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+       (_h_bisim : ∀ n env, T.envAt? n = some env → EnvVis env env T.heap T.heap)
+       (_h_pol_resp_at : ∀ p, T.policyAt? level = some p → PolicyRespectsBisimT p)
+       (_h_safe : SafeEvolution ptable T)
        (r : Val) (T' : TowerState),
       applyDirect fuel ptable level op args T = some (r, T') →
       TowerCE T T' ∧ SafeEvolution ptable T' ∧ ValValid r T'.heap) := by
