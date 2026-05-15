@@ -780,7 +780,7 @@ theorem materialize_preserves_PureHeap {T T' : TowerState} {n : Nat}
     PureHeap T'.heap := by
   unfold TowerState.materialize at h_mat
   split at h_mat
-  · exact (Option.noConfusion h_mat)
+  · cases h_mat
   · split at h_mat
     · injection h_mat with h_eq
       subst h_eq; exact h_T
@@ -980,7 +980,7 @@ theorem applyPrim_PureVal {name : String} {args : List Val} {v : Val}
                             | [.builtinBaseApply], h =>
                               obtain rfl := Option.some.inj h; rfl
                           · rw [if_neg h₁₃] at h
-                            exact Option.noConfusion h
+                            cases h
 
 /-! ### Inductive step
 
@@ -1198,8 +1198,8 @@ theorem allPureIndep_succ (n : Nat) (IH : AllPureIndep n) :
             · obtain ⟨rfl, rfl⟩ := h_some
               refine ⟨?_, h_T⟩
               exact PureHeap_getElem? h_T (by assumption)
-            · exact Option.noConfusion h_some
-          · exact Option.noConfusion h_some
+            · cases h_some
+          · cases h_some
       | lam ps body =>
           simp [eval] at h_some
           obtain ⟨rfl, rfl⟩ := h_some
@@ -1584,15 +1584,15 @@ theorem allPureIndep_succ (n : Nat) (IH : AllPureIndep n) :
       intro p v T' h_some
       unfold applyDirect at h_some
       cases op with
-      | num _ => exact Option.noConfusion h_some
-      | bool _ => exact Option.noConfusion h_some
-      | nilV => exact Option.noConfusion h_some
-      | sym _ => exact Option.noConfusion h_some
-      | cons _ _ => exact Option.noConfusion h_some
+      | num _ => cases h_some
+      | bool _ => cases h_some
+      | nilV => cases h_some
+      | sym _ => cases h_some
+      | cons _ _ => cases h_some
       | builtinBaseApply =>
           match args, h_some with
-          | [], h => exact Option.noConfusion h
-          | [_], h => exact Option.noConfusion h
+          | [], h => cases h
+          | [_], h => cases h
           | [actualOp, opList], h_s =>
               simp only [PureValList, Bool.and_eq_true] at h_args
               cases h_vtl : valToList opList with
@@ -1603,7 +1603,7 @@ theorem allPureIndep_succ (n : Nat) (IH : AllPureIndep n) :
                     valToList_PureValList h_args.2.1 h_vtl
                   exact (IH_applyDirect level _ operands T
                           h_args.1 h_ops_pure h_T).2 p v T' h_s
-          | _ :: _ :: _ :: _, h => exact Option.noConfusion h
+          | _ :: _ :: _ :: _, h => cases h
       | closure ps body cenv =>
           simp only [PureVal] at h_op
           by_cases h_len : ps.length = args.length
@@ -1724,7 +1724,7 @@ theorem getElem?_some_lt_length {α} {l : List α} {idx : Nat} {v : α}
       exfalso
       have h_ge : l.length ≤ idx := Nat.le_of_not_lt (of_decide_eq_false h_lt)
       rw [List.getElem?_eq_none h_ge] at h
-      exact Option.noConfusion h
+      cases h
 
 theorem OrigBoundIn_heap_extend
     {h₁ h₂ : Heap} {old new : Val}

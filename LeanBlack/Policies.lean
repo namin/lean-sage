@@ -597,7 +597,7 @@ theorem multnExact_soundForCE_first_install_tower
     -- so this case is unreachable.
     exfalso
     rw [callAsBaseApply_builtin_num_none] at h_old
-    exact Option.noConfusion h_old
+    cases h_old
   · have h_op : OpNotNum op := fun n hop_num => hn ⟨n, hop_num⟩
     exact multnExact_CE_nonnum_case h_admit h_fuel h_op hresp_pt h_old install wf
       h_heap_deep h_op_deep h_operands_deep h_levels_deep h_levels_resp

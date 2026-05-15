@@ -385,7 +385,7 @@ private theorem materializeStep_level_envs_valid_preserves
       have h_oob : (T.levels ++ [new_ls]).length ≤ m := by
         simp [List.length_append]; omega
       rw [List.getElem?_eq_none h_oob] at hen
-      exact Option.noConfusion hen
+      cases hen
 
 /-- Iterated materializeStep preserves "level envs valid in heap". -/
 private theorem materializeStep_iter_level_envs_valid_preserves
@@ -445,7 +445,7 @@ private theorem materializeStep_policies_resp_preserves
       have h_oob : (T.levels ++ [new_ls]).length ≤ m := by
         simp [List.length_append]; omega
       rw [List.getElem?_eq_none h_oob] at hp
-      exact Option.noConfusion hp
+      cases hp
 
 /-- Iterated materializeStep preserves "all policies satisfy P". -/
 private theorem materializeStep_iter_policies_resp_preserves
@@ -1686,7 +1686,7 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                       | none =>
                           have h_a_none : T_a.materialize (level + 1) = none :=
                             (T_a.materialize_cross_side_some_iff T_b _).mpr h_some
-                          rw [h_a_none] at hm_a; exact Option.noConfusion hm_a
+                          rw [h_a_none] at hm_a; cases hm_a
                       | some _ => simp
                     obtain ⟨T_b_mat, hm_b⟩ := Option.isSome_iff_exists.mp hm_b_some
                     -- Cross-side parallel facts
@@ -2319,7 +2319,7 @@ theorem frame_tower : ∀ n, FrameStmtT n := by
                   exfalso
                   have h_a_none : T_a.materialize (level + 1) = none :=
                     h_iff.mpr hm_b_check
-                  rw [h_a_none] at hm_a; exact Option.noConfusion hm_a
+                  rw [h_a_none] at hm_a; cases hm_a
               | some _ => simp
             obtain ⟨T_b_mat, hm_b⟩ := Option.isSome_iff_exists.mp hm_b_some
             -- Cross-side parallel facts.
@@ -4300,7 +4300,7 @@ private theorem shift_respect (cutoff : Nat) (padding : Heap) :
                           rw [hxlv] at h_st_env
                           simp only [Option.map_some] at h_st_env
                           rw [h_st_env]
-                          simp only [Option.some_bind]
+                          simp only [Option.bind_some]
                           cases hxlv_lookup : lv_env.lookup x with
                           | none =>
                               rw [shift_env_lookup_none cutoff padding.length lv_env x hxlv_lookup]

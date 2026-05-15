@@ -1992,4 +1992,4 @@ theorem safeEvolution_necessary :
       | k + 2 =>
           simp [callAsBaseApply, applyDirect, cex_div_closure, allocStep, eval]
     rw [h_div fuel'] at h_call
-    exact Option.noConfusion h_call
+    cases h_call
