@@ -4,9 +4,8 @@ A reflective tower of interpreters in Lean 4 where modifications to
 the `base-apply` rule carry kernel-checked proofs of conservative
 extension (`CE_weak_strong`). Black-faithful (heap + closure +
 `set!`), with CakeML-style value bisimulation (Kumar 2016 §3)
-underwriting the soundness arguments. Toolchain:
-`leanprover/lean4:v4.20.0`. All public theorems are kernel-checked
-with no `sorry`, `admit`, or `axiom`.
+underwriting the soundness arguments.
+All public theorems are kernel-checked with no `sorry`, `admit`, or `axiom`.
 
 lean-sage is highlighted in
 [reasonable-reflection](https://github.com/namin/reasonable-reflection).
