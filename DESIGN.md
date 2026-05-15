@@ -101,7 +101,9 @@ eval_tower_safe :
 that's materialized in either `T` or `T'`, the apply rule at level `n` in
 `T'` is a `CE_weak`-conservative-extension of the apply rule at level `n`
 in `T`. (`CE_weak` because lean-green's `multnExact_soundForCE_first_install`
-already concludes `_weak`, not `_`. See `lean-green/WAND.md`.)
+already concludes `_weak`, not `_`. See [`SCOPE.md`](SCOPE.md) —
+"Why the headline relation is `CE_weak` / `CE_weak_strong`, not strict
+`CE`" — for the technical reason.)
 
 `SafeEvolution ptable T` says every materialized level's policy is universally
 sound and every policy in `ptable` respects bisim. Newly-materialized levels

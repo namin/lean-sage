@@ -1,20 +1,78 @@
 # lean-sage
 
-A reflective tower of interpreters in Lean 4 where modifications to the
-`base-apply` rule carry kernel-checked proofs of conservative
-extension. Black-faithful (heap + closure + `set!`), with
-CakeML-style value bisimulation underwriting the soundness arguments.
+A reflective tower of interpreters in Lean 4 where modifications to
+the `base-apply` rule carry kernel-checked proofs of conservative
+extension (`CE_weak_strong`). Black-faithful (heap + closure +
+`set!`), with CakeML-style value bisimulation (Kumar 2016 §3)
+underwriting the soundness arguments. Toolchain:
+`leanprover/lean4:v4.20.0`. All public theorems are kernel-checked
+with no `sorry`, `admit`, or `axiom`.
 
-**All theorems sorry-free.** Lean toolchain v4.20.0.
+lean-sage is the Lean artifact for the
+[reasonable-reflection](https://github.com/namin/reasonable-reflection)
+abstract.
 
-## What has been proved
+## Quickstart
 
-Five user-facing results.
+```bash
+lake build                # library + three executables
+lake exe smoke            # 4 scenes, 8 tests   — structural-policy
+lake exe demos            # 12 scenes, 29 tests — reflection capabilities
+lake exe proofBasedSmoke  # 10 scenes, 27 tests — proof-based admission
+```
+
+Success criterion:
+
+- `lake build` succeeds.
+- Each executable prints only `OK` lines (no line starting with `XX`).
+- No uncommented `sorry`, `admit`, or `axiom` in `LeanBlack/`,
+  `Smoke.lean`, `Demos.lean`, or `ProofBasedSmoke.lean`.
+  The current CI check is `! grep -rn "sorry$" LeanBlack/`.
+
+## What to inspect if you have 10 minutes
+
+1. [`LeanBlack/Public.lean`](LeanBlack/Public.lean) — the public API
+   surface; one screen, tables of the six headline theorems and the
+   exported types / constructors.
+2. [`LeanBlack/ProofBased.lean`](LeanBlack/ProofBased.lean) —
+   `CE_weak_strong`, `ApprovedModification`, `approvedPolicy`,
+   `approvedPolicy_soundForCE_weak_strong`, `multnApproval`,
+   `wand_defeated_existential_gated_beta`.
+3. [`LeanBlack/Soundness.lean`](LeanBlack/Soundness.lean) —
+   `eval_tower_safe` (multi-level CE preservation through reflective
+   programs) and `safeEvolution_necessary` (the without-the-gate
+   counterexample).
+4. [`LeanBlack/Compose.lean`](LeanBlack/Compose.lean) —
+   `CE_weak_strong_trans` (the global guarantee across composed
+   admissions).
+5. [`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) — 10 scenes
+   exercising the gate end-to-end, including Scene 4 (a doubling
+   wrapper that fails to admit) and Scene 10 (the composed chain
+   `bbApply → multn → identity-delegate-on-multn`).
+
+For a hands-on walkthrough that builds approvals from scratch, see
+[`TUTORIAL.md`](TUTORIAL.md). For the architectural rationale,
+[`DESIGN.md`](DESIGN.md) and [`DESIGN_PROOF.md`](DESIGN_PROOF.md).
+For exact scope (what is and is not claimed), [`SCOPE.md`](SCOPE.md).
+
+## Artifact claim map
+
+| Paper-level claim | Files / theorems / demos |
+|---|---|
+| Proof-carrying admission of `set! base-apply` | `ApprovedModification`, `approvedPolicy`, `approvedPolicy_soundForCE_weak_strong`, `multnApproval` (all in `LeanBlack/ProofBased.lean`) |
+| multn as worked example | `multnExact_soundForCE_first_install_tower` (`LeanBlack/Policies.lean`), `multnApproval`, `ProofBasedSmoke` Scenes 3, 8, 9 |
+| Bad wrapper refused at the gate | `ProofBasedSmoke` Scene 4 (doubling wrapper refused), and `safeEvolution_necessary` (`LeanBlack/Soundness.lean`) as the ungated counterexample |
+| CE preservation under reflective programs | `eval_tower_safe` (`LeanBlack/Soundness.lean`) |
+| Composition of admissions | `CE_weak_strong_trans` (`LeanBlack/Compose.lean`), `identityDelegateApproval` (`LeanBlack/IdentityDelegate.lean`), `ProofBasedSmoke` Scene 10 |
+| β-equivalence under gated reflection (Wand point) | `wand_defeated_existential_gated_beta` (`LeanBlack/ProofBased.lean`) — **convergent / top-level**, not full contextual equivalence |
+| Reflective depth | Multi-level `set! base-apply`: `Smoke` Scene 3, `Demos` Scenes 6 and 11, `ProofBasedSmoke` Scenes 7 and 9. Operational per-level policy via `installPolicy`: `Smoke` Scene 4, `Demos` Scene 11. |
+
+## The six user-facing results
 
 ### 1. Substrate stays CE-coherent under any program
 
 ```
-eval_tower_safe   (Soundness.lean)
+eval_tower_safe   (LeanBlack/Soundness.lean)
 ```
 
 For any expression — including reflective ones using `(em ...)` and
@@ -26,8 +84,8 @@ per-modification check propagates through any depth of reflection.
 ### 2. multn conservatively extends the baseline
 
 ```
-multnExact_soundForCE_first_install_tower   (Policies.lean)
-multnApproval                               (ProofBased.lean)
+multnExact_soundForCE_first_install_tower   (LeanBlack/Policies.lean)
+multnApproval                                (LeanBlack/ProofBased.lean)
 ```
 
 The kernel-checked approval certifies that installing the multn
@@ -41,24 +99,25 @@ admission to the propositional facts the soundness theorem needs.
 ### 3. Without the gate, CE fails
 
 ```
-safeEvolution_necessary   (Soundness.lean)
+safeEvolution_necessary   (LeanBlack/Soundness.lean)
 ```
 
 Concrete counterexample. Under `acceptAll`, a malicious "constant-zero"
 modification breaks `(+ 1 2)`. The gate is genuinely load-bearing —
 this is the converse of Theorem 1.
 
-### 4. β-equivalence survives gated reflection (Wand defeat)
+### 4. β-equivalence survives gated reflection (Wand defeat — convergent)
 
 ```
-wand_defeated_existential_gated_beta   (ProofBased.lean)
+wand_defeated_existential_gated_beta   (LeanBlack/ProofBased.lean)
 ```
 
 `((λx. x) 0)` and `0` evaluate to the same value under
 `[approvedPolicy approvals]` for any list of approvals. The β-redex
-and its contractum are observationally equivalent at the top level,
-**with proof-bearing admissions in scope**. Reflection doesn't
-collapse equational reasoning the way it does ungated (per Wand 1998).
+and its contractum are observationally equivalent **at the top level**
+with proof-bearing admissions in scope. Reflection doesn't collapse
+equational reasoning the way it does ungated (per Wand 1998). The
+full contextual lift is in progress; see "Honest scope" below.
 
 Bridged via `AllPureIndep` (also sorry-free): `eval` is
 policy-table-independent for `Pure` expressions.
@@ -66,7 +125,7 @@ policy-table-independent for `Pure` expressions.
 ### 5. Proof-based admission slots into the runtime
 
 ```
-approvedPolicy_soundForCE_weak_strong   (ProofBased.lean)
+approvedPolicy_soundForCE_weak_strong   (LeanBlack/ProofBased.lean)
 ```
 
 `approvedPolicy approvals` is a `BlackPolicy` — the runtime treats it
@@ -78,15 +137,15 @@ type-checked its CE proof.
 ### 6. CE composes — global guarantee across admissions
 
 ```
-CE_weak_strong_trans   (Compose.lean)
+CE_weak_strong_trans   (LeanBlack/Compose.lean)
 ```
 
 The conservative-extension relation between apply values is
-transitive: if `v_a → v_b` and `v_b → v_c` are each CE_weak_strong,
-then `v_a → v_c` is CE_weak_strong. Combined with #5, this gives the
-abstract's *global property across composed admissions*: any chain of
-approved admissions at a level yields a final apply value that is
-CE-related back to `bbApply`. Underlying lemma:
+transitive: if `v_a → v_b` and `v_b → v_c` are each `CE_weak_strong`,
+then `v_a → v_c` is `CE_weak_strong`. Combined with #5, this gives
+the abstract's *global property across composed admissions*: any
+chain of approved admissions at a level yields a final apply value
+that is CE-related back to `bbApply`. Underlying lemma:
 `ValVis_aux_weak_trans` (depth-indexed value-bisim transitivity).
 
 ## What this backs (vs. the LICS abstract)
@@ -99,69 +158,47 @@ The artifact backs the highlighted instance in the
 | Substrate kind     | Reflective tower of interpreters (heap + closure + `set! base-apply`)  |
 | Modification kind  | `set!` on the `base-apply` heap cell                                   |
 | Evidence kind      | Kernel-checked Lean proof (`CE_weak_strong`)                           |
-| Policy             | Per-modification conservative extension                                 |
+| Policy             | Per-modification conservative extension                                |
 | Guarantee          | Substrate is always a conservative extension of the base               |
-| Reflective depth   | Multi-level: `(em (em (set! ...)))` modifies deeper levels             |
+| Reflective depth   | Multi-level `(em (em (set! ...)))` modifies deeper levels (proved); `installPolicy` is operational at every level |
 
 CakeML-style value bisimulation (Kumar 2016 §3) underwrites the CE
 proofs: closures are related pointwise through their captured
-environments. `Bisim.lean` + `Frame.lean` carry this infrastructure.
+environments. `LeanBlack/Bisim.lean` + `LeanBlack/Frame.lean` carry
+this infrastructure.
 
-## Honest scope (what's not claimed)
+## Honest scope
 
-- **`CE_weak`, not strict `CE`.** The headline CE conclusion is
-  `_weak` — closures' captured environments aren't required to be
-  Lean-equal, only bisim-related. See [`lean-green/WAND.md`]([https://github.com/namin/lean-green/blob/main/WAND.md](https://github.com/namin/lean-green/blob/main/WAND.md#why-the-headline-ce-statement-is-_weak))
-  for the technical reason.
-- **multn at first install only (the worked example).** The
-  structural `multnExact_soundForCE_first_install_tower` covers
+A confident summary of what is and is not claimed. See
+[`SCOPE.md`](SCOPE.md) for the full version.
+
+- **`CE_weak` / `CE_weak_strong`, not strict `CE`.** The headline CE
+  conclusion uses bisim-related captured environments on closures
+  (per CakeML), not Lean-equal environments. This is the relation
+  the multn proof and the composition lemma `CE_weak_strong_trans`
+  conclude in.
+- **multn proof is first install on `bbApply`.** The structural
+  theorem `multnExact_soundForCE_first_install_tower` covers
   `oldVal = .builtinBaseApply`. Composition across admissions is
-  mechanized via `CE_weak_strong_trans` (`Compose.lean`); a concrete
-  second link (`identityDelegate_CE_of_closure` in
-  `IdentityDelegate.lean`) plugs into the chain, and Scene 10 of
-  `ProofBasedSmoke.lean` exercises the full chain
-  (`bbApply → multn → identity-delegate-on-multn`) end-to-end at the
-  gate level. Stronger non-trivial wrappers
-  (`multn → logging-multn`, etc.) need their own CE proofs but slot
-  into the same chain machinery.
-- **Full contextual β-equivalence is in progress.** The
-  `wand_defeated_existential_gated_beta` result is *convergent*
-  obs-equivalence (M and N evaluate to the same value at the top
-  level). The contextual lift (`∀ context C, eval (C[M]) = eval (C[N])`)
-  is covered for an `EasyCtx`/`WideCtx` sub-language of contexts
-  (`Ctx.lean`), excluding `.lam`. See `TUTORIAL.md` §11.
-- **No installable per-level policy is exposed at the public
-  interface.** `installPolicy` exists in the substrate but lean-sage's
-  headline theorems quantify over a fixed `verifiedTable`, and the
-  "policy at level N is itself reflectively modifiable" axis from the
-  abstract is captured only by multi-level `set!`-on-`base-apply`, not
-  by recursive policy installation.
-
-## Running it
-
-```bash
-lake build               # library + three executables
-lake exe smoke           # 4 scenes, 8 tests   — structural-policy
-lake exe demos           # 12 scenes, 29 tests — reflection capabilities
-lake exe proofBasedSmoke # 10 scenes, 27 tests — proof-based admission
-```
-
-Sample output (multn at level 2 via cross-level reflection):
-
-```
-$ lake exe smoke
-Scene 3: two-level reflection (the new thing)
-  OK  install-2up + (em (2 3 4)): expected num(24), got num(24)
-  OK  install-2up + (2 3 4): expected <none>, got <none>
-```
-
-```
-$ grep -c "sorry$" LeanBlack/*.lean
-LeanBlack/Bisim.lean:0       LeanBlack/Black.lean:0
-LeanBlack/Eval.lean:0        LeanBlack/Frame.lean:0
-LeanBlack/Policies.lean:0    LeanBlack/ProofBased.lean:0
-LeanBlack/Soundness.lean:0   LeanBlack/Tower.lean:0
-```
+  supplied separately by `CE_weak_strong_trans` together with the
+  concrete second link `identityDelegateApproval`
+  (`LeanBlack/IdentityDelegate.lean`). `ProofBasedSmoke` Scene 10
+  exercises the full chain `bbApply → multn →
+  identity-delegate-on-multn` end-to-end.
+- **β result is top-level / convergent.** Full contextual β
+  (`∀ context C, evalProgram (C[M]) = evalProgram (C[N])`) is
+  partial / in progress. The clean half (`EasyCtx`, `WideCtx`,
+  `SimpleCtx`) covers every `Expr`-tree position except `.lam`. See
+  `LeanBlack/Ctx.lean`, `LeanBlack/ContextualBeta.lean`,
+  `LeanBlack/HeapAgree.lean`, `LeanBlack/EvalFuelMono.lean`, and
+  `TUTORIAL.md` §12.
+- **No public recursive proof-based policy-installation theorem.**
+  lean-sage mechanizes multi-level reflective modification of
+  `base-apply` and operationally includes per-level policy
+  installation via `installPolicy`. The public theorem surface does
+  not currently expose a recursive proof-based theorem for
+  installing new gate policies through higher gates — the headline
+  theorems quantify over a fixed `verifiedTable`.
 
 ## File map
 
@@ -173,8 +210,9 @@ LeanBlack/Soundness.lean:0   LeanBlack/Tower.lean:0
 | [`Demos.lean`](Demos.lean) | 12 reflection capabilities (cross-level cascade, composition, adaptive wrappers) |
 | [`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) | Proof-based scenes incl. end-to-end multn through the kernel gate |
 | [`TUTORIAL.md`](TUTORIAL.md) | Hands-on walkthrough — start here to build your first approval |
-| [`DESIGN.md`](DESIGN.md) | Architectural rationale (structural-policy half) |
+| [`DESIGN.md`](DESIGN.md) | Architectural rationale (substrate half) |
 | [`DESIGN_PROOF.md`](DESIGN_PROOF.md) | Proof-based admission design |
+| [`SCOPE.md`](SCOPE.md) | Precise scope of headline claims |
 
 **Library** (dependency order; internal lemmas live here).
 
@@ -185,16 +223,20 @@ LeanBlack/Soundness.lean:0   LeanBlack/Tower.lean:0
 | `LeanBlack/Eval.lean` | Tower-indexed mutual `eval`/`evalList`/`applyVia`/`applyDirect` |
 | `LeanBlack/Bisim.lean` | CakeML-style value bisimulation, shift apparatus |
 | `LeanBlack/Frame.lean` | Cross-side framing — the technical engine for CE |
-| `LeanBlack/Soundness.lean` | `TowerCE`, `SafeEvolution`, `eval_tower_safe` (theorem 1) + necessity counterexample (theorem 3) |
-| `LeanBlack/Policies.lean` | Structural policies + multn soundness (theorem 2's structural half) |
-| `LeanBlack/ProofBased.lean` | `ApprovedModification`, proof-based gate, multn approval (theorem 2's proof-bearing half), Wand defeat (theorem 4), soundness (theorem 5) |
-| `LeanBlack/Compose.lean` | `ValVis_weak` / `CE_weak` / `CE_weak_strong` transitivity (theorem 6) — composition across admissions |
+| `LeanBlack/Soundness.lean` | `TowerCE`, `SafeEvolution`, `eval_tower_safe` (#1) + necessity counterexample (#3) |
+| `LeanBlack/Policies.lean` | Structural policies + multn soundness (#2's structural half) |
+| `LeanBlack/ProofBased.lean` | `ApprovedModification`, proof-based gate, multn approval (#2's proof-bearing half), Wand defeat (#4), proof-based soundness (#5) |
+| `LeanBlack/Compose.lean` | `ValVis_weak` / `CE_weak` / `CE_weak_strong` transitivity (#6) — composition across admissions |
 | `LeanBlack/IdentityDelegate.lean` | `identityDelegate_CE_of_closure` + `identityDelegateApproval` — concrete second link in a CE chain |
+| `LeanBlack/Public.lean` | Single-file entry point exposing the headline API |
 
-**Contextual-β infrastructure** (in progress; supports the scope-extension of theorem 4):
+**Contextual-β infrastructure** (in progress; supports the scope-extension of #4):
 
 `LeanBlack/EvalFuelMono.lean`, `LeanBlack/Ctx.lean`,
 `LeanBlack/ContextualBeta.lean`, `LeanBlack/HeapAgree.lean`.
+
+For the theorem surface, start with
+[`LeanBlack/Public.lean`](LeanBlack/Public.lean).
 
 ## What you can do with it
 

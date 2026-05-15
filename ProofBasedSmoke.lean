@@ -9,23 +9,66 @@
   the policy was constructed: from a list of `ApprovedModification`s,
   each carrying a Lean term of type `CE_weak_strong`.
 
-  Two scenes:
+  Ten scenes:
 
   1. **Approved identity mod admitted.** Install
      `approvedPolicy [identityApproval 1 [] .builtinBaseApply]` at
      level 1, then run `(em (set! base-apply base-apply))` — an
-     identity modification (RHS evaluates to the current value,
-     which is `.builtinBaseApply`). The gate consults the approval
-     list, the match succeeds, the `.set` returns `.bool true`.
-     A subsequent `(+ 1 2)` still returns `3` because the
-     modification was identity.
+     identity modification. The gate consults the approval list,
+     the match succeeds, the `.set` returns `.bool true`. A
+     subsequent `(+ 1 2)` still returns `3` (identity).
 
-  2. **Non-matching mod refused.** Same setup, but the mutation is
+  2. **Non-matching mod refused.** Same setup; the mutation is
      `(em (set! base-apply (lam (op args) 42)))` — a constant-42
-     wrapper. The approval list has only the identity approval; the
-     `newVal` mismatch means no approval matches; the gate refuses;
-     `.set` returns `.bool false`. The heap is *not* updated, so
+     wrapper. The approval list has only the identity approval;
+     `newVal` mismatch, no approval matches, `.set` returns
+     `.bool false`, heap unchanged, `(+ 1 2)` still returns `3`.
+
+  3. **multn approval constructs + matches.** Build the multn
+     approval via `multnApproval` (invoking
+     `multnExact_soundForCE_first_install_tower` inside the proof
+     field) and verify the gate admits the matching multn ctx and
+     refuses a non-multn `newVal`.
+
+  4. **Disaster demo — doubling wrapper refused.** A doubling
+     wrapper (where `(+ 1 2)` would become `6`) has no
+     `CE_weak_strong` inhabitant, so no `ApprovedModification` can
+     be constructed for it. Through the gate, the `.set` returns
+     `.bool false`; `(+ 1 2)` still returns `3` post-refuse. The
+     companion ungated path shows the same wrapper changes
+     `(+ 1 2)` to `6` — the gate is genuinely load-bearing.
+
+  5. **Verified compose — `[identity, multn]` coexist.** Two
+     approvals in one list; both their target ctxes admit; a
+     doubling wrapper still refuses.
+
+  6. **Custom modification (logging-multn).** A second-source
+     numeric wrapper distinct from the canonical multn closure is
+     admitted via the same `multnApproval` template (the
+     structural shape matches; the `newVal` is verifiably distinct
+     by `Val.beq`).
+
+  7. **Cross-level — proof-based admission at level 2.** Build a
+     level-2 multn approval; verify it admits at level 2 and
+     refuses at level 1; verify a multi-level approval table
+     admits at the right level by index.
+
+  8. **End-to-end multn at level 1.** Gate installed, `(em (set!
+     base-apply <multn>))` admitted, post-admission `(2 3 4)` at
+     level 0 returns `num(24)` via level-1's now-multn base-apply;
      `(+ 1 2)` still returns `3`.
+
+  9. **End-to-end multn at level 2.** Same shape as Scene 8 but
+     the `set!` happens at level 2 (via `(em (em ...))`).
+     Post-admission `(em (2 3 4))` returns `num(24)` via level-2's
+     now-multn base-apply; level-0 `(2 3 4)` is still `<none>`.
+
+  10. **Composed admission chain `bbApply → multn →
+      identity-delegate`.** Two approvals
+      `[runtimeMultnApprovalLevel1, runtimeIdentityDelegateApproval]`
+      coexist in one `approvedPolicy`. Step 1 (`bbApply → multn`)
+      admits; step 2 (`multn → identity-delegate-on-multn`)
+      admits; a wrong-shape modification at step 2 still refuses.
 
   Run with `lake build proofBasedSmoke && lake exe proofBasedSmoke`.
 -/

@@ -55,7 +55,7 @@ Proof-based admission lives in:
 
 (Four companion files — `HeapAgree.lean`, `ContextualBeta.lean`,
 `EvalFuelMono.lean`, `Ctx.lean` — carry the in-progress contextual-β
-lift. Deferred to §11.)
+lift. Deferred to §12.)
 
 Proof-based admission is purely additive on the structural-policy
 world; the only change to existing files was dropping a `private`
@@ -357,7 +357,7 @@ policy-table-independent for `Pure` expressions (no `.set`, no
 table doesn't affect its evaluation.
 
 This is the convergent form; full contextual obs-equivalence (∀
-context C) is in progress — see §11.
+context C) is in progress — see §12.
 
 ## 9. End-to-end through the gate
 
@@ -465,10 +465,11 @@ You can write Lean code that produces:
 And run `lake exe proofBasedSmoke` to see the full pipeline (10
 scenes, 27 tests) admitting / refusing / composing in real time.
 
-That's the proof-based half of lean-sage. The structural-policy half
-(`multnExactPolicy` + `multnExact_soundForCE_first_install_tower`) is
-covered in [`DESIGN.md`](DESIGN.md) and exercised by
-`lake exe smoke` + `lake exe demos`.
+That's the proof-based half of the artifact. The structural-policy
+half (`multnExactPolicy` +
+`multnExact_soundForCE_first_install_tower`) is covered in
+[`DESIGN.md`](DESIGN.md) and exercised by `lake exe smoke` +
+`lake exe demos`.
 
 For a single entry-point exposing just the public API, see
 [`LeanBlack/Public.lean`](LeanBlack/Public.lean).
