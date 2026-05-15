@@ -8,9 +8,8 @@ underwriting the soundness arguments. Toolchain:
 `leanprover/lean4:v4.20.0`. All public theorems are kernel-checked
 with no `sorry`, `admit`, or `axiom`.
 
-lean-sage is the Lean artifact for the
-[reasonable-reflection](https://github.com/namin/reasonable-reflection)
-abstract.
+lean-sage is highlighted in
+[reasonable-reflection](https://github.com/namin/reasonable-reflection).
 
 ## Quickstart
 
@@ -150,7 +149,7 @@ that is CE-related back to `bbApply`. Underlying lemma:
 
 ## What this backs (vs. the LICS abstract)
 
-The artifact backs the highlighted instance in the
+The artifact is the highlighted instance in
 [reasonable-reflection abstract](https://github.com/namin/reasonable-reflection):
 
 | Dimension          | Realization                                                            |
