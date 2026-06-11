@@ -2067,16 +2067,21 @@ theorem SimpleCtx.plug_cong : ∀ (C : SimpleCtx) {M N : Expr},
       simp only [SimpleCtx.plug]
       exact EvalEquiv.seqTail_cong (ih h) hd pre post
 
-/-! ### Remaining per-`Ctx` cases — TODO
+/-! ### Remaining per-`Ctx` cases
 
-`.lam ps ·`: the body appears under a closure value. Strict
-equality fails because `eval (.lam ps M) = some (.closure ps M env, T)`
-and the closure value embeds `M` literally — so the two closures
-on the two sides differ syntactically. The right closure form
-under contextual β is `ValVis`-style syntactic refinement.
+Every position except `.lam` is now covered: the strict-equality
+congruences here (`SimpleCtx.plug_cong`), and the conditional
+`EvalEquivAt` track completed by `CtxPure.lean` (`PureCtx` covers
+all thirteen non-`.lam` positions, including `.letEBody` and `.em`
+via a depth-indexed predicate family, with pure pre-hole siblings).
 
-`.app pre · post`, `.primAppFun`, `.primAppArg`, `.seq`:
-case-split on list traversal at the hole position; analogous to
-`.letEVal` for the head case and `.letEBody` for tail positions. -/
+`.lam ps ·` — the sole exclusion: the body appears under a closure
+value. Strict equality fails because
+`eval (.lam ps M) = some (.closure ps M env, T)` and the closure
+value embeds `M` literally — so the two closures on the two sides
+differ syntactically. The right closure form under contextual β is
+a `ValVis`-style relation refined to permit β-related bodies
+(Howe-style candidate relation), threaded through `eval` by the L4
+parallel-bisim induction. See `SCOPE.md`. -/
 
 end LeanBlack

@@ -10,7 +10,7 @@ For architectural rationale, see [`DESIGN.md`](DESIGN.md) and
 ## What is proved
 
 lean-sage mechanizes proof-carrying reflective modification of a
-Black-style reflective tower. Six theorems form the public surface
+Black-style reflective tower. Seven theorems form the public surface
 (all in [`LeanBlack/Public.lean`](LeanBlack/Public.lean)):
 
 | Theorem | Where | What it gives |
@@ -21,9 +21,11 @@ Black-style reflective tower. Six theorems form the public surface
 | `LeanBlack.wand_defeated_existential_gated_beta` | `LeanBlack/ProofBased.lean` | β-equivalence survives gated reflection (convergent / top-level). |
 | `LeanBlack.approvedPolicy_soundForCE_weak_strong` | `LeanBlack/ProofBased.lean` | Proof-based admission soundness: every approval is CE. |
 | `LeanBlack.CE_weak_strong_trans` | `LeanBlack/Compose.lean` | Composition: chained admissions yield CE substrates. |
+| `contextual_beta_pure` | `LeanBlack/ContextualBetaPure.lean` | Contextual β: redex ≡ contractum in every `Expr` position except under `.lam` (see scope below). |
 
-All theorems are kernel-checked with no `sorry`, `admit`, or `axiom`.
-Toolchain: `leanprover/lean4:v4.20.0`.
+All theorems are kernel-checked with no `sorry`, `admit`, or `axiom`
+declarations (standard `propext` / `Classical.choice` / `Quot.sound`
+only). Toolchain: `leanprover/lean4:v4.20.0`.
 
 ## Why the headline relation is `CE_weak` / `CE_weak_strong`, not strict `CE`
 
@@ -59,19 +61,61 @@ proof-bearing approvals. This is the value-level existential defeat
 of Wand 1998 that the predecessor lean-green already had, lifted to
 the proof-based admission setting.
 
-It is **not** the full contextual statement
-`∀ C, evalProgram (C[M]) = evalProgram (C[N])`.
+**The contextual lift is now proved for every `Expr` position except
+under `.lam`.** `contextual_beta_pure`
+([`LeanBlack/ContextualBetaPure.lean`](LeanBlack/ContextualBetaPure.lean)):
+for any context `C` drawn from `PureCtx` (all thirteen hole-bearing
+positions of the `Expr` tree except `.lam`'s body — including `.set`
+value positions, `.letE` bodies, and `.em`-nesting to any depth
+within the tower bound), any binder `x`, any body, and any *pure*
+operand `v_expr`:
 
-The contextual lift is partial / in-progress. The pieces live in
-[`LeanBlack/EvalFuelMono.lean`](LeanBlack/EvalFuelMono.lean),
-[`LeanBlack/Ctx.lean`](LeanBlack/Ctx.lean),
-[`LeanBlack/ContextualBeta.lean`](LeanBlack/ContextualBeta.lean), and
-[`LeanBlack/HeapAgree.lean`](LeanBlack/HeapAgree.lean). The clean
-half (`EasyCtx`, `WideCtx`, `SimpleCtx`) covers every `Expr`-tree
-position except `.lam`. `contextual_beta_easy` in `Ctx.lean` is the
-contextually-quantified β statement for the easy-context
-sub-language. What remains is threading the L4 parallel-bisim
-invariant through `eval` to lift to arbitrary contexts.
+    C[(λx. body) v_expr]  ≡  C[let x = v_expr in body]
+
+(same convergent outcomes), at every state satisfying
+`BuiltinReadyP (emDepth C)`. The program-level corollary
+`contextual_beta_at_start` instantiates this at the canonical
+pre-materialized start tower `buildTower (emDepth C + 2)` under any
+level-0 policy, any policy table, and any env — closing the
+lazy-materialization gap (`initTower` materializes only level 0, so
+the hole's level+1 condition fails at the bare start state).
+`wand_beta_ctx_pure_at_start` is the Wand-pair instance.
+
+The precise scope qualifiers:
+
+- **Pure operand and pure pre-hole siblings.** `v_expr` and the
+  context's sub-expressions evaluated *before* the hole must be
+  `Pure` (no `.set` / `.installPolicy`); post-hole siblings and
+  context nodes themselves (e.g. a surrounding `.set`) are
+  unconstrained. This is what guarantees the L1 conditions survive
+  to the hole: pure evaluation only *extends* the state
+  (`LeanBlack/PureExt.lean`).
+- **`BuiltinReadyP d` precondition.** Depth margin
+  `level + d + 1 < maxDepth`, levels materialized past
+  `level + d + 1`, builtin `base-apply` cells in the window
+  `[level, level + d]`, and a pure heap. The start-tower corollary
+  discharges all of it by construction.
+- **`.lam` exclusion.** Contexts placing the hole under a binder
+  are not covered: closures embed bodies syntactically, so
+  outcome-equality congruence fails; the `.lam` case needs a
+  `ValVis`-style relation refined to permit β-related closure
+  bodies (Howe-style), threaded through `eval` by the L4
+  parallel-bisim induction. This is the one remaining piece of the
+  full contextual statement.
+
+The supporting machinery:
+[`LeanBlack/EvalFuelMono.lean`](LeanBlack/EvalFuelMono.lean) (fuel
+monotonicity), [`LeanBlack/Ctx.lean`](LeanBlack/Ctx.lean)
+(per-constructor congruences; `EasyCtx`/`WideCtx`/`SimpleCtx` are
+earlier tiers, kept because their preconditions are incomparable —
+they don't require heap purity),
+[`LeanBlack/PureExt.lean`](LeanBlack/PureExt.lean) (`StateExtends`
+under pure evaluation, the preservation engine),
+[`LeanBlack/CtxPure.lean`](LeanBlack/CtxPure.lean) (`PureCtx` and the
+depth-indexed master congruence `PureCtx.plug_cong_family`), and
+[`LeanBlack/ContextualBeta.lean`](LeanBlack/ContextualBeta.lean) /
+[`LeanBlack/HeapAgree.lean`](LeanBlack/HeapAgree.lean) (the β
+base-case witness and the post-admission CE bridges).
 
 ## Reflective depth: what is claimed
 
@@ -127,6 +171,6 @@ machinery.
 | Substrate is always a conservative extension of the base under reflective modification. | `eval_tower_safe` (`CE_weak`, with multi-level reflection through `(em ...)`-chains). |
 | Modifications carry kernel-checked CE evidence. | `ApprovedModification.proof : CE_weak_strong …`; `approvedPolicy_soundForCE_weak_strong`. |
 | The gate is load-bearing — without it, CE fails. | `safeEvolution_necessary` + `ProofBasedSmoke` Scene 4. |
-| β-equivalence survives gated reflection. | `wand_defeated_existential_gated_beta` (convergent / top-level). Contextual β is partial — see above. |
+| β-equivalence survives gated reflection. | `wand_defeated_existential_gated_beta` (convergent / top-level) + `contextual_beta_pure` (every `Expr` position except under `.lam`; pure operand and pure pre-hole siblings — see above). |
 | Modifications compose. | `CE_weak_strong_trans` + `identityDelegateApproval` + `ProofBasedSmoke` Scene 10. |
 | Reflective depth: per-level modification, governed. | Multi-level `set! base-apply` proved sound via `eval_tower_safe`; `installPolicy` operational; no public recursive proof-based policy-installation theorem. |

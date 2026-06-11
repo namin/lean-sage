@@ -3,6 +3,7 @@ import LeanBlack.Policies
 import LeanBlack.ProofBased
 import LeanBlack.Compose
 import LeanBlack.IdentityDelegate
+import LeanBlack.ContextualBetaPure
 
 /-!
 # Public — entry-point exposing the headline API
@@ -12,7 +13,7 @@ scope. Use this if you're reading the artifact to verify the
 abstract's claim; use the underlying modules if you're hacking on
 internals.
 
-## The six headline theorems
+## The seven headline theorems
 
 | Theorem (qualified name)                            | What it says                                                       |
 |-----------------------------------------------------|--------------------------------------------------------------------|
@@ -22,13 +23,26 @@ internals.
 | `LeanBlack.wand_defeated_existential_gated_beta`    | β-equivalence survives gated reflection (Wand defeat, convergent). |
 | `LeanBlack.approvedPolicy_soundForCE_weak_strong`   | Proof-based admission soundness: every approval is CE.             |
 | `LeanBlack.CE_weak_strong_trans`                    | Composition: chained admissions yield CE substrates.               |
+| `contextual_beta_pure`                              | Contextual β: redex ≡ contractum in *every* `Expr` position except under `.lam` (pure operand, pure pre-hole siblings, `em`-nesting to any depth in the tower bound). |
 
-The first three live in the root namespace (historical, `Soundness.lean`
-and `Policies.lean` predate the `LeanBlack` namespace convention).
-The last three live in the `LeanBlack` namespace.
+The supporting program-level forms of `contextual_beta_pure`
+(`ContextualBetaPure.lean`):
+
+- `contextual_beta_at_start` — the equivalence run at level 0 from
+  the canonical pre-materialized tower `buildTower (emDepth C + 2)`,
+  under any level-0 policy, policy table, and env (`initTower`
+  materializes only level 0, so the hole's level+1 condition needs
+  the pre-materialized start tower);
+- `wand_beta_ctx_pure_at_start` — the specific Wand pair
+  `((λx. x) 0)` / `(let x 0 x)`, contextually quantified.
+
+The root-namespace theorems are historical (`Soundness.lean` and
+`Policies.lean` predate the `LeanBlack` namespace convention); the
+contextual-β layer follows `ContextualBeta.lean` in the root
+namespace.
 
 After `open LeanBlack` (or just `import LeanBlack.Public; open LeanBlack`),
-all six are accessible by their short names.
+all seven are accessible by their short names.
 
 ## Public types and constructors (all in `LeanBlack` namespace)
 
@@ -42,13 +56,23 @@ all six are accessible by their short names.
 | `numIdentityApproval`               | Identity at a `.num n` value (vacuous template).   |
 | `identityDelegateApproval`          | Identity-delegate-on-closure (chain second link).  |
 
+## Contextual-β support types (root namespace)
+
+| Name                  | Purpose                                              |
+|-----------------------|------------------------------------------------------|
+| `LeanBlack.PureCtx`   | Contexts over every `Expr` position except `.lam`.   |
+| `BuiltinReadyN d`     | Depth-indexed readiness (margin `d` of `em`-nesting). |
+| `BuiltinReadyP d`     | `BuiltinReadyN d` bundled with heap purity.          |
+| `LeanBlack.StateExtends` | Structural state evolution under pure evaluation. |
+
 ## What's NOT exported
 
 Internal lemmas (`frame_tower`, `shift_respect`, `applyDirect_heap_extend_weak`,
 `materialize_shift_commutes`, value-bisim machinery, etc.) stay in
-their underlying modules. The contextual-β infrastructure (`Ctx.lean`,
-`ContextualBeta.lean`, `HeapAgree.lean`, `EvalFuelMono.lean`) is
-work-in-progress and not yet part of the public surface.
+their underlying modules. The only remaining contextual-β exclusion
+is the `.lam` position (contexts under a binder), which needs an
+up-to-bisim equivalence (`ValVis`-style) rather than outcome
+equality; see `SCOPE.md`.
 
 For a walkthrough, see [`TUTORIAL.md`](../TUTORIAL.md). For full file
 descriptions, see [`README.md`](../README.md).

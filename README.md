@@ -62,10 +62,10 @@ For exact scope (what is and is not claimed), [`SCOPE.md`](SCOPE.md).
 | Bad wrapper refused at the gate | `ProofBasedSmoke` Scene 4 (doubling wrapper refused), and `safeEvolution_necessary` (`LeanBlack/Soundness.lean`) as the ungated counterexample |
 | CE preservation under reflective programs | `eval_tower_safe` (`LeanBlack/Soundness.lean`) |
 | Composition of admissions | `CE_weak_strong_trans` (`LeanBlack/Compose.lean`), `identityDelegateApproval` (`LeanBlack/IdentityDelegate.lean`), `ProofBasedSmoke` Scene 10 |
-| β-equivalence under gated reflection (Wand point) | `wand_defeated_existential_gated_beta` (`LeanBlack/ProofBased.lean`) — **convergent / top-level**, not full contextual equivalence |
+| β-equivalence under gated reflection (Wand point) | `wand_defeated_existential_gated_beta` (`LeanBlack/ProofBased.lean`) — convergent / top-level — and `contextual_beta_pure` (`LeanBlack/ContextualBetaPure.lean`) — **contextual, every `Expr` position except under `.lam`** |
 | Reflective depth | Multi-level `set! base-apply`: `Smoke` Scene 3, `Demos` Scenes 6 and 11, `ProofBasedSmoke` Scenes 7 and 9. Operational per-level policy via `installPolicy`: `Smoke` Scene 4, `Demos` Scene 11. |
 
-## The six user-facing results
+## The seven user-facing results
 
 ### 1. Substrate stays CE-coherent under any program
 
@@ -114,11 +114,36 @@ wand_defeated_existential_gated_beta   (LeanBlack/ProofBased.lean)
 `[approvedPolicy approvals]` for any list of approvals. The β-redex
 and its contractum are observationally equivalent **at the top level**
 with proof-bearing admissions in scope. Reflection doesn't collapse
-equational reasoning the way it does ungated (per Wand 1998). The
-full contextual lift is in progress; see "Honest scope" below.
+equational reasoning the way it does ungated (per Wand 1998).
 
 Bridged via `AllPureIndep` (also sorry-free): `eval` is
 policy-table-independent for `Pure` expressions.
+
+### 7. Contextual β — every position except under `.lam`
+
+```
+contextual_beta_pure          (LeanBlack/ContextualBetaPure.lean)
+contextual_beta_at_start      (program-level, canonical start tower)
+wand_beta_ctx_pure_at_start   (the Wand pair, contextually quantified)
+```
+
+For any context `C` covering every hole-bearing `Expr` position
+except `.lam`'s body — including `.set` value positions, `.letE`
+bodies, and `.em`-nesting to any depth within the tower bound — any
+binder `x`, any body, and any *pure* operand `v_expr`:
+
+`C[(λx. body) v_expr]` and `C[let x = v_expr in body]` have the same
+convergent outcomes, at every state with depth margin, materialized
+levels, builtin `base-apply` cells in the relevant window, and a
+pure heap (`BuiltinReadyP (emDepth C)`). The context's pre-hole
+siblings must be `Pure`; post-hole siblings are unconstrained.
+
+`contextual_beta_at_start` anchors this at the pre-materialized
+start tower `buildTower (emDepth C + 2)` (any level-0 policy, any
+policy table, any env), closing the lazy-materialization gap. The
+engine is `LeanBlack/PureExt.lean`: pure evaluation only *extends*
+the tower state (heap appends, env preservation, level growth) — a
+joint induction in the style of `AllPureIndep`.
 
 ### 5. Proof-based admission slots into the runtime
 
@@ -183,13 +208,14 @@ A confident summary of what is and is not claimed. See
   (`LeanBlack/IdentityDelegate.lean`). `ProofBasedSmoke` Scene 10
   exercises the full chain `bbApply → multn →
   identity-delegate-on-multn` end-to-end.
-- **β result is top-level / convergent.** Full contextual β
-  (`∀ context C, evalProgram (C[M]) = evalProgram (C[N])`) is
-  partial / in progress. The clean half (`EasyCtx`, `WideCtx`,
-  `SimpleCtx`) covers every `Expr`-tree position except `.lam`. See
-  `LeanBlack/Ctx.lean`, `LeanBlack/ContextualBeta.lean`,
-  `LeanBlack/HeapAgree.lean`, `LeanBlack/EvalFuelMono.lean`, and
-  `TUTORIAL.md` §12.
+- **Contextual β excludes `.lam` positions.** `contextual_beta_pure`
+  covers every `Expr` position except under a binder, for pure
+  operands and pure pre-hole siblings (`SCOPE.md` has the precise
+  qualifiers). The `.lam` case — congruence under a closure body —
+  needs an up-to-bisim equivalence (`ValVis`-style, Howe-flavored)
+  rather than outcome equality, threaded through `eval` by the L4
+  parallel-bisim induction. That is the one remaining piece of the
+  full contextual statement.
 - **No public recursive proof-based policy-installation theorem.**
   lean-sage mechanizes multi-level reflective modification of
   `base-apply` and operationally includes per-level policy
@@ -228,10 +254,17 @@ A confident summary of what is and is not claimed. See
 | `LeanBlack/IdentityDelegate.lean` | `identityDelegate_CE_of_closure` + `identityDelegateApproval` — concrete second link in a CE chain |
 | `LeanBlack/Public.lean` | Single-file entry point exposing the headline API |
 
-**Contextual-β infrastructure** (in progress; supports the scope-extension of #4):
+**Contextual-β layer** (carries #7; `.lam` positions remain open):
 
-`LeanBlack/EvalFuelMono.lean`, `LeanBlack/Ctx.lean`,
-`LeanBlack/ContextualBeta.lean`, `LeanBlack/HeapAgree.lean`.
+| File | Carries |
+|------|---------|
+| `LeanBlack/EvalFuelMono.lean` | Fuel monotonicity (joint bump across the four eval functions) |
+| `LeanBlack/Ctx.lean` | Term contexts, `EvalEquiv` / `EvalEquivAt`, per-constructor congruences |
+| `LeanBlack/ContextualBeta.lean` | β base-case witness (`beta_letE_conv_equiv`), CE→β bridges, `BuiltinReady` |
+| `LeanBlack/HeapAgree.lean` | Selective-prefix CE (`CE_weak_strong_at`), post-admission multn certificate |
+| `LeanBlack/PureExt.lean` | `StateExtends`: pure evaluation only extends the state (the preservation engine) |
+| `LeanBlack/CtxPure.lean` | `PureCtx` (all non-`.lam` positions) + depth-indexed master congruence |
+| `LeanBlack/ContextualBetaPure.lean` | #7: `contextual_beta_pure`, `buildTower` readiness, start-state corollaries |
 
 For the theorem surface, start with
 [`LeanBlack/Public.lean`](LeanBlack/Public.lean).

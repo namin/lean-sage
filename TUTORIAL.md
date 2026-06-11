@@ -474,12 +474,12 @@ half (`multnExactPolicy` +
 For a single entry-point exposing just the public API, see
 [`LeanBlack/Public.lean`](LeanBlack/Public.lean).
 
-## 12. Beyond the basics — contextual β (in progress)
+## 12. Beyond the basics — contextual β
 
 The W1 statement in §8 is *convergent* obs-equivalence (M and N
-evaluate to the same value at the top level). Full *contextual*
-obs-equivalence — `∀ C : Expr → Expr, evalProgram (C[M]) =
-evalProgram (C[N])` — is in progress. The pieces:
+evaluate to the same value at the top level). The *contextual*
+lift is now proved for every `Expr` position except under `.lam`
+(§12.1 below). The supporting pieces:
 
 - [`LeanBlack/EvalFuelMono.lean`](LeanBlack/EvalFuelMono.lean) — fuel
   monotonicity for all four mutually-recursive eval functions. The
@@ -504,13 +504,56 @@ evalProgram (C[N])` — is in progress. The pieces:
   the admission moment (where the full-prefix premise breaks because
   the base-apply cell changes).
 
-The headline near-result: **`contextual_beta_easy`** (in `Ctx.lean`)
-— for any `EasyCtx` and any `(x, body, v_expr)`, `C.plug (β-redex)`
-and `C.plug (.letE)` are observationally equivalent at every state
-satisfying `BetaLetEReady v_expr`. This is the contextually-quantified
-β statement for the easy-context sub-language. What remains is
-threading the L4 parallel-bisim invariant through `eval` to lift to
-arbitrary contexts.
+The first contextually-quantified result on this track:
+**`contextual_beta_easy`** (in `ContextualBeta.lean`) — for any
+`EasyCtx` and any `(x, body, v_expr)`, `C.plug (β-redex)` and
+`C.plug (.letE)` are observationally equivalent at every state
+satisfying `BetaLetEReady v_expr`.
+
+### 12.1 The completed lift — `contextual_beta_pure`
+
+Three files carry the lift to arbitrary non-`.lam` contexts:
+
+- [`LeanBlack/PureExt.lean`](LeanBlack/PureExt.lean) —
+  `StateExtends T T'`: evaluating a `Pure` expression only
+  *extends* the state (heap appends, envs preserved verbatim,
+  level count monotone). Joint induction in the `EvalFuelBump`
+  style; purity bookkeeping consumed from `allPureIndep`. This is
+  the preservation engine: `BuiltinReady`-style predicates survive
+  any pure sibling evaluation.
+- [`LeanBlack/CtxPure.lean`](LeanBlack/CtxPure.lean) — `PureCtx`
+  (all thirteen non-`.lam` positions) and the master congruence
+  `PureCtx.plug_cong_family`, generic over a predicate family
+  `P : Nat → StatePred` indexed by *remaining `em`-depth margin*:
+  each `em` in the context trades one unit of margin for one level
+  (`EvalEquivAt.em_cong_shift`); every other constructor preserves
+  the index.
+- [`LeanBlack/ContextualBetaPure.lean`](LeanBlack/ContextualBetaPure.lean)
+  — the family `BuiltinReadyN d` / `BuiltinReadyP d`, the β base
+  case for arbitrary *pure* operands (state-only precondition: a
+  divergent operand makes both sides fail identically), and the
+  headline:
+
+  ```
+  contextual_beta_pure :
+    C.sidesPure → Pure v_expr →
+    EvalEquivAt (BuiltinReadyP C.emDepth)
+      (C.plug (.app [.lam [x] body, v_expr]))
+      (C.plug (.letE x v_expr body))
+  ```
+
+  plus the program-level corollaries at the canonical
+  pre-materialized start tower `buildTower (emDepth C + 2)`
+  (`contextual_beta_at_start`, `wand_beta_ctx_pure_at_start`),
+  which close the lazy-materialization gap: `buildTower`'s fresh
+  levels carry builtin `base-apply` cells by construction
+  (`buildTower_builtin`).
+
+What remains of the full contextual statement is the `.lam`
+position only — congruence under a closure body — which needs an
+up-to-bisim outcome relation (`ValVis` refined to permit β-related
+bodies, Howe-style) threaded through `eval` by the L4
+parallel-bisim induction. See `SCOPE.md`.
 
 ## 13. Reading order for the source
 
