@@ -63,7 +63,7 @@ For exact scope (what is and is not claimed), [`SCOPE.md`](SCOPE.md).
 | CE preservation under reflective programs | `eval_tower_safe` (`LeanBlack/Soundness.lean`) |
 | Composition of admissions | `CE_weak_strong_trans` (`LeanBlack/Compose.lean`), `identityDelegateApproval` (`LeanBlack/IdentityDelegate.lean`), `ProofBasedSmoke` Scene 10 |
 | β-equivalence under gated reflection (Wand point) | `wand_defeated_existential_gated_beta` (`LeanBlack/ProofBased.lean`) — convergent / top-level — and `contextual_beta_pure` (`LeanBlack/ContextualBetaPure.lean`) — **contextual, every `Expr` position except under `.lam`** |
-| Reflective depth | Multi-level `set! base-apply`: `Smoke` Scene 3, `Demos` Scenes 6 and 11, `ProofBasedSmoke` Scenes 7 and 9. Operational per-level policy via `installPolicy`: `Smoke` Scene 4, `Demos` Scene 11. |
+| Reflective depth | Multi-level `set! base-apply`: `Smoke` Scene 3, `Demos` Scenes 6 and 11, `ProofBasedSmoke` Scenes 7 and 9. Operational per-level policy via `installPolicy`: `Smoke` Scene 4, `Demos` Scene 11. Admission-event-level chain composition across kernel-built gate swaps: `LeanBlack/GovChain.lean` (see §6a and `SCOPE.md`). |
 
 ## The seven user-facing results
 
@@ -165,11 +165,60 @@ CE_weak_strong_trans   (LeanBlack/Compose.lean)
 
 The conservative-extension relation between apply values is
 transitive: if `v_a → v_b` and `v_b → v_c` are each `CE_weak_strong`,
-then `v_a → v_c` is `CE_weak_strong`. Combined with #5, this gives
-the abstract's *global property across composed admissions*: any
-chain of approved admissions at a level yields a final apply value
-that is CE-related back to `bbApply`. Underlying lemma:
-`ValVis_aux_weak_trans` (depth-indexed value-bisim transitivity).
+then `v_a → v_c` is `CE_weak_strong` — *at a common reference heap*.
+Underlying lemma: `ValVis_aux_weak_trans` (depth-indexed value-bisim
+transitivity).
+
+The common-reference-heap proviso matters: on a chain of two *real*
+installs it is never satisfied, because each admission rewrites the
+`base-apply` cell that the previous full-prefix snapshot pins
+(`fullPrefix_certs_conflict` in `ProofBasedSmoke.lean` proves this
+on the worked chain). The abstract's *global property across
+composed admissions* is therefore delivered by the selective layer
+in §6a, instantiated on the worked chain by
+`chainCertsFire_post_chain` + `chain_CE` and exercised at runtime by
+`ProofBasedSmoke` Scene 11.
+
+#### 6a. Composition that survives real admission sequences
+
+```
+ApprovedModificationAt / approvedPolicyAt   (LeanBlack/GovChain.lean)
+chain_CE                                    (n-link composition)
+```
+
+`CE_weak_strong_trans` composes two certificates *at a common
+reference heap* — but every admission rewrites the `base-apply`
+cell, so full-prefix certificates from two successive real
+admissions can never fire at a common test state
+(`fullPrefix_certs_conflict`, proved on the worked chain).
+`GovChain.lean` closes this with the **selective admission layer**:
+approvals whose certificates pin only the cells they read
+(`CE_weak_strong_at`), which therefore survive later installs, and
+`chain_CE`, which composes any number of them at per-link
+snapshots. Concrete links: `multnApprovalAt` and
+`identityDelegateApprovalAt`; runtime inversions for the `.set` and
+`installPolicy` clauses tie admission steps to the substrate per
+step.
+
+Instantiated on the worked chain
+`bbApply → multn → identity-delegate`:
+`chainCertsFire_post_chain` (`ProofBasedSmoke.lean`) proves the
+selective chain's firing condition at the post-chain heap and any
+extension, so `chain_CE` yields the composed conservative extension
+there. `ProofBasedSmoke` Scene 11 runs the contrast: the selective
+gate admits both steps and refuses garbage; the full-prefix
+snapshot check is broken post-install while the selective cells
+survive. (Scene-level concrete side conditions use `native_decide`,
+per that file's house style; the `GovChain.lean` machinery itself is
+axiom-clean.)
+
+The packaged corollary `govReach_CE` additionally quantifies over
+interleavings of admissions and gate replacements. Cite it with its
+assumptions: replacement-gate soundness is a hypothesis (discharged
+by construction only for kernel-built `approvedPolicyAt` gates),
+the chain's firing condition is a per-instance obligation, and it
+is an admission-event-level statement, not a whole-program-trace
+theorem — see `SCOPE.md`.
 
 ## What this backs (vs. the LICS abstract)
 
@@ -183,7 +232,7 @@ The artifact is the highlighted instance in
 | Evidence kind      | Kernel-checked Lean proof (`CE_weak_strong`)                           |
 | Policy             | Per-modification conservative extension                                |
 | Guarantee          | Substrate is always a conservative extension of the base               |
-| Reflective depth   | Multi-level `(em (em (set! ...)))` modifies deeper levels (proved); `installPolicy` is operational at every level |
+| Reflective depth   | Multi-level `(em (em (set! ...)))` modifies deeper levels (proved); `installPolicy` is operational at every level (admission-event-level composition across gate swaps: §6a) |
 
 CakeML-style value bisimulation (Kumar 2016 §3) underwrites the CE
 proofs: closures are related pointwise through their captured
@@ -216,13 +265,16 @@ A confident summary of what is and is not claimed. See
   rather than outcome equality, threaded through `eval` by the L4
   parallel-bisim induction. That is the one remaining piece of the
   full contextual statement.
-- **No public recursive proof-based policy-installation theorem.**
-  lean-sage mechanizes multi-level reflective modification of
-  `base-apply` and operationally includes per-level policy
-  installation via `installPolicy`. The public theorem surface does
-  not currently expose a recursive proof-based theorem for
-  installing new gate policies through higher gates — the headline
-  theorems quantify over a fixed `verifiedTable`.
+- **No strong proof-based gate-modifies-gate theorem.** The
+  "gate modifiable through the gate one level up" axis is backed
+  operationally, plus admission-event-level chain composition
+  (§6a). `govReach_CE` assumes each replacement gate's soundness
+  (free only for kernel-built gates) and is not a
+  whole-program-trace theorem: the `eval_tower_safe` induction
+  threads the strict `CE` relation, which proof-bearing gates
+  cannot satisfy (multn itself is the counterexample). A
+  weak-relation analog of the full `all_tower_safe` induction is
+  the real target and remains future work; see `SCOPE.md`.
 
 ## File map
 
@@ -265,6 +317,12 @@ A confident summary of what is and is not claimed. See
 | `LeanBlack/PureExt.lean` | `StateExtends`: pure evaluation only extends the state (the preservation engine) |
 | `LeanBlack/CtxPure.lean` | `PureCtx` (all non-`.lam` positions) + depth-indexed master congruence |
 | `LeanBlack/ContextualBetaPure.lean` | #7: `contextual_beta_pure`, `buildTower` readiness, start-state corollaries |
+
+**Chain-composition layer** (supports #6, see §6a):
+
+| File | Carries |
+|------|---------|
+| `LeanBlack/GovChain.lean` | Selective admission (`ApprovedModificationAt` / `approvedPolicyAt`), chain composition (`chain_CE`), runtime inversions for `.set` / `installPolicy`, concrete links (`multnApprovalAt`, `identityDelegateApprovalAt`), and the packaged `GovReach` corollary (assumptions in §6a) |
 
 For the theorem surface, start with
 [`LeanBlack/Public.lean`](LeanBlack/Public.lean).

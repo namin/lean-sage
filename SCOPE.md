@@ -23,6 +23,11 @@ Black-style reflective tower. Seven theorems form the public surface
 | `LeanBlack.CE_weak_strong_trans` | `LeanBlack/Compose.lean` | Composition: chained admissions yield CE substrates. |
 | `contextual_beta_pure` | `LeanBlack/ContextualBetaPure.lean` | Contextual β: redex ≡ contractum in every `Expr` position except under `.lam` (see scope below). |
 
+In support of the composition theorem (`CE_weak_strong_trans`),
+[`LeanBlack/GovChain.lean`](LeanBlack/GovChain.lean) adds the
+selective admission layer and chain composition — see "Reflective
+depth" below for what it does and does not establish.
+
 All theorems are kernel-checked with no `sorry`, `admit`, or `axiom`
 declarations (standard `propext` / `Classical.choice` / `Quot.sound`
 only). Toolchain: `leanprover/lean4:v4.20.0`.
@@ -130,39 +135,80 @@ lean-sage also includes **operational per-level policy
 installation** via `(installPolicy n)`, exercised by `Smoke` Scene 4
 and `Demos` Scene 11.
 
+On the proof-based side,
+[`LeanBlack/GovChain.lean`](LeanBlack/GovChain.lean) strengthens the
+*composition* story so it applies to real admission sequences:
+
+- **Selective admission** (`ApprovedModificationAt` /
+  `approvedPolicyAt`): the certificate pins only the cells it reads
+  (`CE_weak_strong_at`). This matters because full-prefix
+  certificates from successive admissions can never fire at a
+  common test state — each admission rewrites the `base-apply`
+  cell — so without selectivity, `CE_weak_strong_trans` cannot be
+  applied to an actual chain of two or more installs.
+- **Chain composition** (`chain_CE`): n links at per-link
+  snapshots compose, at any test state agreeing with each link's
+  cells.
+- **Runtime inversions**: every committed `.set` factors as one
+  admission step (`eval_set_inverts` / `eval_set_commit_govStep`);
+  every committed `installPolicy` selects a table entry
+  (`eval_installPolicy_inverts`).
+- A packaged corollary (`GovReach` / `govReach_CE`) quantifies over
+  interleavings of admissions and gate replacements.
+
 ## Reflective depth: what is NOT claimed
 
-The public theorem surface does not currently expose a recursive
-proof-based theorem for installing new gate policies through higher
-gates. In other words: although `(installPolicy n)` operationally
-exists and is reachable through `(em ...)`-chains, there is no
-public lemma quantifying over an arbitrary chain of higher-gate
-proof-based admissions of new policies. The headline theorems
-quantify over a fixed `verifiedTable`, and the
-"policy at level *N* is itself reflectively modifiable" axis from the
-reasonable-reflection abstract is captured operationally by
-multi-level `set!`-on-`base-apply` plus `installPolicy`, not by a
-recursive proof-based policy-installation theorem.
+The "gate is itself modifiable through the gate one level up" axis
+remains backed **operationally** (multi-level `set!` +
+`installPolicy`, with `eval_tower_safe` covering strictly-sound
+tables), **not** by a strong proof-based theorem. Precisely:
 
-This is a deliberate scoping decision, not an oversight: the recursive
-proof-based policy-installation theorem would compose
-`approvedPolicy_soundForCE_weak_strong` across a quantified chain of
-higher gates, which is future work.
+- `govReach_CE`'s `regate` rule *assumes* each replacement gate is
+  sound; the assumption is discharged by construction only for
+  kernel-built `approvedPolicyAt` gates
+  (`approvedPolicyAt_SoundForCEAt` — no such gate exists without
+  kernel-checked certificates). The theorem does not derive gate
+  soundness from a gated check one level up.
+- The chain's firing condition at a test state (`CertsFire`) is a
+  per-instance obligation, discharged for the concrete links here
+  by the fresh-cells discipline, not in general.
+- There is no whole-program-trace theorem for proof-bearing tables.
+  The obstruction is principled: proof-bearing gates are sound for
+  `CE_weak_strong` (weak bisimilar results, content-prefix-bound
+  certificates) and cannot be sound for the strict `CE` that the
+  `eval_tower_safe` induction threads — the multn worked example
+  itself is the counterexample. A weak-relation analog of the full
+  `all_tower_safe` induction is the real target and remains future
+  work.
 
-## Composition: first install + identity-delegate, not arbitrary chain
+## Composition: how the chain actually composes
 
 The structural multn soundness theorem
 `multnExact_soundForCE_first_install_tower` covers
-`oldVal = .builtinBaseApply` — the first-install case. Composition
-across admissions is supplied separately by `CE_weak_strong_trans`
-(in `LeanBlack/Compose.lean`) together with a concrete second link
-`identityDelegateApproval` (in `LeanBlack/IdentityDelegate.lean`).
-`ProofBasedSmoke` Scene 10 exercises the full chain
-`bbApply → multn → identity-delegate-on-multn` end-to-end.
+`oldVal = .builtinBaseApply` — the first-install case.
+`ProofBasedSmoke` Scene 10 exercises the two-install chain
+`bbApply → multn → identity-delegate-on-multn` end-to-end at
+runtime.
+
+For the *composed* guarantee on that chain, `CE_weak_strong_trans`
+(in `LeanBlack/Compose.lean`) alone does not suffice: it composes
+two certificates at a common reference heap, and the two
+full-prefix approvals' snapshots provably conflict at the
+`base-apply` cell (`fullPrefix_certs_conflict`,
+`ProofBasedSmoke.lean`) — no test state extends both. The composed
+guarantee is delivered by the selective layer
+(`LeanBlack/GovChain.lean`): the selective re-renders of the same
+two approvals pin only the cells their proofs read, the chain's
+firing condition holds at the post-chain heap and any extension
+(`chainCertsFire_post_chain`), and `chain_CE` then gives the
+composed conservative extension `bbApply → identity-delegate`.
+`ProofBasedSmoke` Scene 11 runs the contrast. (Scene-level concrete
+side conditions use `native_decide`, per that file's house style;
+the `GovChain.lean` machinery is axiom-clean.)
 
 Stronger non-trivial wrappers (`multn → logging-multn`, etc.) would
-need their own `CE_weak_strong` proofs but slot into the same chain
-machinery.
+need their own `CE_weak_strong_at` proofs but slot into the same
+chain machinery.
 
 ## Summary table — paper claim ↔ artifact backing
 
@@ -173,4 +219,4 @@ machinery.
 | The gate is load-bearing — without it, CE fails. | `safeEvolution_necessary` + `ProofBasedSmoke` Scene 4. |
 | β-equivalence survives gated reflection. | `wand_defeated_existential_gated_beta` (convergent / top-level) + `contextual_beta_pure` (every `Expr` position except under `.lam`; pure operand and pure pre-hole siblings — see above). |
 | Modifications compose. | `CE_weak_strong_trans` + `identityDelegateApproval` + `ProofBasedSmoke` Scene 10. |
-| Reflective depth: per-level modification, governed. | Multi-level `set! base-apply` proved sound via `eval_tower_safe`; `installPolicy` operational; no public recursive proof-based policy-installation theorem. |
+| Reflective depth: per-level modification, governed. | Multi-level `set! base-apply` proved sound via `eval_tower_safe`; `installPolicy` operational. Proof-based admission chains compose across kernel-built gate swaps at the admission-event level (`GovChain.lean`); a strong proof-based gate-modifies-gate theorem (whole-program-trace, derived gate soundness) remains future work — see above. |

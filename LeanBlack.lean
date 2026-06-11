@@ -14,4 +14,5 @@ import LeanBlack.ContextualBeta
 import LeanBlack.PureExt
 import LeanBlack.CtxPure
 import LeanBlack.ContextualBetaPure
+import LeanBlack.GovChain
 import LeanBlack.Public

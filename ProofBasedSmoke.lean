@@ -78,6 +78,7 @@ import LeanBlack.Tower
 import LeanBlack.Eval
 import LeanBlack.ProofBased
 import LeanBlack.IdentityDelegate
+import LeanBlack.GovChain
 
 open LeanBlack
 
@@ -783,6 +784,178 @@ def test_chain_step2_refuses_doubling : Bool :=
   approvedPolicy chainApprovals chainStep2Ctx
     runtimeMultnClosureLevel1 doubling
 
+/-! ## Scene 11: the chain *composes* — selective approvals
+
+Scene 10 shows both admissions *happen*; this scene addresses
+whether the composed guarantee (`bbApply → … → final value` is CE)
+can actually be instantiated on them.
+
+**Negative half** (`fullPrefix_certs_conflict`, kernel-checked): the
+two full-prefix approvals' snapshots disagree at the base-apply cell
+(index 27: `bbApply` in step 1's snapshot, multn in step 2's), so no
+test state content-extends both — `CE_weak_strong_trans` can never
+be applied to this chain. The full-prefix composition story is
+vacuous on real chains.
+
+**Positive half** (`chainCertsFire_post_chain`): the *selective*
+re-renders of the same two approvals (`GovChain.lean`) pin only the
+cells their proofs read — {28 (orig), 18 (num?)} and {29 (orig)} —
+all disjoint from the base-apply cell 27. They survive both
+installs, the chain's firing condition holds at the post-chain heap
+(and any extension), and `chain_CE` yields the composed conservative
+extension. Concrete-data side conditions in this scene are
+discharged by `native_decide`, matching this file's house style
+(`h_admit_multn_level1`); the chain machinery itself
+(`LeanBlack/GovChain.lean`) is axiom-clean. -/
+
+/-- multn's captured `orig` cell. -/
+theorem runtimeMultn_shape_orig :
+    ∃ ps body cenv, runtimeMultnClosureLevel1 = .closure ps body cenv ∧
+      cenv.lookup "orig" = some 28 :=
+  ⟨["op", "args"], multnWrapperBody, runtimeCenvLevel1, rfl, by native_decide⟩
+
+/-- multn's captured `num?` cell. -/
+theorem runtimeMultn_shape_numq :
+    ∃ ps body cenv, runtimeMultnClosureLevel1 = .closure ps body cenv ∧
+      cenv.lookup "num?" = some 18 :=
+  ⟨["op", "args"], multnWrapperBody, runtimeCenvLevel1, rfl, by native_decide⟩
+
+/-- Step 1's approval, selective edition: pins cells 28 and 18 only. -/
+def runtimeMultnApprovalAtLevel1 : ApprovedModificationAt :=
+  multnApprovalAt 1 runtimeHeapLevel1 .nil .nil 27
+    runtimeMultnClosureLevel1 h_admit_multn_level1
+    28 18 runtimeMultn_shape_orig runtimeMultn_shape_numq
+
+/-- Step 2's approval, selective edition: pins cell 29 only. -/
+def runtimeIdentityDelegateApprovalAt : ApprovedModificationAt :=
+  identityDelegateApprovalAt 1 chainHeapAtStep2Admission
+    runtimeIdentityDelegateCenv (level1Heap.length + 1)
+    runtimeMultnClosureLevel1
+    chainHeapAtStep2Admission_multn_not_bbApply
+    chainHeapAtStep2Admission_cenv_lookup_orig
+    chainHeapAtStep2Admission_lookup_orig
+
+/-- The chain, as `GovChain.lean` links. -/
+def chainCertsAt : List (AdmissionCert 1) :=
+  [runtimeMultnApprovalAtLevel1.toCert, runtimeIdentityDelegateApprovalAt.toCert]
+
+/-- The links form a chain `bbApply → multn → identity-delegate`. -/
+theorem chainCertsAt_chainOk :
+    ChainOk 1 chainCertsAt .builtinBaseApply runtimeIdentityDelegateClosure :=
+  ⟨rfl, rfl, rfl⟩
+
+/-- **Negative half.** No test state content-extends both full-prefix
+    snapshots: they disagree at the base-apply cell. So the
+    full-prefix composition (`CE_weak_strong_trans`) is vacuous on
+    this — or any — real two-install chain. -/
+theorem fullPrefix_certs_conflict :
+    ¬ ∃ h : Heap, HeapPrefix runtimeHeapLevel1 h ∧
+                  HeapPrefix chainHeapAtStep2Admission h := by
+  rintro ⟨h, h_pref1, h_pref2⟩
+  have h_len1 : (27 : Nat) < runtimeHeapLevel1.length := by native_decide
+  have h_len2 : (27 : Nat) < chainHeapAtStep2Admission.length := by native_decide
+  have h_cell1 : runtimeHeapLevel1[27]? = some .builtinBaseApply := by native_decide
+  have h_cell2 : chainHeapAtStep2Admission[27]? = some runtimeMultnClosureLevel1 := by
+    native_decide
+  have h_eq1 : runtimeHeapLevel1[27]? = h[27]? :=
+    HeapPrefix.getElem? h_pref1 27 h_len1
+  have h_eq2 : chainHeapAtStep2Admission[27]? = h[27]? :=
+    HeapPrefix.getElem? h_pref2 27 h_len2
+  have h_contra : some Val.builtinBaseApply = some runtimeMultnClosureLevel1 := by
+    rw [← h_cell1, h_eq1, ← h_eq2, h_cell2]
+  exact Val.noConfusion (Option.some.inj h_contra)
+
+/-- Heap after step 2's `.set` commits (cell 27 becomes the
+    identity-delegate closure). -/
+def chainHeapAfterStep2Set : Heap :=
+  chainHeapAtStep2Admission.set 27 runtimeIdentityDelegateClosure
+
+/-- **Positive half.** The selective chain's firing condition holds
+    at the post-chain heap and any extension of it: every link's
+    cells survived both installs. (The `ValValid` components are the
+    standard well-formedness of the two closures at the test state,
+    supplied as hypotheses.) -/
+theorem chainCertsFire_post_chain
+    (T : TowerState) (extras : Heap)
+    (h_heap : T.heap = chainHeapAfterStep2Set ++ extras)
+    (h_vv_multn : ValValid runtimeMultnClosureLevel1 T.heap)
+    (h_vv_delegate : ValValid runtimeIdentityDelegateClosure T.heap) :
+    CertsFire 1 chainCertsAt T := by
+  intro cert h_mem
+  have h_agree1 : HeapAgreeAt [28, 18] runtimeHeapLevel1 chainHeapAfterStep2Set := by
+    intro i hi
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hi
+    rcases hi with rfl | rfl <;> native_decide
+  have h_agree2 : HeapAgreeAt [level1Heap.length + 1] chainHeapAtStep2Admission
+      chainHeapAfterStep2Set := by
+    intro i hi
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hi
+    subst hi
+    native_decide
+  have h_bound1 : ∀ i ∈ [28, 18], i < chainHeapAfterStep2Set.length := by
+    intro i hi
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hi
+    rcases hi with rfl | rfl <;> native_decide
+  have h_bound2 : ∀ i ∈ [level1Heap.length + 1],
+      i < chainHeapAfterStep2Set.length := by
+    intro i hi
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hi
+    subst hi
+    native_decide
+  have h_len1 : runtimeHeapLevel1.length ≤ chainHeapAfterStep2Set.length := by
+    native_decide
+  have h_len2 : chainHeapAtStep2Admission.length ≤ chainHeapAfterStep2Set.length := by
+    native_decide
+  simp only [chainCertsAt, List.mem_cons, List.mem_singleton] at h_mem
+  rcases h_mem with rfl | rfl | h_absurd
+  · -- multn link: cells 28 and 18.
+    refine ⟨?_, ?_, h_vv_multn⟩
+    · show runtimeHeapLevel1.length ≤ T.heap.length
+      rw [h_heap, List.length_append]
+      omega
+    · show HeapAgreeAt [28, 18] runtimeHeapLevel1 T.heap
+      rw [h_heap]
+      exact HeapAgreeAt.append_right extras h_agree1 h_bound1
+  · -- delegate link: cell 29.
+    refine ⟨?_, ?_, h_vv_delegate⟩
+    · show chainHeapAtStep2Admission.length ≤ T.heap.length
+      rw [h_heap, List.length_append]
+      omega
+    · show HeapAgreeAt [level1Heap.length + 1] chainHeapAtStep2Admission T.heap
+      rw [h_heap]
+      exact HeapAgreeAt.append_right extras h_agree2 h_bound2
+  · cases h_absurd
+
+/-! Runtime booleans for the scene: the selective gate admits both
+steps of the chain (and still refuses garbage), and the two
+`matches`-components that distinguish the disciplines evaluate the
+way the theorems say. -/
+
+def selectiveChainApprovals : List ApprovedModificationAt :=
+  [runtimeMultnApprovalAtLevel1, runtimeIdentityDelegateApprovalAt]
+
+def test_sel_step1_admit : Bool :=
+  approvedPolicyAt selectiveChainApprovals chainStep1Ctx
+    .builtinBaseApply runtimeMultnClosureLevel1
+
+def test_sel_step2_admit : Bool :=
+  approvedPolicyAt selectiveChainApprovals chainStep2Ctx
+    runtimeMultnClosureLevel1 runtimeIdentityDelegateClosure
+
+def test_sel_step2_refuses_doubling : Bool :=
+  let doubling : Val := .closure ["op", "args"] (.var "op") .nil
+  approvedPolicyAt selectiveChainApprovals chainStep2Ctx
+    runtimeMultnClosureLevel1 doubling
+
+/-- The full-prefix snapshot check, evaluated at the post-install
+    heap: broken (the base-apply cell changed). -/
+def test_fullprefix_snapshot_broken : Bool :=
+  decide (runtimeHeapLevel1 = chainHeapAtStep2Admission.take runtimeHeapLevel1.length)
+
+/-- The selective cells check, evaluated at the same heap: intact. -/
+def test_selective_cells_survive : Bool :=
+  [28, 18].all (cellAgreesB runtimeHeapLevel1 chainHeapAtStep2Admission)
+
 def main : IO Unit := do
   IO.println "Scene 1: proof-bearing admission — identity mod ADMITTED"
   runOne "(em (set! base-apply base-apply)) ⇒ bool(true)"
@@ -843,3 +1016,10 @@ def main : IO Unit := do
   IO.println s!"  {if test_chain_step1_admit then "OK " else "XX "} step 1 (bbApply → multn): expected true, got {test_chain_step1_admit}"
   IO.println s!"  {if test_chain_step2_admit then "OK " else "XX "} step 2 (multn → identity-delegate): expected true, got {test_chain_step2_admit}"
   IO.println s!"  {if test_chain_step2_refuses_doubling then "XX " else "OK "} step 2 refuses doubling (no matching approval): expected false, got {test_chain_step2_refuses_doubling}"
+  IO.println ""
+  IO.println "Scene 11: the chain composes — selective approvals (GovChain)"
+  IO.println s!"  {if test_sel_step1_admit then "OK " else "XX "} selective gate admits step 1 (bbApply → multn): expected true, got {test_sel_step1_admit}"
+  IO.println s!"  {if test_sel_step2_admit then "OK " else "XX "} selective gate admits step 2 (multn → identity-delegate): expected true, got {test_sel_step2_admit}"
+  IO.println s!"  {if test_sel_step2_refuses_doubling then "XX " else "OK "} selective gate refuses doubling: expected false, got {test_sel_step2_refuses_doubling}"
+  IO.println s!"  {if test_fullprefix_snapshot_broken then "XX " else "OK "} full-prefix snapshot BROKEN post-install (cell 27 changed): expected false, got {test_fullprefix_snapshot_broken}"
+  IO.println s!"  {if test_selective_cells_survive then "OK " else "XX "} selective cells (28, 18) SURVIVE post-install: expected true, got {test_selective_cells_survive}"

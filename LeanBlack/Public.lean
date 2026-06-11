@@ -4,6 +4,7 @@ import LeanBlack.ProofBased
 import LeanBlack.Compose
 import LeanBlack.IdentityDelegate
 import LeanBlack.ContextualBetaPure
+import LeanBlack.GovChain
 
 /-!
 # Public — entry-point exposing the headline API
@@ -55,6 +56,30 @@ all seven are accessible by their short names.
 | `identityApproval`                  | Identity approval (self-replacement, any Val).     |
 | `numIdentityApproval`               | Identity at a `.num n` value (vacuous template).   |
 | `identityDelegateApproval`          | Identity-delegate-on-closure (chain second link).  |
+
+Supporting layer for #6 (`GovChain.lean`, all in the `LeanBlack`
+namespace) — composition across *real* admission sequences:
+
+- `ApprovedModificationAt` / `approvedPolicyAt` — proof-bearing
+  admission in *selective* form: the certificate pins only the cells
+  it reads (`CE_weak_strong_at`), so it stays consumable after later
+  admissions rewrite the `base-apply` cell. Full-prefix approvals
+  from successive admissions can never fire at a common test state,
+  so this is what lets `CE_weak_strong_trans`-style composition
+  apply to an actual chain at all;
+- `chain_CE` — n-link composition of selective certificates at
+  per-link snapshots;
+- `GovReach` / `govReach_CE` — a packaged corollary quantifying
+  over interleavings of admissions and gate replacements. Read its
+  assumptions before citing it: each replacement gate's soundness
+  is a hypothesis of the step (discharged by construction only for
+  kernel-built `approvedPolicyAt` gates), and the chain's firing
+  condition at a test state (`CertsFire`) is a per-instance
+  obligation. It is an admission-event-level statement, not a
+  whole-program-trace theorem — see `SCOPE.md`;
+- `eval_set_inverts` / `eval_installPolicy_inverts` and their
+  corollaries — mechanized inversions of the two mutation clauses,
+  tying abstract steps to the runtime per step.
 
 ## Contextual-β support types (root namespace)
 
