@@ -98,14 +98,22 @@ lemmas, and the thirteen strict per-constructor congruence lemmas
 `sidesOK S`; the `em`-descent hypothesis is demanded only of
 contexts that actually `em`-nest.
 
-**Two `matches` disciplines.** `ApprovedModification.matches`
-(content-prefix) and `ApprovedModificationAt.matches` (per-cell)
-could collapse into the selective form with `indices := range`;
-kept separate for now because the full-prefix form is what the
-existing scenes and `approvedPolicy_soundForCE_weak_strong` consume.
-Candidate follow-up. (The certificate layer itself is already
-unified: the selective proof is the primitive, the full-prefix
-certificate a corollary via `CE_weak_strong_of_at`.)
+**Two `matches` disciplines — RESOLVED (by theorem).** The
+full-prefix admission discipline is *provably* the
+`indices := List.range` instance of the selective one, at every
+layer (`GovChain.lean`): relation
+(`HeapPrefix_iff_agree_range`), certificate
+(`CE_weak_strong_iff_at_range`), matcher
+(`ApprovedModification.toAt_matches` — Boolean equality, so the two
+gates agree decision-for-decision), and gate
+(`approvedPolicy_eq_at` : `approvedPolicy ams =
+approvedPolicyAt (ams.map toAt)`, pointwise as functions). The two
+structures are kept for their distinct *statement* roles
+(single-admission vs. chain link), but they are one discipline, and
+the kernel has checked that.
+
+With both items resolved, the remaining complexity in this repo is
+the theorem-forced kind catalogued above.
 
 ## Where the open problems live
 

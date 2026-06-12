@@ -269,6 +269,96 @@ def ApprovedModificationAt.toCert (am : ApprovedModificationAt) :
   { indices := am.indices, heap := am.heap,
     oldVal := am.oldVal, newVal := am.newVal, proof := am.proof }
 
+/-! ## The full-prefix discipline is the `range` instance
+
+`ApprovedModification` (`ProofBased.lean`) and its gate
+`approvedPolicy` are not a second discipline: full-prefix is
+*provably* the `indices := List.range` instance of selective, at
+every layer — relation (`HeapPrefix_iff_agree_range`), certificate
+(`CE_weak_strong_iff_at_range`), matcher (Boolean equality
+`ApprovedModification.toAt_matches`), and gate
+(`approvedPolicy_eq_at`). -/
+
+/-- `HeapPrefix` is exactly length-bound plus agreement on the full
+    index range. -/
+theorem HeapPrefix_iff_agree_range (h₁ h₂ : Heap) :
+    HeapPrefix h₁ h₂ ↔
+      (h₁.length ≤ h₂.length ∧ HeapAgreeAt (List.range h₁.length) h₁ h₂) := by
+  constructor
+  · intro h_pref
+    refine ⟨HeapPrefix.length_le h_pref, ?_⟩
+    exact HeapPrefix.toHeapAgreeAt h_pref (fun i hi => List.mem_range.mp hi)
+  · rintro ⟨h_len, h_agree⟩
+    show h₁ = h₂.take h₁.length
+    apply List.ext_getElem?
+    intro i
+    rw [List.getElem?_take]
+    split
+    · exact h_agree i (List.mem_range.mpr ‹_›)
+    · exact List.getElem?_eq_none (Nat.le_of_not_lt ‹_›)
+
+/-- The full-prefix certificate is the `range` instance of the
+    selective one. (`CE_weak_strong_of_at` in `HeapAgree.lean` is
+    the ← direction generalized to any in-bounds index set.) -/
+theorem CE_weak_strong_iff_at_range
+    {level : Nat} {h_ref : Heap} {old new : Val} :
+    CE_weak_strong level h_ref old new ↔
+      CE_weak_strong_at level (List.range h_ref.length) h_ref old new := by
+  constructor
+  · intro h fuel ptable op operands T r T' h_len h_agree
+    exact h fuel ptable op operands T r T'
+      ((HeapPrefix_iff_agree_range _ _).mpr ⟨h_len, h_agree⟩)
+  · intro h
+    exact CE_weak_strong_of_at (fun i hi => List.mem_range.mp hi) h
+
+/-- View a full-prefix approval as a selective approval over the
+    full index range. -/
+def ApprovedModification.toAt (am : ApprovedModification) :
+    ApprovedModificationAt :=
+  { level   := am.level
+    indices := List.range am.heap.length
+    heap    := am.heap
+    oldVal  := am.oldVal
+    newVal  := am.newVal
+    proof   := CE_weak_strong_iff_at_range.mp am.proof }
+
+/-- The two matchers agree decision-for-decision. -/
+theorem ApprovedModification.toAt_matches
+    (am : ApprovedModification) (ctx : MutationCtx) (oldVal newVal : Val) :
+    am.toAt.matches ctx oldVal newVal = am.matches ctx oldVal newVal := by
+  have hb : ∀ (a b : Bool), (a = true ↔ b = true) → a = b := by
+    intro a b h
+    cases a <;> cases b <;> simp_all
+  apply hb
+  unfold ApprovedModificationAt.matches ApprovedModification.matches
+            ApprovedModification.toAt
+  simp only [Bool.and_eq_true, decide_eq_true_eq, List.all_eq_true]
+  constructor
+  · rintro ⟨⟨⟨⟨h_lvl, h_len⟩, h_cells⟩, h_old⟩, h_new⟩
+    exact ⟨⟨⟨h_lvl, (HeapPrefix_iff_agree_range _ _).mpr
+      ⟨h_len, fun i hi => cellAgreesB_eq (h_cells i hi)⟩⟩, h_old⟩, h_new⟩
+  · rintro ⟨⟨⟨h_lvl, h_pref⟩, h_old⟩, h_new⟩
+    obtain ⟨h_len, h_agree⟩ := (HeapPrefix_iff_agree_range _ _).mp h_pref
+    refine ⟨⟨⟨⟨h_lvl, h_len⟩, fun i hi => ?_⟩, h_old⟩, h_new⟩
+    unfold cellAgreesB
+    rw [h_agree i hi]
+    cases ctx.heap[i]? with
+    | none => rfl
+    | some v => exact val_beq_self v
+
+/-- **The old gate is the new gate**: `approvedPolicy` is
+    `approvedPolicyAt` over the range-instance approvals —
+    pointwise equal as a `BlackPolicy`. -/
+theorem approvedPolicy_eq_at (ams : List ApprovedModification) :
+    approvedPolicy ams
+      = approvedPolicyAt (ams.map ApprovedModification.toAt) := by
+  funext ctx oldVal newVal
+  unfold approvedPolicy approvedPolicyAt
+  rw [List.any_map]
+  congr 1
+  funext am
+  exact (am.toAt_matches ctx oldVal newVal).symm
+
 /-- Soundness notion for gates in the selective discipline: every
     admission is backed by a selective certificate whose cells agree
     with the admission-moment heap. -/
