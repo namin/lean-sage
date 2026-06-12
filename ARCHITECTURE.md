@@ -81,28 +81,31 @@ underlying soundness theorems naturally produce.
 
 ## Accidental complexity (flagged, with plan)
 
-**Context-language tiers.** `Ctx`, `SimpleCtx`, `EasyCtx`,
-`WideCtx` (`Ctx.lean`) and `PureCtx` (`CtxPure.lean`) are growth
-rings of the contextual-β effort: each tier covers the positions
-whose congruence was provable with the preservation hypotheses
-available at the time. They differ only in (a) which positions are
-included and (b) what is demanded of pre-hole siblings. The
-consolidation target is one context language and one master
-congruence parameterized by a sibling class `S : Expr → Prop` and a
-predicate family: `S := fun _ => False` recovers the easy tier
-(contexts with no pre-hole siblings), `S := fun _ => True` the wide
-tier, `S := Pure` the pure tier, and the trivial predicate family
-recovers the unconditional (`SimpleCtx`) track. Until that refactor
-lands, treat `PureCtx.plug_cong_family` as the most general master
-and the others as historical scaffolding kept for their weaker
-hypotheses.
+**Context-language tiers — RESOLVED.** There is now exactly one
+context language (`Ctx`, `Ctx.lean`) and one master congruence
+(`Ctx.plug_cong_master`, `CtxPure.lean`), parameterized by a sibling
+class `S : Expr → Prop` and a predicate family indexed by remaining
+`em`-depth. The historical tiers are instantiations: the trivial
+family with `S := True` gives the unconditional strict track
+(`Ctx.plug_cong`); `S := fun _ => False` gives the easy tier
+(`Ctx.plug_cong_at_easy` — contexts with no pre-hole siblings, no
+hypotheses at all); `S := (Pure · = true)` with the `BuiltinReadyP`
+family gives contextual β (`contextual_beta_pure`). The former
+`SimpleCtx`/`EasyCtx`/`WideCtx`/`PureCtx` types, their four master
+lemmas, and the thirteen strict per-constructor congruence lemmas
+(~1,400 lines) are deleted. Side conditions on a context are
+`lamFree` (the one open position), `emDepth` (the family index), and
+`sidesOK S`; the `em`-descent hypothesis is demanded only of
+contexts that actually `em`-nest.
 
 **Two `matches` disciplines.** `ApprovedModification.matches`
 (content-prefix) and `ApprovedModificationAt.matches` (per-cell)
 could collapse into the selective form with `indices := range`;
 kept separate for now because the full-prefix form is what the
 existing scenes and `approvedPolicy_soundForCE_weak_strong` consume.
-Candidate follow-up to the context consolidation.
+Candidate follow-up. (The certificate layer itself is already
+unified: the selective proof is the primitive, the full-prefix
+certificate a corollary via `CE_weak_strong_of_at`.)
 
 ## Where the open problems live
 

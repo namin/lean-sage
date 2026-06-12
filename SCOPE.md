@@ -72,7 +72,7 @@ the proof-based admission setting.
 **The contextual lift is now proved for every `Expr` position except
 under `.lam`.** `contextual_beta_pure`
 ([`LeanBlack/ContextualBetaPure.lean`](LeanBlack/ContextualBetaPure.lean)):
-for any context `C` drawn from `PureCtx` (all thirteen hole-bearing
+for any lam-free context `C : Ctx` (all thirteen hole-bearing
 positions of the `Expr` tree except `.lam`'s body — including `.set`
 value positions, `.letE` bodies, and `.em`-nesting to any depth
 within the tower bound), any binder `x`, any body, and any *pure*
@@ -113,14 +113,15 @@ The precise scope qualifiers:
 
 The supporting machinery:
 [`LeanBlack/EvalFuelMono.lean`](LeanBlack/EvalFuelMono.lean) (fuel
-monotonicity), [`LeanBlack/Ctx.lean`](LeanBlack/Ctx.lean)
-(per-constructor congruences; `EasyCtx`/`WideCtx`/`SimpleCtx` are
-earlier tiers, kept because their preconditions are incomparable —
-they don't require heap purity),
+monotonicity), [`LeanBlack/Ctx.lean`](LeanBlack/Ctx.lean) (the one
+context language, observational equivalence, per-constructor
+congruences),
 [`LeanBlack/PureExt.lean`](LeanBlack/PureExt.lean) (`StateExtends`
 under pure evaluation, the preservation engine),
-[`LeanBlack/CtxPure.lean`](LeanBlack/CtxPure.lean) (`PureCtx` and the
-depth-indexed master congruence `PureCtx.plug_cong_family`), and
+[`LeanBlack/CtxPure.lean`](LeanBlack/CtxPure.lean) (the one master
+congruence `Ctx.plug_cong_master`, parameterized by sibling class
+and predicate family; the strict and easy tiers are its
+instantiations `Ctx.plug_cong` / `Ctx.plug_cong_at_easy`), and
 [`LeanBlack/ContextualBeta.lean`](LeanBlack/ContextualBeta.lean) /
 [`LeanBlack/HeapAgree.lean`](LeanBlack/HeapAgree.lean) (the β
 base-case witness and the post-admission CE bridges).

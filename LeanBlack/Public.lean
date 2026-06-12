@@ -85,7 +85,7 @@ namespace) — composition across *real* admission sequences:
 
 | Name                  | Purpose                                              |
 |-----------------------|------------------------------------------------------|
-| `LeanBlack.PureCtx`   | Contexts over every `Expr` position except `.lam`.   |
+| `LeanBlack.Ctx` + `Ctx.plug_cong_master` | THE context language and THE master congruence (sibling-class- and predicate-family-parameterized); tiers are instantiations. |
 | `BuiltinReadyN d`     | Depth-indexed readiness (margin `d` of `em`-nesting). |
 | `BuiltinReadyP d`     | `BuiltinReadyN d` bundled with heap purity.          |
 | `LeanBlack.StateExtends` | Structural state evolution under pure evaluation. |

@@ -494,11 +494,11 @@ lift is now proved for every `Expr` position except under `.lam`
   monotonicity for all four mutually-recursive eval functions. The
   arithmetic enabler for fuel-juggling inside the cross-side bisim
   and the contextual β bridges.
-- [`LeanBlack/Ctx.lean`](LeanBlack/Ctx.lean) — term contexts +
-  `EvalEquiv` observational equivalence + per-constructor
-  congruence lemmas. The clean half (`EasyCtx`, `WideCtx`,
-  `SimpleCtx`) covers every `Expr`-tree position except `.lam`,
-  which is deferred because of closure-syntactic refinement.
+- [`LeanBlack/Ctx.lean`](LeanBlack/Ctx.lean) — THE term-context
+  language (`Ctx`) + `EvalEquiv` / `EvalEquivAt` observational
+  equivalence + per-constructor congruence lemmas. Every
+  `Expr`-tree position except `.lam` is covered (the `.lam`
+  deferral is closure-syntactic refinement; see `SCOPE.md`).
 - [`LeanBlack/ContextualBeta.lean`](LeanBlack/ContextualBeta.lean) —
   operational β-redex factoring (`eval_beta_builtin`) and CE→β
   bridges (`ce_apply_bisim_builtin`,
@@ -515,9 +515,10 @@ lift is now proved for every `Expr` position except under `.lam`
 
 The first contextually-quantified result on this track:
 **`contextual_beta_easy`** (in `ContextualBeta.lean`) — for any
-`EasyCtx` and any `(x, body, v_expr)`, `C.plug (β-redex)` and
-`C.plug (.letE)` are observationally equivalent at every state
-satisfying `BetaLetEReady v_expr`.
+easy-tier context (lam-free, `em`-free, no pre-hole siblings) and
+any `(x, body, v_expr)`, `C.plug (β-redex)` and `C.plug (.letE)`
+are observationally equivalent at every state satisfying
+`BetaLetEReady v_expr` — with no preservation hypotheses at all.
 
 ### 12.1 The completed lift — `contextual_beta_pure`
 
@@ -530,13 +531,15 @@ Three files carry the lift to arbitrary non-`.lam` contexts:
   style; purity bookkeeping consumed from `allPureIndep`. This is
   the preservation engine: `BuiltinReady`-style predicates survive
   any pure sibling evaluation.
-- [`LeanBlack/CtxPure.lean`](LeanBlack/CtxPure.lean) — `PureCtx`
-  (all thirteen non-`.lam` positions) and the master congruence
-  `PureCtx.plug_cong_family`, generic over a predicate family
+- [`LeanBlack/CtxPure.lean`](LeanBlack/CtxPure.lean) — THE master
+  congruence `Ctx.plug_cong_master`, parameterized by a sibling
+  class `S : Expr → Prop` and a predicate family
   `P : Nat → StatePred` indexed by *remaining `em`-depth margin*:
   each `em` in the context trades one unit of margin for one level
   (`EvalEquivAt.em_cong_shift`); every other constructor preserves
-  the index.
+  the index. The strict and easy tiers are its instantiations
+  (`Ctx.plug_cong`, `Ctx.plug_cong_at_easy`); contextual β is the
+  `S := Pure` instantiation.
 - [`LeanBlack/ContextualBetaPure.lean`](LeanBlack/ContextualBetaPure.lean)
   — the family `BuiltinReadyN d` / `BuiltinReadyP d`, the β base
   case for arbitrary *pure* operands (state-only precondition: a
@@ -545,7 +548,7 @@ Three files carry the lift to arbitrary non-`.lam` contexts:
 
   ```
   contextual_beta_pure :
-    C.sidesPure → Pure v_expr →
+    C.lamFree → C.sidesOK (Pure · = true) → Pure v_expr →
     EvalEquivAt (BuiltinReadyP C.emDepth)
       (C.plug (.app [.lam [x] body, v_expr]))
       (C.plug (.letE x v_expr body))

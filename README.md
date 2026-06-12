@@ -327,7 +327,7 @@ A confident summary of what is and is not claimed. See
 | `LeanBlack/ContextualBeta.lean` | β base-case witness (`beta_letE_conv_equiv`), CE→β bridges, `BuiltinReady` |
 | `LeanBlack/HeapAgree.lean` | Selective-prefix CE (`CE_weak_strong_at`), post-admission multn certificate |
 | `LeanBlack/PureExt.lean` | `StateExtends`: pure evaluation only extends the state (the preservation engine) |
-| `LeanBlack/CtxPure.lean` | `PureCtx` (all non-`.lam` positions) + depth-indexed master congruence |
+| `LeanBlack/CtxPure.lean` | THE master congruence `Ctx.plug_cong_master` (sibling-class- and predicate-family-parameterized) + tier instantiations (`Ctx.plug_cong`, `Ctx.plug_cong_at_easy`) |
 | `LeanBlack/ContextualBetaPure.lean` | #7: `contextual_beta_pure`, `buildTower` readiness, start-state corollaries |
 
 **Chain-composition layer** (supports #6, see §6a):

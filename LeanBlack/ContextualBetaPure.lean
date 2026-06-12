@@ -9,8 +9,9 @@
     conditions),
   - `PureExt.lean`'s structural-evolution engine (`StateExtends`
     under pure evaluation), and
-  - `CtxPure.lean`'s master congruence (`PureCtx.plug_cong_family`
-    over every `Expr` position except under `.lam`)
+  - `CtxPure.lean`'s master congruence (`Ctx.plug_cong_master`
+    with sibling class `Pure`, over every `Expr` position except
+    under `.lam`)
 
   into the contextually-quantified β-equivalence:
 
@@ -236,19 +237,24 @@ theorem beta_letE_pure_EvalEquivAt (x : String) (body v_expr : Expr)
 
 /-! ## The contextual β theorem -/
 
-/-- **Contextual β over pure-sided contexts.** For any context `C`
-    covering every `Expr` position except under `.lam`, with pure
-    pre-hole siblings, and any pure operand: the β-redex plug and
-    the `.letE` plug are observationally equivalent at every
-    `BuiltinReadyP (emDepth C)` state. -/
+/-- **Contextual β over pure-sided contexts.** For any lam-free
+    context `C` (every `Expr` position except under `.lam`,
+    `em`-nesting included) with pure pre-hole siblings, and any pure
+    operand: the β-redex plug and the `.letE` plug are
+    observationally equivalent at every `BuiltinReadyP (emDepth C)`
+    state. Instance of the master congruence
+    (`Ctx.plug_cong_master` with sibling class `Pure`). -/
 theorem contextual_beta_pure
-    (C : PureCtx) (h_sides : C.sidesPure = true)
+    (C : Ctx) (h_lam : C.lamFree = true)
+    (h_sides : C.sidesOK (fun e => Pure e = true))
     (x : String) (body v_expr : Expr) (h_pv : Pure v_expr = true) :
     EvalEquivAt (BuiltinReadyP C.emDepth)
         (C.plug (.app [.lam [x] body, v_expr]))
         (C.plug (.letE x v_expr body)) :=
-  PureCtx.plug_cong_family BuiltinReadyP BuiltinReadyP_closed
-    BuiltinReadyP_em BuiltinReadyP_alloc C h_sides
+  Ctx.plug_cong_master (fun e => Pure e = true) BuiltinReadyP
+    BuiltinReadyP_closed BuiltinReadyP_alloc C
+    (fun _ => BuiltinReadyP_em)
+    h_lam h_sides
     (beta_letE_pure_EvalEquivAt x body v_expr h_pv)
 
 /-! ## Closing the lazy-materialization gap: the canonical start tower
@@ -363,12 +369,13 @@ theorem startTower_BuiltinReadyP (d : Nat) (h_depth : d + 1 < Tower.maxDepth)
 /-! ## Program-level corollaries -/
 
 /-- **Contextual β from the canonical start state.** For any
-    pure-sided context `C` with depth margin, any binder/body, and
-    any pure operand: the two plugs agree on all outcomes when run
-    at level 0 from the pre-materialized tower, under any level-0
-    policy, any policy table, and any env. -/
+    lam-free pure-sided context `C` with depth margin, any
+    binder/body, and any pure operand: the two plugs agree on all
+    outcomes when run at level 0 from the pre-materialized tower,
+    under any level-0 policy, any policy table, and any env. -/
 theorem contextual_beta_at_start
-    (C : PureCtx) (h_sides : C.sidesPure = true)
+    (C : Ctx) (h_lam : C.lamFree = true)
+    (h_sides : C.sidesOK (fun e => Pure e = true))
     (h_depth : C.emDepth + 1 < Tower.maxDepth)
     (x : String) (body v_expr : Expr) (h_pv : Pure v_expr = true)
     (ptable : PolicyTable) (p : BlackPolicy) (env : Env)
@@ -377,16 +384,17 @@ theorem contextual_beta_at_start
             ((buildTower (C.emDepth + 2)).setPolicyAt 0 p) = some (v, T_final)) ↔
     (∃ k, eval k ptable 0 (C.plug (.letE x v_expr body)) env
             ((buildTower (C.emDepth + 2)).setPolicyAt 0 p) = some (v, T_final)) :=
-  contextual_beta_pure C h_sides x body v_expr h_pv ptable 0 env _
+  contextual_beta_pure C h_lam h_sides x body v_expr h_pv ptable 0 env _
     (startTower_BuiltinReadyP C.emDepth h_depth p ptable env) v T_final
 
 /-- **The Wand pair, contextually quantified, from the start
     state.** The specific β-redex/contractum pair of
-    `wand_defeated_existential_gated_beta`, lifted to any pure-sided
-    context (every `Expr` position except under `.lam`), including
-    `em`-nesting to any depth within the tower bound. -/
+    `wand_defeated_existential_gated_beta`, lifted to any lam-free
+    pure-sided context (every `Expr` position except under `.lam`),
+    including `em`-nesting to any depth within the tower bound. -/
 theorem wand_beta_ctx_pure_at_start
-    (C : PureCtx) (h_sides : C.sidesPure = true)
+    (C : Ctx) (h_lam : C.lamFree = true)
+    (h_sides : C.sidesOK (fun e => Pure e = true))
     (h_depth : C.emDepth + 1 < Tower.maxDepth)
     (ptable : PolicyTable) (p : BlackPolicy) (env : Env)
     (v : Val) (T_final : TowerState) :
@@ -394,5 +402,5 @@ theorem wand_beta_ctx_pure_at_start
             ((buildTower (C.emDepth + 2)).setPolicyAt 0 p) = some (v, T_final)) ↔
     (∃ k, eval k ptable 0 (C.plug (.letE "x" (.num 0) (.var "x"))) env
             ((buildTower (C.emDepth + 2)).setPolicyAt 0 p) = some (v, T_final)) :=
-  contextual_beta_at_start C h_sides h_depth "x" (.var "x") (.num 0) rfl
+  contextual_beta_at_start C h_lam h_sides h_depth "x" (.var "x") (.num 0) rfl
     ptable p env v T_final

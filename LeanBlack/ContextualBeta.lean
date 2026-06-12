@@ -56,6 +56,7 @@ import LeanBlack.ProofBased
 import LeanBlack.HeapAgree
 import LeanBlack.EvalFuelMono
 import LeanBlack.Ctx
+import LeanBlack.CtxPure
 
 open LeanBlack
 
@@ -215,8 +216,9 @@ theorem eval_letE (n : Nat) (ptable : PolicyTable) (level : Nat)
     fuel arithmetic differs (β-redex needs `+3`, `.letE` needs `+2`)
     but converges to the same outcome under `eval_fuel_mono`. This
     is the practical β-equivalence "base-case witness" — composing
-    with the `SimpleCtx.plug_cong` analog would give contextually-
-    quantified β under the appropriate state preconditions. -/
+    with the master congruence (`Ctx.plug_cong_master`) gives
+    contextually-quantified β under the appropriate state
+    preconditions. -/
 theorem beta_letE_conv_equiv
     (n : Nat) (ptable : PolicyTable) (level : Nat)
     (x : String) (body v_expr : Expr) (env : Env) (T : TowerState)
@@ -319,24 +321,29 @@ theorem beta_letE_EvalEquivAt (x : String) (body v_expr : Expr) :
   exact beta_letE_conv_equiv n ptable level x body v_expr env T
           h_depth v_val T' h_eval_v h_mat' h_builtin' v T_final
 
-/-- **Contextual β-equivalence over `EasyCtx`** — the headline
-    deliverable for the "easy" half of T1.
+/-- **Contextual β-equivalence, easy tier** — the first
+    contextually-quantified deliverable of T1.
 
-    For any easy context `C` and any `(x, body, v_expr)`, the
+    For any lam-free, `em`-free context with no pre-hole siblings
+    (`sidesOK (fun _ => False)`) and any `(x, body, v_expr)`, the
     β-redex plug and the `.letE` plug are observationally
-    equivalent at every state where the L1 conditions hold on
-    the *plugged* expression.
+    equivalent at every state where the L1 conditions hold —
+    with *no* preservation hypotheses (such contexts cannot
+    disturb the state before the hole).
 
     Note: the predicate refers to the *inner* `v_expr`, not the
-    plugged `.app [...]` / `.letE`. This is the right form for
-    use cases where the surrounding `EasyCtx` doesn't disturb the
-    L1 conditions (e.g., pure contexts at the relevant levels). -/
+    plugged `.app [...]` / `.letE`. Instance of the master
+    congruence `Ctx.plug_cong_master` via `Ctx.plug_cong_at_easy`. -/
 theorem contextual_beta_easy
-    (x : String) (body v_expr : Expr) (C : EasyCtx) :
+    (x : String) (body v_expr : Expr) (C : Ctx)
+    (h_lam : C.lamFree = true)
+    (h_sides : C.sidesOK (fun _ => False))
+    (h_noem : C.emDepth = 0) :
     EvalEquivAt (BetaLetEReady v_expr)
                 (C.plug (.app [.lam [x] body, v_expr]))
                 (C.plug (.letE x v_expr body)) :=
-  EasyCtx.plug_cong_at C (beta_letE_EvalEquivAt x body v_expr)
+  Ctx.plug_cong_at_easy (beta_letE_EvalEquivAt x body v_expr)
+    C h_lam h_sides h_noem
 
 /-! ### Concrete usage examples — the framework in action -/
 
@@ -345,42 +352,42 @@ example (x : String) (body v_expr : Expr) :
     EvalEquivAt (BetaLetEReady v_expr)
                 (.app [.lam [x] body, v_expr])
                 (.letE x v_expr body) :=
-  contextual_beta_easy x body v_expr .hole
+  contextual_beta_easy x body v_expr .hole rfl trivial rfl
 
 /-- β under `.set` (the gate value position). -/
 example (x : String) (body v_expr : Expr) (y : String) :
     EvalEquivAt (BetaLetEReady v_expr)
                 (.set y (.app [.lam [x] body, v_expr]))
                 (.set y (.letE x v_expr body)) :=
-  contextual_beta_easy x body v_expr (.set y .hole)
+  contextual_beta_easy x body v_expr (.set y .hole) rfl trivial rfl
 
 /-- β nested in `.ifte`'s cond. -/
 example (x : String) (body v_expr : Expr) (t e : Expr) :
     EvalEquivAt (BetaLetEReady v_expr)
                 (.ifte (.app [.lam [x] body, v_expr]) t e)
                 (.ifte (.letE x v_expr body) t e) :=
-  contextual_beta_easy x body v_expr (.ifteCond .hole t e)
+  contextual_beta_easy x body v_expr (.ifteCond .hole t e) rfl trivial rfl
 
 /-- β at the function position of an outer `.primApp`. -/
 example (x : String) (body v_expr : Expr) (args : List Expr) :
     EvalEquivAt (BetaLetEReady v_expr)
                 (.primApp (.app [.lam [x] body, v_expr]) args)
                 (.primApp (.letE x v_expr body) args) :=
-  contextual_beta_easy x body v_expr (.primAppFun .hole args)
+  contextual_beta_easy x body v_expr (.primAppFun .hole args) rfl trivial rfl
 
 /-- β in the value position of a `.letE` binding another variable. -/
 example (x : String) (body v_expr : Expr) (y : String) (body' : Expr) :
     EvalEquivAt (BetaLetEReady v_expr)
                 (.letE y (.app [.lam [x] body, v_expr]) body')
                 (.letE y (.letE x v_expr body) body') :=
-  contextual_beta_easy x body v_expr (.letEVal y .hole body')
+  contextual_beta_easy x body v_expr (.letEVal y .hole body') rfl trivial rfl
 
 /-- β nested two levels deep: inside a `.set` inside an `.ifteCond`. -/
 example (x : String) (body v_expr : Expr) (y : String) (t e : Expr) :
     EvalEquivAt (BetaLetEReady v_expr)
                 (.ifte (.set y (.app [.lam [x] body, v_expr])) t e)
                 (.ifte (.set y (.letE x v_expr body)) t e) :=
-  contextual_beta_easy x body v_expr (.ifteCond (.set y .hole) t e)
+  contextual_beta_easy x body v_expr (.ifteCond (.set y .hole) t e) rfl trivial rfl
 
 /-! ### Specialization to literal `v_expr`
 
@@ -439,29 +446,36 @@ theorem beta_letE_num_EvalEquivAt (x : String) (body : Expr) (i : Int) :
           (BuiltinReady.toBetaLetEReady_num h) v T_final
 
 /-- Specialization of `wand_beta_ctx_easy` to `BuiltinReady`:
-    a cleaner state-only precondition for any easy context. -/
-theorem wand_beta_ctx_easy_builtin (C : EasyCtx) :
+    a cleaner state-only precondition for any easy-tier context. -/
+theorem wand_beta_ctx_easy_builtin (C : Ctx)
+    (h_lam : C.lamFree = true)
+    (h_sides : C.sidesOK (fun _ => False))
+    (h_noem : C.emDepth = 0) :
     EvalEquivAt BuiltinReady
                 (C.plug (.app [.lam ["x"] (.var "x"), .num 0]))
                 (C.plug (.letE "x" (.num 0) (.var "x"))) :=
-  EasyCtx.plug_cong_at C (beta_letE_num_EvalEquivAt "x" (.var "x") 0)
+  Ctx.plug_cong_at_easy (beta_letE_num_EvalEquivAt "x" (.var "x") 0)
+    C h_lam h_sides h_noem
 
 /-! ### Worked example — `wand_defeated_existential_gated_beta`'s
     specific pair, contextually quantified
 
 `M = (λx. x) 0`, `N = .letE x 0 x` — the exact pair used in the
 specific-fuel `wand_defeated_existential_gated_beta` theorem.
-Lifted via `contextual_beta_easy` to any `EasyCtx`. -/
+Lifted via `contextual_beta_easy` to any easy-tier context. -/
 
 /-- The contextually-quantified β-equivalence for the
-    wand-defeated specific pair: for any easy context `C`,
+    wand-defeated specific pair: for any easy-tier context `C`,
     `C.plug ((λx. x) 0) ≡ C.plug (.letE x 0 x)` at every state
     where the L1 conditions hold. -/
-theorem wand_beta_ctx_easy (C : EasyCtx) :
+theorem wand_beta_ctx_easy (C : Ctx)
+    (h_lam : C.lamFree = true)
+    (h_sides : C.sidesOK (fun _ => False))
+    (h_noem : C.emDepth = 0) :
     EvalEquivAt (BetaLetEReady (.num 0))
                 (C.plug (.app [.lam ["x"] (.var "x"), .num 0]))
                 (C.plug (.letE "x" (.num 0) (.var "x"))) :=
-  contextual_beta_easy "x" (.var "x") (.num 0) C
+  contextual_beta_easy "x" (.var "x") (.num 0) C h_lam h_sides h_noem
 
 /-- Concrete instantiation: β in the function position of an outer
     `.primApp`. Result: `(+ ((λx. x) 0) ...) ≡ (+ (.letE x 0 x) ...)`. -/
@@ -469,14 +483,15 @@ example (args : List Expr) :
     EvalEquivAt (BetaLetEReady (.num 0))
                 (.primApp (.app [.lam ["x"] (.var "x"), .num 0]) args)
                 (.primApp (.letE "x" (.num 0) (.var "x")) args) :=
-  wand_beta_ctx_easy (.primAppFun .hole args)
+  wand_beta_ctx_easy (.primAppFun .hole args) rfl trivial rfl
 
 /-- Concrete instantiation: β at the head of an `.app`. -/
 example (args : List Expr) :
     EvalEquivAt (BetaLetEReady (.num 0))
                 (.app ((.app [.lam ["x"] (.var "x"), .num 0]) :: args))
                 (.app ((.letE "x" (.num 0) (.var "x")) :: args)) :=
-  wand_beta_ctx_easy (.appHead .hole args)
+  wand_beta_ctx_easy (.app [] .hole args) rfl
+    (by simp [Ctx.sidesOK]) rfl
 
 /-- Fuel-flexible packaging of `eval_beta_builtin`: if the β-redex
     succeeds at fuel `n+3` with result `(result, T_final)`, then for
