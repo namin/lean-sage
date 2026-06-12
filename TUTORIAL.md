@@ -282,9 +282,8 @@ This exercises the *operator-wrap* branch of `callAsBaseApply`.
 
 ## 7. The multn approval — the worked example
 
-The headline. An `ApprovedModification` for the multn closure,
-constructed by invoking `multnExact_soundForCE_first_install_tower`
-inside the `CE_weak_strong` proof:
+The headline. An `ApprovedModification` for the multn closure
+(`LeanBlack/HeapAgree.lean`):
 
 ```lean
 def multnApproval
@@ -297,17 +296,27 @@ def multnApproval
     ApprovedModification := ...
 ```
 
-Two pieces of machinery made this work:
+The certificate has one source of truth: the *selective* proof
+`multnApproval_at_proof` (also `HeapAgree.lean`), which invokes
+`multnExact_soundForCE_first_install_tower` and pins exactly the
+two heap cells the proof reads — the closure's captured `orig` and
+`num?`. The full-prefix `CE_weak_strong` form that
+`ApprovedModification` carries is *derived* from it by
+`CE_weak_strong_of_at` (a `HeapPrefix` implies agreement at any
+cells within it). The machinery underneath:
 
-1. **`InstallFacts.heap_extend`** — `OrigBoundIn` and `NumQBoundIn`
-   are about specific heap-cell lookups, so they transport across a
-   content-preserving `HeapPrefix` extension. This is why
-   `ApprovedModification.matches` checks **content-prefix** (not just
-   length) and `CE_weak_strong` carries `HeapPrefix h_ref T.heap`.
+1. **Selective transport** — `InstallFacts_heap_agree_cells`:
+   `OrigBoundIn` and `NumQBoundIn` are about specific heap-cell
+   lookups, so agreement at those two cells suffices to transport
+   them to any test state. This is also what makes the certificate
+   consumable *post-admission*, after other cells (including
+   `base-apply` itself) have changed — the property the admission
+   chains of `GovChain.lean` rely on.
 
-2. **Fuel split.** `multnExact_soundForCE_first_install_tower`
-   requires `fuel ≥ 2`. `CE_weak_strong` quantifies over arbitrary
-   `fuel`. The proof case-analyzes:
+2. **Fuel split** (`LeanBlack/ProofBased.lean`).
+   `multnExact_soundForCE_first_install_tower` requires `fuel ≥ 2`;
+   the certificate quantifies over arbitrary `fuel`. The proof
+   case-analyzes:
    - `fuel = 0`: vacuous (`applyDirect 0` returns `none`).
    - `fuel = 1`: by case on `op`, succeeds only for `op = .prim p`.
      For the prim subcase, "bump" fuel to 2 via

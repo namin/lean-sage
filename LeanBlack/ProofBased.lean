@@ -1687,38 +1687,31 @@ theorem wand_defeated_existential_gated_beta
       decide +kernel
     · simp [evalProgram, eval]; rfl
 
-/-! ## Multn approval — the worked example
+/-! ## Multn approval — fuel-split machinery
 
-This is the headline construction: an `ApprovedModification` for the
-multn closure, built by invoking `multnExact_soundForCE_first_install_tower`
-inside the `CE_weak_strong` proof.
+The multn approval itself lives in `LeanBlack/HeapAgree.lean`: its
+certificate is the *selective* proof (`multnApproval_at_proof`,
+pinning only the closure's captured `orig` and `num?` cells), with
+the full-prefix `CE_weak_strong` form derived via
+`CE_weak_strong_of_at`. What remains here is the fuel-split
+machinery that proof consumes:
 
-Two pieces of machinery are needed:
-
-1. **`InstallFacts.heap_extend`** — `OrigBoundIn` and `NumQBoundIn`
-   are about specific heap-cell lookups, so they transport across a
-   content-preserving `HeapPrefix` extension. This is why the
-   approval's `matches` checks content-prefix and `CE_weak_strong`
-   carries `HeapPrefix h_ref T.heap`.
-
-2. **Fuel split.** `multnExact_soundForCE_first_install_tower` requires
-   `fuel ≥ 2`. `CE_weak_strong` quantifies over arbitrary `fuel`.
-   - `fuel = 0`: `callAsBaseApply 0 .builtinBaseApply ... = applyDirect 0 ... = none`,
-     so `h_old` is unsatisfiable. Vacuous.
-   - `fuel = 1`: `callAsBaseApply 1 .builtinBaseApply op operands T
-     = applyDirect 1 ... op operands T`. By case on `op`:
-     - `.num`/`.bool`/`.nilV`/`.sym`/`.cons`/`.closure`: `applyDirect 1`
-       returns `none` (closure body eval with fuel 0 is `none`; other
-       constructors are non-callable). Vacuous.
-     - `.prim p`: returns `some (applyPrim p operands, T)` (fuel-
-       independent). This subcase needs a separate proof; we handle
-       it by "bumping" fuel to 2 (`applyDirect_prim_fuel_bump`).
-     - `.builtinBaseApply`: recurses to `applyDirect 0` → `none`.
-       Vacuous.
-   - `fuel ≥ 2`: invoke the multn theorem directly.
+**Fuel split.** `multnExact_soundForCE_first_install_tower` requires
+`fuel ≥ 2`, while the certificate quantifies over arbitrary `fuel`.
+- `fuel = 0`: `callAsBaseApply 0 .builtinBaseApply ... = applyDirect 0 ... = none`,
+  so the old-side call is unsatisfiable. Vacuous.
+- `fuel = 1`: `callAsBaseApply 1 .builtinBaseApply op operands T
+  = applyDirect 1 ... op operands T`. By case on `op`:
+  - `.num`/`.bool`/`.nilV`/`.sym`/`.cons`/`.closure`: `applyDirect 1`
+    returns `none` (closure body eval with fuel 0 is `none`; other
+    constructors are non-callable). Vacuous.
+  - `.prim p`: returns `some (applyPrim p operands, T)` (fuel-
+    independent). Handled by "bumping" fuel to 2
+    (`applyDirect_prim_fuel_bump`).
+  - `.builtinBaseApply`: recurses to `applyDirect 0` → `none`.
+    Vacuous.
+- `fuel ≥ 2`: invoke the multn theorem directly.
 -/
-
-/-! ### `InstallFacts.heap_extend` -/
 
 /-- If `h₁[idx]? = some v`, then `idx < h₁.length`. -/
 theorem getElem?_some_lt_length {α} {l : List α} {idx : Nat} {v : α}
@@ -1731,31 +1724,6 @@ theorem getElem?_some_lt_length {α} {l : List α} {idx : Nat} {v : α}
       have h_ge : l.length ≤ idx := Nat.le_of_not_lt (of_decide_eq_false h_lt)
       rw [List.getElem?_eq_none h_ge] at h
       cases h
-
-theorem OrigBoundIn_heap_extend
-    {h₁ h₂ : Heap} {old new : Val}
-    (h_pref : HeapPrefix h₁ h₂) (h_orig : OrigBoundIn h₁ old new) :
-    OrigBoundIn h₂ old new := by
-  obtain ⟨ps, body, cenv, idx, h_eq, h_lookup, h_heap⟩ := h_orig
-  refine ⟨ps, body, cenv, idx, h_eq, h_lookup, ?_⟩
-  have h_idx : idx < h₁.length := getElem?_some_lt_length h_heap
-  rw [← HeapPrefix.getElem? h_pref idx h_idx]; exact h_heap
-
-theorem NumQBoundIn_heap_extend
-    {h₁ h₂ : Heap} {new : Val}
-    (h_pref : HeapPrefix h₁ h₂) (h_numq : NumQBoundIn h₁ new) :
-    NumQBoundIn h₂ new := by
-  obtain ⟨ps, body, cenv, idx, h_eq, h_lookup, h_heap⟩ := h_numq
-  refine ⟨ps, body, cenv, idx, h_eq, h_lookup, ?_⟩
-  have h_idx : idx < h₁.length := getElem?_some_lt_length h_heap
-  rw [← HeapPrefix.getElem? h_pref idx h_idx]; exact h_heap
-
-theorem InstallFacts_heap_extend
-    {h₁ h₂ : Heap} {old new : Val}
-    (h_pref : HeapPrefix h₁ h₂) (install : InstallFacts old new h₁) :
-    InstallFacts old new h₂ :=
-  { orig := OrigBoundIn_heap_extend h_pref install.orig
-    numq := NumQBoundIn_heap_extend h_pref install.numq }
 
 /-! ### Fuel split helpers
 
@@ -1814,91 +1782,12 @@ theorem callAsBaseApply_one_builtin_succeeds_implies_prim
                   | some _ => rw [h_vtl] at h; simp [applyDirect] at h
               | cons _ _  => simp [applyDirect] at h
 
-/-! ### The multn approval
+/-! ### The multn approval — moved
 
-Given the multn-shape admission fact at the admission heap, plus
-shift-respect for the verified table, construct an
-`ApprovedModification` whose `proof` field invokes
-`multnExact_soundForCE_first_install_tower` (after handling the
-`fuel < 2` cases).
-
-The admission point: `multnExactPolicy` admits `.builtinBaseApply →
-newClosure` at the snapshot heap `heap`. This is verified by
-`multnExactPolicy_implies_InstallFacts`, giving install facts on
-`heap`. Inside the proof, those facts transport to any test state's
-heap via `InstallFacts_heap_extend` + the `HeapPrefix` premise. -/
-
-/-- The multn approval. Construction needs:
-
-    - The shape-admission fact at a chosen admission heap.
-    - A shift-respect fact for the policy table consumed at runtime,
-      stated at the admission heap (transported to test states via
-      this proof's prefix-extension premise).
-
-    The runner constructs both at the admission moment from the
-    runtime state; see `multnExactPolicy_implies_InstallFacts` and
-    `verifiedTable_respects_shift` (the latter in `Policies.lean`'s
-    follow-up section, not used directly here — we take the shift
-    facts as input parameters). -/
-def multnApproval
-    (level : Nat) (heap : Heap) (env metaEnv : Env) (index : Nat)
-    (newClosure : Val)
-    (h_admit : multnExactPolicy
-                 { target := "base-apply", heap := heap, env := env,
-                   metaEnv := metaEnv, index := index, level := level }
-                 .builtinBaseApply newClosure = true) :
-    ApprovedModification :=
-{ level   := level
-  heap    := heap
-  oldVal  := .builtinBaseApply
-  newVal  := newClosure
-  proof   := by
-    intro fuel ptable op operands T r T'
-      h_prefix h_heap h_op h_operands h_old h_new
-      h_ptable h_lvl_pol h_env h_pol h_env_bisim
-      h_heap_deep h_op_deep h_operands_deep h_env_deep
-      h_pt_shift h_pol_shift h_call
-    -- Get install facts on the admission heap, then transport to T.heap.
-    have ⟨_, install_heap⟩ := multnExactPolicy_implies_InstallFacts h_admit
-    have install_T : InstallFacts .builtinBaseApply newClosure T.heap :=
-      InstallFacts_heap_extend h_prefix install_heap
-    -- Build RuntimeWF from the strong-CE hypotheses. `ev_cenv` uses
-    -- `ValValid newClosure T.heap`, which on a closure unfolds to the
-    -- captured env's EnvValid in T.heap.
-    have wf : RuntimeWF newClosure op operands T := {
-      hv_heap     := h_heap
-      ev_levels   := h_env
-      ev_cenv     := fun ps body cenv' h_eq => by
-        have h_vv : ValValid (.closure ps body cenv') T.heap := h_eq ▸ h_new
-        exact h_vv
-      vv_op       := h_op
-      lvv_operands := h_operands }
-    -- Fuel split.
-    match fuel, h_call with
-    | 0,     h_call =>
-        -- callAsBaseApply 0 .builtinBaseApply = applyDirect 0 = none.
-        exact absurd h_call (by simp [callAsBaseApply, applyDirect])
-    | 1,     h_call =>
-        -- fuel = 1 + h_old succeeds ⇒ op = .prim p. Bump to fuel 2,
-        -- then invoke the multn theorem.
-        obtain ⟨p, h_op_eq⟩ :=
-          callAsBaseApply_one_builtin_succeeds_implies_prim h_call
-        subst h_op_eq
-        have h_call_2 : callAsBaseApply 2 ptable level .builtinBaseApply
-                          (.prim p) operands T = some (r, T') := by
-          simp only [callAsBaseApply] at h_call ⊢
-          exact applyDirect_prim_fuel_bump h_call
-        obtain ⟨fuel', T'', r', h_call', h_vv, h_pol_all, h_heap_v, h_mono⟩ :=
-          multnExact_soundForCE_first_install_tower h_admit (by omega) h_ptable
-            h_call_2 install_T wf h_heap_deep h_op_deep h_operands_deep
-            h_env_deep h_pol h_pt_shift h_pol_shift
-        exact ⟨fuel', T'', r', h_call', h_vv, h_pol_all level, h_heap_v, h_mono⟩
-    | n + 2, h_call =>
-        -- fuel ≥ 2: invoke multn theorem directly.
-        obtain ⟨fuel', T'', r', h_call', h_vv, h_pol_all, h_heap_v, h_mono⟩ :=
-          multnExact_soundForCE_first_install_tower h_admit (by omega) h_ptable
-            h_call install_T wf h_heap_deep h_op_deep h_operands_deep
-            h_env_deep h_pol h_pt_shift h_pol_shift
-        exact ⟨fuel', T'', r', h_call', h_vv, h_pol_all level, h_heap_v, h_mono⟩ }
+`multnApproval` now lives in `LeanBlack/HeapAgree.lean`, where its
+certificate is *derived* from the selective proof
+`multnApproval_at_proof` via `CE_weak_strong_of_at` — there is one
+multn proof, not two. The fuel-split helpers above remain here; the
+selective proof consumes them. -/
 
 end LeanBlack

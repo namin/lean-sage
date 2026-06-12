@@ -1,6 +1,7 @@
 import LeanBlack.Compose
 import LeanBlack.Frame
 import LeanBlack.EvalFuelMono
+import LeanBlack.HeapAgree
 
 /-!
 # IdentityDelegate — the simplest non-trivial second-install wrapper
@@ -116,7 +117,7 @@ theorem ValDeep_listToVal : ∀ {xs : List Val} {h : Heap},
   | [],      _, _ => trivial
   | _ :: _,  _, ⟨hv, htail⟩ => ⟨hv, ValDeep_listToVal htail⟩
 
-/-! ## CE_weak_strong: identityDelegate-on-origVal conservatively extends origVal
+/-! ## The selective certificate (the primitive)
 
 The proof bridges:
 1. The trace lemma `identityDelegate_body_unfolds`: invoking
@@ -126,32 +127,32 @@ The proof bridges:
    `applyDirect origVal [op, listToVal operands] T` to the same call
    at `T_alloc`, with `ValVis_weak`-related result.
 
-The Deep validity premises that `applyDirect_heap_extend_weak`
-demands are derived from `HeapDeep T.heap` + the fact that `origVal`
-sits at `idx_o` in `T.heap` (via `HeapPrefix h_ref T.heap` + the
-approval's heap-recorded `idx_o`).
+The certificate only reads one heap cell — the captured `orig` at
+`idx_o` — so it is stated selectively (`CE_weak_strong_at` over
+`[idx_o]`): it survives any later mutation of other cells,
+including the `base-apply` cell itself, which is what lets it serve
+as a *second link* in an admission chain. The full-prefix form is
+derived below.
 
 Restriction: `origVal ≠ .builtinBaseApply`. The bbApply case requires
 a different unfolding (bbApply-unpack first); not needed for our
 chain demo where the orig captured by identityDelegate is the
 previously-installed multn closure. -/
 
-theorem identityDelegate_CE_of_closure
+theorem identityDelegate_CE_at
     (level : Nat) (h_ref : Heap) (origVal : Val) (cenv : Env) (idx_o : Nat)
     (h_not_bbApply : origVal ≠ .builtinBaseApply)
     (h_lookup_o : cenv.lookup "orig" = some idx_o)
     (h_heap_o : h_ref[idx_o]? = some origVal) :
-    CE_weak_strong level h_ref origVal
+    CE_weak_strong_at level [idx_o] h_ref origVal
       (.closure ["op", "args"] identityDelegateBody cenv) := by
   intro fuel ptable op operands T r T'
-  intro h_prefix h_heap h_op h_operands h_va h_vb h_pt h_pol h_envs h_pols h_envvis
+  intro _h_len h_agree
+  intro h_heap h_op h_operands h_va h_vb h_pt h_pol h_envs h_pols h_envvis
   intro h_heap_deep h_op_deep h_operands_deep h_levels_deep h_pt_shift h_pol_shift h_call
-  -- Lift h_heap_o from h_ref to T.heap via HeapPrefix.
-  have h_idx_lt_ref : idx_o < h_ref.length := by
-    have := List.getElem?_eq_some_iff.mp h_heap_o
-    obtain ⟨h, _⟩ := this; exact h
+  -- Transport the orig cell from h_ref to T.heap via the selective agreement.
   have h_heap_o_T : T.heap[idx_o]? = some origVal := by
-    rw [← HeapPrefix.getElem? h_prefix idx_o h_idx_lt_ref]; exact h_heap_o
+    rw [← h_agree idx_o (by simp)]; exact h_heap_o
   -- ValDeep origVal at T.heap, via HeapDeep.
   have h_origVal_deep : ValDeep origVal T.heap :=
     h_heap_deep idx_o origVal h_heap_o_T
@@ -165,50 +166,52 @@ theorem identityDelegate_CE_of_closure
   -- Validity of the extras (= [op, listToVal operands]).
   have h_extras_valid : ListValValid [op, listToVal operands] T.heap :=
     ⟨h_op, ValValid_listToVal h_operands, trivial⟩
-  -- ListValValid [op, listToVal operands] T.heap (for applyDirect_heap_extend_weak's operands).
-  -- (Same as h_extras_valid.)
-  have h_args_valid : ListValValid [op, listToVal operands] T.heap := h_extras_valid
   -- Deep validity for the extras list.
   have h_args_deep : ListValDeep [op, listToVal operands] T.heap :=
     ⟨h_op_deep, ValDeep_listToVal h_operands_deep, trivial⟩
-  -- Apply heap-extend-weak. Note: h_va = ValValid origVal T.heap (from CE_weak_strong's premises;
-  -- CE_weak_strong calls this "ValValid old T.heap").
+  -- Apply heap-extend-weak. Note: h_va = ValValid origVal T.heap (from
+  -- the certificate's premises; the predicate calls this "ValValid old T.heap").
   obtain ⟨r_alloc, T_alloc_post, h_app_alloc, h_vis, h_heap_valid, h_state_eq, h_heap_mono⟩ :=
-    applyDirect_heap_extend_weak h_pt h_heap h_va h_args_valid h_envs h_pols
-      h_app_origVal [op, listToVal operands] h_extras_valid h_heap_deep h_origVal_deep h_args_deep
-      h_levels_deep h_pt_shift h_pol_shift
-  -- T_alloc = { T with heap := T.heap ++ [op, listToVal operands] }.
-  let T_alloc : TowerState := { T with heap := T.heap ++ [op, listToVal operands] }
-  -- Trace identityDelegate's invocation: callAsBaseApply (fuel+2) on closure unfolds
-  -- to applyDirect fuel on origVal at T_alloc.
-  -- We need fuel ≥ 3 for the trace (evalList of 2 vars). If fuel < 3, we use a larger fuel.
-  -- Easiest: use fuel + 3 as the input fuel to the trace lemma, giving output applyDirect at fuel + 1.
-  -- Then apply heap_extend_weak at a higher fuel. But the conclusion only needs ∃ fuel'.
-  -- So pick fuel' large enough: fuel' = fuel + 2 with precondition fuel ≥ 3, OR fuel' = (fuel + 3) + 2 = fuel + 5.
-  -- For robustness, use fuel + 5 to skip the fuel-bound check.
-  -- Pick output fuel = fuel + 5, giving trace input fuel + 5 → applyDirect (fuel + 3) on origVal
-  -- at T_alloc (trace's `fuel + 3 ≥ 3` always holds, so the case-split on small fuel is avoided).
+    applyDirect_heap_extend_weak h_pt h_heap h_va h_extras_valid h_envs h_pols
+      h_app_origVal [op, listToVal operands] h_extras_valid h_heap_deep h_origVal_deep
+      h_args_deep h_levels_deep h_pt_shift h_pol_shift
+  -- Trace identityDelegate's invocation: callAsBaseApply (fuel+2) on closure
+  -- unfolds to applyDirect fuel on origVal at the alloc'd state. Use
+  -- fuel + 5 so the trace's `≥ 3` bound holds unconditionally.
   refine ⟨fuel + 5, T_alloc_post, r_alloc, ?_, h_vis, ?_, h_heap_valid, ?_⟩
-  · -- callAsBaseApply (fuel+5) ptable level identityDelegateClos op operands T = some (r_alloc, T_alloc_post)
-    show callAsBaseApply (fuel + 5) ptable level
+  · show callAsBaseApply (fuel + 5) ptable level
           (.closure ["op", "args"] identityDelegateBody cenv) op operands T = _
     unfold callAsBaseApply
     show applyDirect (fuel + 5) ptable level
           (.closure ["op", "args"] identityDelegateBody cenv)
           [op, listToVal operands] T = _
-    -- Trace lemma at fuel + 3 ≥ 3.
     have h_fuel3 : fuel + 3 ≥ 3 := by omega
-    -- Trace: applyDirect (fuel+3+2) on identityDelegate = applyDirect (fuel+3) on origVal at T_alloc.
     rw [show fuel + 5 = (fuel + 3) + 2 from by omega]
     rw [identityDelegate_body_unfolds h_fuel3 ptable level op operands cenv idx_o origVal
           h_lookup_o T h_heap_o_T]
-    -- Bump h_app_alloc from fuel to fuel + 3.
     exact applyDirect_fuel_mono (by omega : fuel ≤ fuel + 3) h_app_alloc
-  · -- T'.policyAt? level = T_alloc_post.policyAt? level (from h_state_eq).
-    exact h_state_eq level
-  · -- T.heap.length ≤ T_alloc_post.heap.length.
-    have : T.heap.length ≤ T.heap.length + [op, listToVal operands].length := Nat.le_add_right _ _
+  · exact h_state_eq level
+  · have : T.heap.length ≤ T.heap.length + [op, listToVal operands].length :=
+      Nat.le_add_right _ _
     exact Nat.le_trans this h_heap_mono
+
+/-- Full-prefix corollary of `identityDelegate_CE_at` (the form
+    `ApprovedModification.proof` consumes), via
+    `CE_weak_strong_of_at`. -/
+theorem identityDelegate_CE_of_closure
+    (level : Nat) (h_ref : Heap) (origVal : Val) (cenv : Env) (idx_o : Nat)
+    (h_not_bbApply : origVal ≠ .builtinBaseApply)
+    (h_lookup_o : cenv.lookup "orig" = some idx_o)
+    (h_heap_o : h_ref[idx_o]? = some origVal) :
+    CE_weak_strong level h_ref origVal
+      (.closure ["op", "args"] identityDelegateBody cenv) := by
+  refine CE_weak_strong_of_at ?_
+    (identityDelegate_CE_at level h_ref origVal cenv idx_o
+      h_not_bbApply h_lookup_o h_heap_o)
+  intro i hi
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at hi
+  subst hi
+  exact getElem?_some_lt_length h_heap_o
 
 /-! ## Approval constructor
 

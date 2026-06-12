@@ -245,9 +245,9 @@ theorem NumQBoundIn_heap_agree
 
 /-- `InstallFacts` transports across `HeapAgreeAt` covering both
     the `orig` and `num?` indices. This is the key transport
-    lemma the new multn proof uses, replacing the
-    `InstallFacts_heap_extend` lemma that demanded full
-    `HeapPrefix`. -/
+    lemma the multn proof uses: agreement at exactly two cells
+    suffices (a full `HeapPrefix` would also do, but would not
+    survive later mutations of other cells). -/
 theorem InstallFacts_heap_agree
     {h₁ h₂ : Heap} {old new : Val}
     (install : InstallFacts old new h₁)
@@ -303,11 +303,13 @@ theorem heapAgreeAt_pair_to_cells
 
 /-! ## `multnApproval_at` — the multn approval, weakened-premise form
 
-Mirrors `multnApproval` in `ProofBased.lean` but produces a
-`CE_weak_strong_at` certificate. Almost the entire body is shared
-with `multnApproval`'s proof; the only change is the InstallFacts
-transport step, which now uses `InstallFacts_heap_agree_cells` +
-`heapAgreeAt_pair_to_cells` instead of `InstallFacts_heap_extend`.
+**This is the one multn certificate.** It produces the selective
+`CE_weak_strong_at` form, pinning exactly the cells the proof reads;
+the full-prefix `CE_weak_strong` form (consumed by
+`ApprovedModification` via `multnApproval`, defined at the end of
+this file) is derived from it by `CE_weak_strong_of_at`. The
+InstallFacts transport uses `InstallFacts_heap_agree_cells` +
+`heapAgreeAt_pair_to_cells`.
 
 The constructed approval's certificate is **consumable
 post-admission**: a `.set "base-apply"` mutation at a level
@@ -379,5 +381,61 @@ theorem multnApproval_at_proof
           h_call install_T wf h_heap_deep h_op_deep h_operands_deep
           h_env_deep h_pol h_pt_shift h_pol_shift
       exact ⟨fuel', T'', r', h_call', h_vv, h_pol_all level, h_heap_v, h_mono⟩
+
+/-! ## The selective certificate is the primitive
+
+A full content-prefix (`HeapPrefix`) implies agreement at any cells
+within it, so a selective certificate whose cells lie inside the
+snapshot yields the full-prefix certificate. Consequently every
+full-prefix approval proof in the repo is a *corollary* of its
+selective form — there is one multn proof (`multnApproval_at_proof`
+above), not two. -/
+
+/-- Bridge: selective certificate (cells within the snapshot) →
+    full-prefix certificate. -/
+theorem CE_weak_strong_of_at
+    {level : Nat} {indices : List Nat} {h_ref : Heap} {old new : Val}
+    (h_bounds : ∀ i ∈ indices, i < h_ref.length)
+    (h : CE_weak_strong_at level indices h_ref old new) :
+    CE_weak_strong level h_ref old new := by
+  intro fuel ptable op operands T r T' h_prefix
+  exact h fuel ptable op operands T r T'
+    (HeapPrefix.length_le h_prefix)
+    (HeapPrefix.toHeapAgreeAt h_prefix h_bounds)
+
+/-- The multn approval — the worked example's `ApprovedModification`
+    (full-prefix form, as `approvedPolicy` consumes).
+
+    The certificate is *derived*: `multnApproval_at_proof` pins the
+    cells the proof actually reads (the closure's captured `orig`
+    and `num?`, extracted from the admission fact), and
+    `CE_weak_strong_of_at` widens to the full prefix. The selective
+    certificate is the primitive; this is its corollary. -/
+def multnApproval
+    (level : Nat) (heap : Heap) (env metaEnv : Env) (index : Nat)
+    (newClosure : Val)
+    (h_admit : multnExactPolicy
+                 { target := "base-apply", heap := heap, env := env,
+                   metaEnv := metaEnv, index := index, level := level }
+                 .builtinBaseApply newClosure = true) :
+    ApprovedModification :=
+{ level   := level
+  heap    := heap
+  oldVal  := .builtinBaseApply
+  newVal  := newClosure
+  proof   := by
+    have ⟨_, install_heap⟩ := multnExactPolicy_implies_InstallFacts h_admit
+    obtain ⟨ps_o, body_o, cenv_o, idx_o, h_eq_o, h_lk_o, h_cell_o⟩ := install_heap.orig
+    obtain ⟨ps_n, body_n, cenv_n, idx_n, h_eq_n, h_lk_n, h_cell_n⟩ := install_heap.numq
+    refine CE_weak_strong_of_at ?_
+      (multnApproval_at_proof level heap env metaEnv index newClosure h_admit
+        idx_o idx_n
+        ⟨ps_o, body_o, cenv_o, h_eq_o, h_lk_o⟩
+        ⟨ps_n, body_n, cenv_n, h_eq_n, h_lk_n⟩)
+    intro i hi
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hi
+    rcases hi with rfl | rfl
+    · exact getElem?_some_lt_length h_cell_o
+    · exact getElem?_some_lt_length h_cell_n }
 
 end LeanBlack

@@ -463,59 +463,10 @@ def multnApprovalAt
     proof   := multnApproval_at_proof level heap env metaEnv index newClosure
                  h_admit idx_o idx_n h_shape_o h_shape_n }
 
-/-- The identity-delegate certificate, selective edition. The
-    full-prefix proof (`identityDelegate_CE_of_closure`,
-    `IdentityDelegate.lean`) uses its `HeapPrefix` premise only to
-    transport the captured `orig` cell — so the selective form pins
-    exactly `[idx_o]`. -/
-theorem identityDelegate_CE_at
-    (level : Nat) (h_ref : Heap) (origVal : Val) (cenv : Env) (idx_o : Nat)
-    (h_not_bbApply : origVal ≠ .builtinBaseApply)
-    (h_lookup_o : cenv.lookup "orig" = some idx_o)
-    (h_heap_o : h_ref[idx_o]? = some origVal) :
-    CE_weak_strong_at level [idx_o] h_ref origVal
-      (.closure ["op", "args"] identityDelegateBody cenv) := by
-  intro fuel ptable op operands T r T'
-  intro _h_len h_agree
-  intro h_heap h_op h_operands h_va h_vb h_pt h_pol h_envs h_pols h_envvis
-  intro h_heap_deep h_op_deep h_operands_deep h_levels_deep h_pt_shift h_pol_shift h_call
-  -- Transport the orig cell from h_ref to T.heap via the selective agreement.
-  have h_heap_o_T : T.heap[idx_o]? = some origVal := by
-    rw [← h_agree idx_o (by simp)]; exact h_heap_o
-  have h_origVal_deep : ValDeep origVal T.heap :=
-    h_heap_deep idx_o origVal h_heap_o_T
-  have h_app_origVal : applyDirect fuel ptable level origVal
-        [op, listToVal operands] T = some (r, T') := by
-    unfold callAsBaseApply at h_call
-    cases origVal with
-    | builtinBaseApply => exact absurd rfl h_not_bbApply
-    | _ => exact h_call
-  have h_extras_valid : ListValValid [op, listToVal operands] T.heap :=
-    ⟨h_op, ValValid_listToVal h_operands, trivial⟩
-  have h_args_deep : ListValDeep [op, listToVal operands] T.heap :=
-    ⟨h_op_deep, ValDeep_listToVal h_operands_deep, trivial⟩
-  obtain ⟨r_alloc, T_alloc_post, h_app_alloc, h_vis, h_heap_valid, h_state_eq, h_heap_mono⟩ :=
-    applyDirect_heap_extend_weak h_pt h_heap h_va h_extras_valid h_envs h_pols
-      h_app_origVal [op, listToVal operands] h_extras_valid h_heap_deep h_origVal_deep
-      h_args_deep h_levels_deep h_pt_shift h_pol_shift
-  refine ⟨fuel + 5, T_alloc_post, r_alloc, ?_, h_vis, ?_, h_heap_valid, ?_⟩
-  · show callAsBaseApply (fuel + 5) ptable level
-          (.closure ["op", "args"] identityDelegateBody cenv) op operands T = _
-    unfold callAsBaseApply
-    show applyDirect (fuel + 5) ptable level
-          (.closure ["op", "args"] identityDelegateBody cenv)
-          [op, listToVal operands] T = _
-    have h_fuel3 : fuel + 3 ≥ 3 := by omega
-    rw [show fuel + 5 = (fuel + 3) + 2 from by omega]
-    rw [identityDelegate_body_unfolds h_fuel3 ptable level op operands cenv idx_o origVal
-          h_lookup_o T h_heap_o_T]
-    exact applyDirect_fuel_mono (by omega : fuel ≤ fuel + 3) h_app_alloc
-  · exact h_state_eq level
-  · have : T.heap.length ≤ T.heap.length + [op, listToVal operands].length :=
-      Nat.le_add_right _ _
-    exact Nat.le_trans this h_heap_mono
-
-/-- The identity-delegate approval, selective edition. -/
+/-- The identity-delegate approval, selective edition. The
+    certificate is `identityDelegate_CE_at`
+    (`IdentityDelegate.lean`) — the selective primitive from which
+    the full-prefix `identityDelegate_CE_of_closure` is derived. -/
 def identityDelegateApprovalAt
     (level : Nat) (heap : Heap) (cenv : Env) (idx_o : Nat) (origVal : Val)
     (h_not_bbApply : origVal ≠ .builtinBaseApply)

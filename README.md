@@ -67,7 +67,7 @@ For exact scope (what is and is not claimed), [`SCOPE.md`](SCOPE.md).
 
 | Paper-level claim | Files / theorems / demos |
 |---|---|
-| Proof-carrying admission of `set! base-apply` | `ApprovedModification`, `approvedPolicy`, `approvedPolicy_soundForCE_weak_strong`, `multnApproval` (all in `LeanBlack/ProofBased.lean`) |
+| Proof-carrying admission of `set! base-apply` | `ApprovedModification`, `approvedPolicy`, `approvedPolicy_soundForCE_weak_strong` (`LeanBlack/ProofBased.lean`); `multnApproval` (`LeanBlack/HeapAgree.lean`, derived from the selective certificate) |
 | multn as worked example | `multnExact_soundForCE_first_install_tower` (`LeanBlack/Policies.lean`), `multnApproval`, `ProofBasedSmoke` Scenes 3, 8, 9 |
 | Bad wrapper refused at the gate | `ProofBasedSmoke` Scene 4 (doubling wrapper refused), and `safeEvolution_necessary` (`LeanBlack/Soundness.lean`) as the ungated counterexample |
 | CE preservation under reflective programs | `eval_tower_safe` (`LeanBlack/Soundness.lean`) |
@@ -300,6 +300,7 @@ A confident summary of what is and is not claimed. See
 | [`DESIGN_PROOF.md`](DESIGN_PROOF.md) | Proof-based admission design |
 | [`SCOPE.md`](SCOPE.md) | Precise scope of headline claims |
 | [`CLAIMS.md`](CLAIMS.md) | The ledger: every claim classified (kernel theorem / instantiated / demo / not mechanized) with its qualifiers |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | The layer map; which dualities are theorem-forced and which are consolidation debt (with plan) |
 
 **Library** (dependency order; internal lemmas live here).
 
