@@ -28,9 +28,12 @@ In support of the composition theorem (`CE_weak_strong_trans`),
 selective admission layer and chain composition — see "Reflective
 depth" below for what it does and does not establish.
 
-All theorems are kernel-checked with no `sorry`, `admit`, or `axiom`
-declarations (standard `propext` / `Classical.choice` / `Quot.sound`
-only). Toolchain: `leanprover/lean4:v4.20.0`.
+All theorems are kernel-checked with no `sorry` or `admit`, on the
+standard axioms only (`propext` / `Classical.choice` / `Quot.sound`),
+CI-enforced by [`LeanBlack/AxiomAudit.lean`](LeanBlack/AxiomAudit.lean).
+Toolchain: `leanprover/lean4:v4.20.0`. For the claim-by-claim
+classification (kernel theorem / instantiated on concrete data /
+runtime demo / not mechanized), see [`CLAIMS.md`](CLAIMS.md).
 
 ## Why the headline relation is `CE_weak` / `CE_weak_strong`, not strict `CE`
 

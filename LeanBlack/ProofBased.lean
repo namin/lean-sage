@@ -14,9 +14,10 @@ Lean 4 doesn't auto-derive `DecidableEq` for mutually-recursive
 inductives. We build the instances from the existing `Val.beq` /
 `Expr.beq` / `Env.beq` boolean equalities (in `Black.lean`) plus
 freshly-proved reflexivity (`val_beq_self`, etc.). With these
-instances in scope, `native_decide` can discharge closed
-`Option Val` / `Option (Val × _)` equalities — the load-bearing
-machinery for W1 below. -/
+instances in scope, `decide +kernel` can discharge closed
+`Option Val` / `Option (Val × _)` equalities by kernel evaluation
+(no trusted-compiler axiom) — the load-bearing machinery for W1
+below. -/
 
 mutual
   theorem val_beq_self : ∀ (a : Val), Val.beq a a = true
@@ -535,7 +536,7 @@ the statement is still meaningful: it says admissions don't disturb
 /-- Convergent observational equivalence under a baseline policy
     table. We use `[acceptAllPolicy]` for concreteness — the policy
     gate is irrelevant for `.set`-free expressions, but baking in a
-    concrete table makes the equality reducible by `native_decide`.
+    concrete table makes the equality kernel-reducible (`decide +kernel`).
     A stronger version parameterized on the approval-gated policy
     table is a follow-up (requires a policy-independence lemma for
     `.set`-free expressions; see note on `wand_defeated_existential`). -/
@@ -552,8 +553,9 @@ def ObsEquivConverges (M N : Expr) : Prop :=
     The witness is `((λx. x) 0)` vs `0`. These differ as `Expr`
     constructors (one is `.app`, the other is `.num`) so they are
     not syntactically equal. They both eval to `(.num 0)` at fuel
-    100 — confirmed by `native_decide`, which the `DecidableEq Val`
-    instance above unlocks.
+    100 — confirmed by `decide +kernel` (kernel evaluation; no
+    trusted-compiler axiom), which the `DecidableEq Val` instance
+    above unlocks.
 
     The role of `approvals` in the statement: even with arbitrary
     proof-bearing admissions in scope, the β-equiv pair converges
@@ -568,7 +570,10 @@ theorem wand_defeated_existential (_approvals : List ApprovedModification) :
     ∃ M N : Expr, M ≠ N ∧ ObsEquivConverges M N := by
   refine ⟨.app [.lam ["x"] (.var "x"), .num 0], .num 0, ?_, ?_⟩
   · intro h; cases h
-  · refine ⟨100, .num 0, ?_, ?_⟩ <;> native_decide
+  · -- `decide +kernel`: the kernel evaluates the witness directly,
+    -- avoiding `native_decide`'s trusted-compiler axiom (and the
+    -- elaborator-level `primPairs` irreducibility block).
+    refine ⟨100, .num 0, ?_, ?_⟩ <;> decide +kernel
 
 /-! ### Follow-up: parameterized W1
 
@@ -1678,7 +1683,8 @@ theorem wand_defeated_existential_gated_beta
         decide
       rw [evalProgram_pure_indep _ h_M_pure 100
             [approvedPolicy approvals] [acceptAllPolicy]]
-      native_decide
+      -- `decide +kernel`: kernel evaluation, no trusted-compiler axiom.
+      decide +kernel
     · simp [evalProgram, eval]; rfl
 
 /-! ## Multn approval — the worked example

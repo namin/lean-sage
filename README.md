@@ -5,7 +5,11 @@ the `base-apply` rule carry kernel-checked proofs of conservative
 extension (`CE_weak_strong`). Black-faithful (heap + closure +
 `set!`), with CakeML-style value bisimulation (Kumar 2016 §3)
 underwriting the soundness arguments.
-All public theorems are kernel-checked with no `sorry`, `admit`, or `axiom`.
+All public theorems are kernel-checked with no `sorry` or `admit`,
+on the standard axioms only (`propext`, `Classical.choice`,
+`Quot.sound`) — enforced in CI by
+[`LeanBlack/AxiomAudit.lean`](LeanBlack/AxiomAudit.lean). For the
+claim-by-claim classification, see [`CLAIMS.md`](CLAIMS.md).
 
 lean-sage is highlighted in
 [reasonable-reflection](https://github.com/namin/reasonable-reflection).
@@ -13,19 +17,25 @@ lean-sage is highlighted in
 ## Quickstart
 
 ```bash
-lake build                # library + three executables
+lake build                # library + axiom audit + three executables
 lake exe smoke            # 4 scenes, 8 tests   — structural-policy
 lake exe demos            # 12 scenes, 29 tests — reflection capabilities
-lake exe proofBasedSmoke  # 10 scenes, 27 tests — proof-based admission
+lake exe proofBasedSmoke  # 11 scenes, 32 tests — proof-based admission
 ```
 
 Success criterion:
 
-- `lake build` succeeds.
+- `lake build` succeeds. This includes
+  [`LeanBlack/AxiomAudit.lean`](LeanBlack/AxiomAudit.lean), which
+  pins the axiom footprint of every headline theorem with
+  `#guard_msgs` — the build fails if any theorem acquires an axiom
+  beyond `propext` / `Classical.choice` / `Quot.sound`. (A `sorry`
+  grep alone cannot see tactic-introduced axioms such as
+  `native_decide`'s.)
 - Each executable prints only `OK` lines (no line starting with `XX`).
-- No uncommented `sorry`, `admit`, or `axiom` in `LeanBlack/`,
-  `Smoke.lean`, `Demos.lean`, or `ProofBasedSmoke.lean`.
-  The current CI check is `! grep -rn "sorry$" LeanBlack/`.
+- No uncommented `sorry` or `admit` in `LeanBlack/`, `Smoke.lean`,
+  `Demos.lean`, or `ProofBasedSmoke.lean`
+  (`! grep -rn "sorry$" LeanBlack/`).
 
 ## What to inspect if you have 10 minutes
 
@@ -289,6 +299,7 @@ A confident summary of what is and is not claimed. See
 | [`DESIGN.md`](DESIGN.md) | Architectural rationale (substrate half) |
 | [`DESIGN_PROOF.md`](DESIGN_PROOF.md) | Proof-based admission design |
 | [`SCOPE.md`](SCOPE.md) | Precise scope of headline claims |
+| [`CLAIMS.md`](CLAIMS.md) | The ledger: every claim classified (kernel theorem / instantiated / demo / not mechanized) with its qualifiers |
 
 **Library** (dependency order; internal lemmas live here).
 
