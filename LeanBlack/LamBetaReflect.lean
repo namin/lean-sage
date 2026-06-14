@@ -3481,6 +3481,672 @@ theorem frameβ_quote_caseRev (n : Nat) (ptable : PolicyTable) (level : Nat)
            closedVal_ValValid v hclosed _, closedVal_ValValid v hclosed _⟩
   · simp at heval
 
+/-- `.var` (reverse): the b-side lookup (forced by `heval`) threads *backward*
+    through `env_visβ` to an a-side cell; the a-side reconstructs at fuel `1`,
+    state unchanged.  Mirror of the forward `frameβ_var_caseW` with a/b swapped. -/
+theorem frameβ_var_caseRev (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (y : String) (exp_b : Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_b : Val) (T_b' : TowerState)
+    (hβ : BetaRel (.var y) exp_b) (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (heval : eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b')) :
+    ∃ (k : Nat) (r_a : Val) (T_a' : TowerState),
+      eval k ptable level (.var y) env_a T_a = some (r_a, T_a') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  have hb := hβ.var_eq; subst hb
+  simp only [eval] at heval
+  cases hlb : env_b.lookup y with
+  | none => simp [hlb] at heval
+  | some idx_b =>
+    simp only [hlb] at heval
+    cases hpb : T_b.heap[idx_b]? with
+    | none => simp [hpb] at heval
+    | some vb =>
+      simp only [hpb, Option.some.injEq, Prod.mk.injEq] at heval
+      obtain ⟨hr, ht⟩ := heval; subst hr; subst ht
+      have he := h_ctx.env_visβ 1 y
+      simp only [hlb] at he
+      cases hla : env_a.lookup y with
+      | none => simp [hla] at he
+      | some idx_a =>
+        simp only [hla, hpb] at he
+        cases hpa : T_a.heap[idx_a]? with
+        | none => simp [hpa] at he
+        | some va =>
+          refine ⟨1, va, T_a, by simp only [eval, hla, hpa], (fun m => ?_), h_ctx,
+                  HeapEvolutionβ.refl _ _, h_ctx.hv_a idx_a va hpa, h_ctx.hv_b idx_b vb hpb⟩
+          have hm := h_ctx.env_visβ m y
+          simp only [hla, hlb, hpa, hpb] at hm
+          exact hm
+
+/-! ### 7v (cont.). The reverse `evalList` clause.
+
+The b-side-driven analog of `frameβ_evalList_evalWP`.  Now genuinely needs the
+**fuel existential**: the two reconstructed a-side sub-evaluations (head + rest)
+land at independent fuels `k_e`, `k_rest`; lift both to `max k_e k_rest` via
+`eval_fuel_mono` / `evalList_fuel_mono`, then run the cons node at one more. -/
+
+/-- The reverse `evalList` clause (b-side drives, `∃ k` a-side fuel). -/
+def FrameβEvalListStmtRev (n : Nat) : Prop :=
+  ∀ (ptable : PolicyTable) (level : Nat) (exps_a exps_b : List Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (rs_b : List Val) (T_b' : TowerState),
+    BetaRelList exps_a exps_b →
+    PureList exps_a = true →
+    PolicyTableRespectsBisimT ptable →
+    WFCtxTβ env_a env_b T_a T_b level →
+    BReady T_b →
+    evalList n ptable level exps_b env_b T_b = some (rs_b, T_b') →
+    ∃ (k : Nat) (rs_a : List Val) (T_a' : TowerState),
+      evalList k ptable level exps_a env_a T_a = some (rs_a, T_a') ∧
+      ListValVisβ rs_a rs_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ListValValid rs_a T_a'.heap ∧ ListValValid rs_b T_b'.heap
+
+/-- The reverse `evalList` inductive step — mirror of `frameβ_evalList_evalWP`,
+    b-side-driven, with the head/rest fuels reconciled by `eval_fuel_mono` /
+    `evalList_fuel_mono`. -/
+theorem frameβ_evalList_evalRev (n : Nat)
+    (ih_eval : FrameβEvalStmtRev n) (ih_list : FrameβEvalListStmtRev n) :
+    FrameβEvalListStmtRev (n + 1) := by
+  intro ptable level exps_a exps_b env_a env_b T_a T_b rs_b T_b' hβ hpure hresp_pt h_ctx hbr heval
+  cases hβ with
+  | nil =>
+      simp only [evalList, Option.some.injEq, Prod.mk.injEq] at heval
+      obtain ⟨hr, hT⟩ := heval; subst hr; subst hT
+      exact ⟨1, [], T_a, by simp [evalList], trivial, h_ctx, HeapEvolutionβ.refl _ _, trivial, trivial⟩
+  | cons hβ_e hβ_rest =>
+      rename_i e e' rest rest'
+      simp only [PureList, Bool.and_eq_true] at hpure
+      obtain ⟨hpe, hprest⟩ := hpure
+      simp only [evalList] at heval
+      cases he : eval n ptable level e' env_b T_b with
+      | none => rw [he] at heval; simp at heval
+      | some pr =>
+          obtain ⟨v_b, T_b_inner⟩ := pr
+          rw [he] at heval; simp only at heval
+          cases hrest : evalList n ptable level rest' env_b T_b_inner with
+          | none => rw [hrest] at heval; simp at heval
+          | some pr2 =>
+              obtain ⟨vs_b, T_b_inner2⟩ := pr2
+              rw [hrest] at heval; simp only [Option.some.injEq, Prod.mk.injEq] at heval
+              obtain ⟨hr, hT⟩ := heval; subst hr; subst hT
+              obtain ⟨k_e, v_a, T_a_inner, h_eval_e_a, h_vv_v, h_ctx_inner, h_he_inner, hv_va, hv_vb⟩ :=
+                ih_eval ptable level e e' env_a env_b T_a T_b v_b T_b_inner hβ_e hpe hresp_pt h_ctx hbr he
+              have hbr_inner : BReady T_b_inner := BReady.closed hbr (hβ_e.pure_preserve hpe) he
+              obtain ⟨k_rest, vs_a, T_a_inner2, h_eval_rest_a, h_lvv, h_ctx_inner2, h_he_inner2,
+                      hv_vsa, hv_vsb⟩ :=
+                ih_list ptable level rest rest' env_a env_b T_a_inner T_b_inner vs_b T_b_inner2
+                  hβ_rest hprest hresp_pt h_ctx_inner hbr_inner hrest
+              have h_vv_v' : ValVisβ v_a v_b T_a_inner2.heap T_b_inner2.heap :=
+                h_he_inner2.valVisβ_preserve v_a v_b hv_va hv_vb h_vv_v
+              have hv_va' : ValValid v_a T_a_inner2.heap := ValValid.length_mono v_a hv_va h_he_inner2.len_a
+              have hv_vb' : ValValid v_b T_b_inner2.heap := ValValid.length_mono v_b hv_vb h_he_inner2.len_b
+              have h_eval_e_a' := eval_fuel_mono (Nat.le_max_left k_e k_rest) h_eval_e_a
+              have h_eval_rest_a' := evalList_fuel_mono (Nat.le_max_right k_e k_rest) h_eval_rest_a
+              refine ⟨max k_e k_rest + 1, v_a :: vs_a, T_a_inner2, ?_, ⟨h_vv_v', h_lvv⟩, h_ctx_inner2,
+                      h_he_inner.trans h_he_inner2, ⟨hv_va', hv_vsa⟩, ⟨hv_vb', hv_vsb⟩⟩
+              simp [evalList, h_eval_e_a', h_eval_rest_a']
+
+/-! ### 7v (cont.). Reverse value-relation foundations.
+
+The b-side-driven cases of `applyDirect` recover the a-side from the b-side
+computation, which needs the **reverse** `ValVisβ` constructor inversions
+(`…_inv_rev`: given the b-side constructor, the a-side matches) and a reverse
+`closedVal_ValVisβ_eq` (on a closure-free value `ValVisβ` is equality, either
+way).  `valToList_bisimβ_rev` / `applyPrim_bisimβ_rev` then mirror the forward
+operand/primitive bisimulations with the result driven by the b-side. -/
+
+/-- `ValVisβ` against an a-side value, with the b-side a numeral, forces the
+    a-side equal.  Reverse of `ValVisβ_num_inv`. -/
+theorem ValVisβ_num_inv_rev {b : Int} {v_a : Val} {h_a h_b : Heap}
+    (h : ValVisβ v_a (.num b) h_a h_b) : v_a = .num b := by
+  have h1 := h 1; cases v_a <;> simp_all [ValVisβ_aux]
+
+/-- Reverse of `ValVisβ_bool_inv`. -/
+theorem ValVisβ_bool_inv_rev {c : Bool} {v_a : Val} {h_a h_b : Heap}
+    (h : ValVisβ v_a (.bool c) h_a h_b) : v_a = .bool c := by
+  have h1 := h 1; cases v_a <;> simp_all [ValVisβ_aux]
+
+/-- Reverse of `ValVisβ_nilV_inv`. -/
+theorem ValVisβ_nilV_inv_rev {v_a : Val} {h_a h_b : Heap}
+    (h : ValVisβ v_a .nilV h_a h_b) : v_a = .nilV := by
+  have h1 := h 1; cases v_a <;> simp_all [ValVisβ_aux]
+
+/-- Reverse of `ValVisβ_cons_inv`: a b-side cons forces an a-side cons with
+    `ValVisβ`-related components. -/
+theorem ValVisβ_cons_inv_rev {x_b y_b : Val} {v_a : Val} {h_a h_b : Heap}
+    (h : ValVisβ v_a (.cons x_b y_b) h_a h_b) :
+    ∃ x_a y_a, v_a = .cons x_a y_a ∧
+      ValVisβ x_a x_b h_a h_b ∧ ValVisβ y_a y_b h_a h_b := by
+  have h1 := h 1
+  cases v_a with
+  | cons x_a y_a => exact ⟨x_a, y_a, rfl, fun d => (h (d + 1)).1, fun d => (h (d + 1)).2⟩
+  | num _ => simp [ValVisβ_aux] at h1
+  | bool _ => simp [ValVisβ_aux] at h1
+  | nilV => simp [ValVisβ_aux] at h1
+  | sym _ => simp [ValVisβ_aux] at h1
+  | closure _ _ _ => simp [ValVisβ_aux] at h1
+  | prim _ => simp [ValVisβ_aux] at h1
+  | builtinBaseApply => simp [ValVisβ_aux] at h1
+
+/-- **On a closure-free b-side value, `ValVisβ` is equality** (reverse of
+    `closedVal_ValVisβ_eq`).  The mul-list primitive needs the a-side operand
+    pinned from the b-side. -/
+theorem closedVal_ValVisβ_eq_rev : ∀ (v_a v_b : Val) (h_a h_b : Heap),
+    closedValB v_b = true → ValVisβ v_a v_b h_a h_b → v_a = v_b
+  | v_a, .num _,  _, _, _, h => ValVisβ_num_inv_rev h
+  | v_a, .bool _, _, _, _, h => ValVisβ_bool_inv_rev h
+  | v_a, .nilV,   _, _, _, h => ValVisβ_nilV_inv_rev h
+  | v_a, .sym _,  _, _, _, h => by have h1 := h 1; cases v_a <;> simp_all [ValVisβ_aux]
+  | v_a, .prim _, _, _, _, h => by have h1 := h 1; cases v_a <;> simp_all [ValVisβ_aux]
+  | v_a, .builtinBaseApply, _, _, _, h => by
+      have h1 := h 1; cases v_a <;> simp_all [ValVisβ_aux]
+  | v_a, .cons x_b y_b, h_a, h_b, hclosed, h => by
+      simp only [closedValB, Bool.and_eq_true] at hclosed
+      obtain ⟨hx, hy⟩ := hclosed
+      obtain ⟨x_a, y_a, rfl, hvx, hvy⟩ := ValVisβ_cons_inv_rev h
+      rw [closedVal_ValVisβ_eq_rev x_a x_b h_a h_b hx hvx,
+          closedVal_ValVisβ_eq_rev y_a y_b h_a h_b hy hvy]
+  | _, .closure _ _ _, _, _, hclosed, _ => by simp [closedValB] at hclosed
+
+/-- Reverse `valToList` bisimulation: a b-side operand list pulls back to a
+    `ValVisβ`-related a-side operand list.  Recurses on the a-side value, using
+    the forward `ValVisβ_{nilV,cons}_inv` to read off the b-side. -/
+theorem valToList_bisimβ_rev : ∀ (ol_a ol_b : Val) (operands_b : List Val) (h_a h_b : Heap),
+    ValVisβ ol_a ol_b h_a h_b → valToList ol_b = some operands_b →
+    ValValid ol_a h_a → ValValid ol_b h_b →
+    ∃ operands_a, valToList ol_a = some operands_a ∧
+      ListValVisβ operands_a operands_b h_a h_b ∧
+      ListValValid operands_a h_a ∧ ListValValid operands_b h_b
+  | .nilV, ol_b, operands_b, _, _, h_vv, hl_b, _, _ => by
+      obtain rfl := ValVisβ_nilV_inv h_vv
+      simp only [valToList, Option.some.injEq] at hl_b; subst hl_b
+      exact ⟨[], rfl, trivial, trivial, trivial⟩
+  | .cons x rest, ol_b, operands_b, h_a, h_b, h_vv, hl_b, hv_a, hv_b => by
+      obtain ⟨x_b, rest_b, rfl, h_vv_head, h_vv_rest⟩ := ValVisβ_cons_inv h_vv
+      simp only [valToList] at hl_b
+      cases hr : valToList rest_b with
+      | none => rw [hr] at hl_b; simp at hl_b
+      | some t =>
+          rw [hr] at hl_b; simp only [Option.some.injEq] at hl_b; subst hl_b
+          have hv_a' : ValValid x h_a ∧ ValValid rest h_a := hv_a
+          have hv_b' : ValValid x_b h_b ∧ ValValid rest_b h_b := hv_b
+          obtain ⟨tail_a, hl_a, h_lvv_tail, hv_tail_a, hv_tail_b⟩ :=
+            valToList_bisimβ_rev rest rest_b t h_a h_b h_vv_rest hr hv_a'.2 hv_b'.2
+          refine ⟨x :: tail_a, ?_, ⟨h_vv_head, h_lvv_tail⟩,
+                  ⟨hv_a'.1, hv_tail_a⟩, ⟨hv_b'.1, hv_tail_b⟩⟩
+          simp [valToList, hl_a]
+  | .num _, ol_b, _, _, _, h_vv, hl_b, _, _ => by
+      obtain rfl := ValVisβ_num_inv h_vv; simp [valToList] at hl_b
+  | .bool _, ol_b, _, _, _, h_vv, hl_b, _, _ => by
+      obtain rfl := ValVisβ_bool_inv h_vv; simp [valToList] at hl_b
+  | .sym _, ol_b, _, _, _, h_vv, hl_b, _, _ => by
+      have h1 := h_vv 1; cases ol_b <;> simp_all [ValVisβ_aux, valToList]
+  | .prim _, ol_b, _, _, _, h_vv, hl_b, _, _ => by
+      have h1 := h_vv 1; cases ol_b <;> simp_all [ValVisβ_aux, valToList]
+  | .closure _ _ _, ol_b, _, _, _, h_vv, hl_b, _, _ => by
+      have h1 := h_vv 1; cases ol_b <;> simp_all [ValVisβ_aux, valToList]
+  | .builtinBaseApply, ol_b, _, _, _, h_vv, hl_b, _, _ => by
+      have h1 := h_vv 1; cases ol_b <;> simp_all [ValVisβ_aux, valToList]
+  termination_by ol_a => sizeOf ol_a
+
+/-! ### 7v (cont.). Determinism + the `applyDirect` forward-FL upgrade.
+
+Each `eval` family member is a function of its fuel, so two convergent runs at
+(possibly different) fuels agree (`*_det`, via `*_fuel_mono` to a common bound).
+The reverse cases reconstruct a-side **convergence**; `rev_applyDirect_upgrade`
+then reads the full cross-side bundle off the (already proved) forward clause
+`(frameβ_tower k).2.2.2` and reconciles its b-side run with the given one by
+determinism — so the reverse `applyDirect` never re-derives `ValVisβ` by hand. -/
+
+theorem eval_det {k1 k2 : Nat} {ptable : PolicyTable} {level : Nat} {e : Expr}
+    {env : Env} {T : TowerState} {r1 T1 r2 T2}
+    (h1 : eval k1 ptable level e env T = some (r1, T1))
+    (h2 : eval k2 ptable level e env T = some (r2, T2)) : r1 = r2 ∧ T1 = T2 := by
+  have h1' := eval_fuel_mono (Nat.le_max_left k1 k2) h1
+  have h2' := eval_fuel_mono (Nat.le_max_right k1 k2) h2
+  rw [h1'] at h2'; simp only [Option.some.injEq, Prod.mk.injEq] at h2'; exact h2'
+
+theorem evalList_det {k1 k2 : Nat} {ptable : PolicyTable} {level : Nat} {es : List Expr}
+    {env : Env} {T : TowerState} {r1 T1 r2 T2}
+    (h1 : evalList k1 ptable level es env T = some (r1, T1))
+    (h2 : evalList k2 ptable level es env T = some (r2, T2)) : r1 = r2 ∧ T1 = T2 := by
+  have h1' := evalList_fuel_mono (Nat.le_max_left k1 k2) h1
+  have h2' := evalList_fuel_mono (Nat.le_max_right k1 k2) h2
+  rw [h1'] at h2'; simp only [Option.some.injEq, Prod.mk.injEq] at h2'; exact h2'
+
+theorem applyVia_det {k1 k2 : Nat} {ptable : PolicyTable} {level : Nat} {op : Val}
+    {args : List Val} {T : TowerState} {r1 T1 r2 T2}
+    (h1 : applyVia k1 ptable level op args T = some (r1, T1))
+    (h2 : applyVia k2 ptable level op args T = some (r2, T2)) : r1 = r2 ∧ T1 = T2 := by
+  have h1' := applyVia_fuel_mono (Nat.le_max_left k1 k2) h1
+  have h2' := applyVia_fuel_mono (Nat.le_max_right k1 k2) h2
+  rw [h1'] at h2'; simp only [Option.some.injEq, Prod.mk.injEq] at h2'; exact h2'
+
+theorem applyDirect_det {k1 k2 : Nat} {ptable : PolicyTable} {level : Nat} {op : Val}
+    {args : List Val} {T : TowerState} {r1 T1 r2 T2}
+    (h1 : applyDirect k1 ptable level op args T = some (r1, T1))
+    (h2 : applyDirect k2 ptable level op args T = some (r2, T2)) : r1 = r2 ∧ T1 = T2 := by
+  have h1' := applyDirect_fuel_mono (Nat.le_max_left k1 k2) h1
+  have h2' := applyDirect_fuel_mono (Nat.le_max_right k1 k2) h2
+  rw [h1'] at h2'; simp only [Option.some.injEq, Prod.mk.injEq] at h2'; exact h2'
+
+/-- **`applyDirect` forward-FL upgrade.** Given a reconstructed a-side
+    `applyDirect` convergence (at any fuel `k`) and the driving b-side run, read
+    the cross-side bundle off the forward clause and pin the b-side result by
+    determinism. -/
+theorem rev_applyDirect_upgrade {n k : Nat} {ptable : PolicyTable} {level : Nat}
+    {op_a op_b : Val} {args_a args_b : List Val} {T_a T_b : TowerState}
+    {r_a : Val} {T_a' : TowerState} {r_b : Val} {T_b' : TowerState}
+    (hresp : PolicyTableRespectsBisimT ptable) (h_tower : TowerInvβ T_a T_b) (hbr : BReady T_b)
+    (hpop : PureVal op_a = true) (hpargs : PureValList args_a = true)
+    (h_vv_op : ValVisβ op_a op_b T_a.heap T_b.heap)
+    (h_lvv : ListValVisβ args_a args_b T_a.heap T_b.heap)
+    (hv_opa : ValValid op_a T_a.heap) (hv_opb : ValValid op_b T_b.heap)
+    (hv_argsa : ListValValid args_a T_a.heap) (hv_argsb : ListValValid args_b T_b.heap)
+    (hev_a : applyDirect k ptable level op_a args_a T_a = some (r_a, T_a'))
+    (hev_b : applyDirect n ptable level op_b args_b T_b = some (r_b, T_b')) :
+    ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ TowerInvβ T_a' T_b' ∧
+    HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  obtain ⟨r_b', T_b'', hev_b', h_vv, h_tower', h_he, hv_ra, hv_rb'⟩ :=
+    (frameβ_tower k).2.2.2 ptable level op_a op_b args_a args_b T_a T_b r_a T_a' hresp h_tower hbr
+      hpop hpargs h_vv_op h_lvv hv_opa hv_opb hv_argsa hv_argsb hev_a
+  obtain ⟨hr, hT⟩ := applyDirect_det hev_b' hev_b
+  subst hr; subst hT
+  exact ⟨h_vv, h_tower', h_he, hv_ra, hv_rb'⟩
+
+/-- Reverse `applyPrim` **convergence**: a b-side primitive application that
+    succeeds pulls back to a converging a-side one.  Convergence only (the value
+    relation comes from `rev_applyDirect_upgrade`); the predicate primitives
+    reduce to plain length-matching, the arithmetic ones to `…_inv_rev`. -/
+theorem applyPrim_conv_rev (name : String) (args_a args_b : List Val) (h_a h_b : Heap)
+    (h_lvv : ListValVisβ args_a args_b h_a h_b)
+    (r_b : Val) (h : applyPrim name args_b = some r_b) :
+    ∃ r_a, applyPrim name args_a = some r_a := by
+  unfold applyPrim at h ⊢
+  by_cases hp_plus : name = "+"
+  · subst hp_plus; simp only [↓reduceIte] at h ⊢
+    cases args_b with
+    | nil => simp [applyPrim_plus] at h
+    | cons v0 rest => cases rest with
+      | nil => simp [applyPrim_plus] at h
+      | cons v1 rest2 => cases rest2 with
+        | cons _ _ => simp [applyPrim_plus] at h
+        | nil => cases v0 with
+          | num b0 => cases v1 with
+            | num b1 =>
+                match args_a, h_lvv with
+                | [a0, a1], ⟨hv0, hv1, _⟩ =>
+                    obtain rfl := ValVisβ_num_inv_rev hv0; obtain rfl := ValVisβ_num_inv_rev hv1
+                    exact ⟨_, rfl⟩
+                | [], hl => exact hl.elim
+                | [_], hl => exact hl.2.elim
+                | _ :: _ :: _ :: _, hl => exact hl.2.2.elim
+            | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _ | builtinBaseApply =>
+                simp [applyPrim_plus] at h
+          | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _ | builtinBaseApply =>
+              simp [applyPrim_plus] at h
+  by_cases hp_minus : name = "-"
+  · subst hp_minus; simp only [↓reduceIte, hp_plus] at h ⊢
+    cases args_b with
+    | nil => simp [applyPrim_minus] at h
+    | cons v0 rest => cases rest with
+      | nil => simp [applyPrim_minus] at h
+      | cons v1 rest2 => cases rest2 with
+        | cons _ _ => simp [applyPrim_minus] at h
+        | nil => cases v0 with
+          | num b0 => cases v1 with
+            | num b1 =>
+                match args_a, h_lvv with
+                | [a0, a1], ⟨hv0, hv1, _⟩ =>
+                    obtain rfl := ValVisβ_num_inv_rev hv0; obtain rfl := ValVisβ_num_inv_rev hv1
+                    exact ⟨_, rfl⟩
+                | [], hl => exact hl.elim
+                | [_], hl => exact hl.2.elim
+                | _ :: _ :: _ :: _, hl => exact hl.2.2.elim
+            | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _ | builtinBaseApply =>
+                simp [applyPrim_minus] at h
+          | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _ | builtinBaseApply =>
+              simp [applyPrim_minus] at h
+  by_cases hp_times : name = "*"
+  · subst hp_times; simp only [↓reduceIte, hp_plus, hp_minus] at h ⊢
+    cases args_b with
+    | nil => simp [applyPrim_times] at h
+    | cons v0 rest => cases rest with
+      | nil => simp [applyPrim_times] at h
+      | cons v1 rest2 => cases rest2 with
+        | cons _ _ => simp [applyPrim_times] at h
+        | nil => cases v0 with
+          | num b0 => cases v1 with
+            | num b1 =>
+                match args_a, h_lvv with
+                | [a0, a1], ⟨hv0, hv1, _⟩ =>
+                    obtain rfl := ValVisβ_num_inv_rev hv0; obtain rfl := ValVisβ_num_inv_rev hv1
+                    exact ⟨_, rfl⟩
+                | [], hl => exact hl.elim
+                | [_], hl => exact hl.2.elim
+                | _ :: _ :: _ :: _, hl => exact hl.2.2.elim
+            | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _ | builtinBaseApply =>
+                simp [applyPrim_times] at h
+          | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _ | builtinBaseApply =>
+              simp [applyPrim_times] at h
+  by_cases hp_mul : name = "mul-list"
+  · subst hp_mul; simp only [↓reduceIte, hp_plus, hp_minus, hp_times] at h ⊢
+    cases args_b with
+    | nil => simp [applyPrim_mulList] at h
+    | cons vb rest => cases rest with
+      | cons _ _ => simp [applyPrim_mulList] at h
+      | nil =>
+          simp only [applyPrim_mulList] at h
+          cases hm : mulConsList vb with
+          | none => rw [hm] at h; simp at h
+          | some k =>
+              match args_a, h_lvv with
+              | [va], ⟨hv, _⟩ =>
+                  obtain rfl := closedVal_ValVisβ_eq_rev va vb h_a h_b (mulConsList_closedVal hm) hv
+                  exact ⟨.num k, by simp [applyPrim_mulList, hm]⟩
+              | [], hl => exact hl.elim
+              | _ :: _ :: _, hl => exact hl.2.elim
+  by_cases hp_eq : name = "="
+  · subst hp_eq; simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul] at h ⊢
+    cases args_b with
+    | nil => simp [applyPrim_eq] at h
+    | cons v0 rest => cases rest with
+      | nil => simp [applyPrim_eq] at h
+      | cons v1 rest2 => cases rest2 with
+        | cons _ _ => simp [applyPrim_eq] at h
+        | nil => cases v0 with
+          | num b0 => cases v1 with
+            | num b1 =>
+                match args_a, h_lvv with
+                | [a0, a1], ⟨hv0, hv1, _⟩ =>
+                    obtain rfl := ValVisβ_num_inv_rev hv0; obtain rfl := ValVisβ_num_inv_rev hv1
+                    exact ⟨_, rfl⟩
+                | [], hl => exact hl.elim
+                | [_], hl => exact hl.2.elim
+                | _ :: _ :: _ :: _, hl => exact hl.2.2.elim
+            | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _ | builtinBaseApply =>
+                simp [applyPrim_eq] at h
+          | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _ | builtinBaseApply =>
+              simp [applyPrim_eq] at h
+  by_cases hp_numQ : name = "num?"
+  · subst hp_numQ; simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq] at h ⊢
+    cases args_b with
+    | nil => simp [applyPrim_numQ] at h
+    | cons v0 rest => cases rest with
+      | cons _ _ => simp [applyPrim_numQ] at h
+      | nil =>
+          match args_a, h_lvv with
+          | [a0], _ => cases a0 <;> exact ⟨_, rfl⟩
+          | [], hl => exact hl.elim
+          | _ :: _ :: _, hl => exact hl.2.elim
+  by_cases hp_boolQ : name = "bool?"
+  · subst hp_boolQ
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ] at h ⊢
+    cases args_b with
+    | nil => simp [applyPrim_boolQ] at h
+    | cons v0 rest => cases rest with
+      | cons _ _ => simp [applyPrim_boolQ] at h
+      | nil =>
+          match args_a, h_lvv with
+          | [a0], _ => cases a0 <;> exact ⟨_, rfl⟩
+          | [], hl => exact hl.elim
+          | _ :: _ :: _, hl => exact hl.2.elim
+  by_cases hp_closureQ : name = "closure?"
+  · subst hp_closureQ
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ, hp_boolQ] at h ⊢
+    cases args_b with
+    | nil => simp [applyPrim_closureQ] at h
+    | cons v0 rest => cases rest with
+      | cons _ _ => simp [applyPrim_closureQ] at h
+      | nil =>
+          match args_a, h_lvv with
+          | [a0], _ => cases a0 <;> exact ⟨_, rfl⟩
+          | [], hl => exact hl.elim
+          | _ :: _ :: _, hl => exact hl.2.elim
+  by_cases hp_primQ : name = "prim?"
+  · subst hp_primQ
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ, hp_boolQ,
+               hp_closureQ] at h ⊢
+    cases args_b with
+    | nil => simp [applyPrim_primQ] at h
+    | cons v0 rest => cases rest with
+      | cons _ _ => simp [applyPrim_primQ] at h
+      | nil =>
+          match args_a, h_lvv with
+          | [a0], _ => cases a0 <;> exact ⟨_, rfl⟩
+          | [], hl => exact hl.elim
+          | _ :: _ :: _, hl => exact hl.2.elim
+  by_cases hp_cons : name = "cons"
+  · subst hp_cons
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ, hp_boolQ,
+               hp_closureQ, hp_primQ] at h ⊢
+    cases args_b with
+    | nil => simp [applyPrim_cons] at h
+    | cons b0 rest => cases rest with
+      | nil => simp [applyPrim_cons] at h
+      | cons b1 rest2 => cases rest2 with
+        | cons _ _ => simp [applyPrim_cons] at h
+        | nil =>
+            match args_a, h_lvv with
+            | [a0, a1], _ => exact ⟨.cons a0 a1, by simp [applyPrim_cons]⟩
+            | [], hl => exact hl.elim
+            | [_], hl => exact hl.2.elim
+            | _ :: _ :: _ :: _, hl => exact hl.2.2.elim
+  by_cases hp_car : name = "car"
+  · subst hp_car
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ, hp_boolQ,
+               hp_closureQ, hp_primQ, hp_cons] at h ⊢
+    cases args_b with
+    | nil => simp [applyPrim_car] at h
+    | cons b0 rest => cases rest with
+      | cons _ _ => simp [applyPrim_car] at h
+      | nil => cases b0 with
+        | cons xb yb =>
+            match args_a, h_lvv with
+            | [a0], ⟨hv, _⟩ =>
+                obtain ⟨x_a, y_a, rfl, _, _⟩ := ValVisβ_cons_inv_rev hv
+                exact ⟨x_a, by simp [applyPrim_car]⟩
+            | [], hl => exact hl.elim
+            | _ :: _ :: _, hl => exact hl.2.elim
+        | num _ | bool _ | nilV | sym _ | closure _ _ _ | prim _ | builtinBaseApply =>
+            simp [applyPrim_car] at h
+  by_cases hp_cdr : name = "cdr"
+  · subst hp_cdr
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ, hp_boolQ,
+               hp_closureQ, hp_primQ, hp_cons, hp_car] at h ⊢
+    cases args_b with
+    | nil => simp [applyPrim_cdr] at h
+    | cons b0 rest => cases rest with
+      | cons _ _ => simp [applyPrim_cdr] at h
+      | nil => cases b0 with
+        | cons xb yb =>
+            match args_a, h_lvv with
+            | [a0], ⟨hv, _⟩ =>
+                obtain ⟨x_a, y_a, rfl, _, _⟩ := ValVisβ_cons_inv_rev hv
+                exact ⟨y_a, by simp [applyPrim_cdr]⟩
+            | [], hl => exact hl.elim
+            | _ :: _ :: _, hl => exact hl.2.elim
+        | num _ | bool _ | nilV | sym _ | closure _ _ _ | prim _ | builtinBaseApply =>
+            simp [applyPrim_cdr] at h
+  by_cases hp_nullQ : name = "null?"
+  · subst hp_nullQ
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ, hp_boolQ,
+               hp_closureQ, hp_primQ, hp_cons, hp_car, hp_cdr] at h ⊢
+    cases args_b with
+    | nil => simp [applyPrim_nullQ] at h
+    | cons v0 rest => cases rest with
+      | cons _ _ => simp [applyPrim_nullQ] at h
+      | nil =>
+          match args_a, h_lvv with
+          | [a0], _ => cases a0 <;> exact ⟨_, rfl⟩
+          | [], hl => exact hl.elim
+          | _ :: _ :: _, hl => exact hl.2.elim
+  exfalso
+  simp only [hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ, hp_boolQ,
+             hp_closureQ, hp_primQ, hp_cons, hp_car, hp_cdr, hp_nullQ, ↓reduceIte] at h
+  exact absurd h (by simp)
+
+/-! ### 7v (cont.). The reverse `applyDirect` clause.
+
+b-side-driven, `∃ k` a-side fuel.  Cases on `op_a` (its b-side shape pinned by
+`ValVisβ`): the non-applicable shapes make the b-side `applyDirect` `none`; `.prim`
+pulls the a-side call back with `applyPrim_conv_rev`; `.builtinBaseApply`
+re-dispatches with `valToList_bisimβ_rev` + the reverse IH; `.closure` runs the
+body via the reverse eval IH over the (symmetric) `allocStep` plumbing.  Each live
+case reconstructs a-side **convergence**, then `rev_applyDirect_upgrade` reads the
+cross-side bundle off the forward clause. -/
+
+def FrameβApplyDirectStmtRev (n : Nat) : Prop :=
+  ∀ (ptable : PolicyTable) (level : Nat) (op_a op_b : Val)
+    (args_a args_b : List Val) (T_a T_b : TowerState) (r_b : Val) (T_b' : TowerState),
+    PolicyTableRespectsBisimT ptable →
+    TowerInvβ T_a T_b →
+    BReady T_b →
+    PureVal op_a = true →
+    PureValList args_a = true →
+    ValVisβ op_a op_b T_a.heap T_b.heap →
+    ListValVisβ args_a args_b T_a.heap T_b.heap →
+    ValValid op_a T_a.heap → ValValid op_b T_b.heap →
+    ListValValid args_a T_a.heap → ListValValid args_b T_b.heap →
+    applyDirect n ptable level op_b args_b T_b = some (r_b, T_b') →
+    ∃ (k : Nat) (r_a : Val) (T_a' : TowerState),
+      applyDirect k ptable level op_a args_a T_a = some (r_a, T_a') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ TowerInvβ T_a' T_b' ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap
+
+theorem frameβ_applyDirect_evalRev (n : Nat)
+    (ih_eval : FrameβEvalStmtRev n) (ih_ad : FrameβApplyDirectStmtRev n) :
+    FrameβApplyDirectStmtRev (n + 1) := by
+  intro ptable level op_a op_b args_a args_b T_a T_b r_b T_b'
+        hresp h_tower hbr hpop hpargs h_vv_op h_lvv hv_opa hv_opb hv_argsa hv_argsb heval
+  have heval0 := heval
+  have h_vv1 := h_vv_op 1
+  cases op_a with
+  | num _ => cases op_b <;> simp_all [ValVisβ_aux, applyDirect]
+  | bool _ => cases op_b <;> simp_all [ValVisβ_aux, applyDirect]
+  | nilV => cases op_b <;> simp_all [ValVisβ_aux, applyDirect]
+  | sym _ => cases op_b <;> simp_all [ValVisβ_aux, applyDirect]
+  | cons _ _ => cases op_b <;> simp_all [ValVisβ_aux, applyDirect]
+  | prim name =>
+      have h_opb : op_b = .prim name := by
+        cases op_b with
+        | prim n' => simp only [ValVisβ_aux] at h_vv1; rw [h_vv1]
+        | num _ => simp [ValVisβ_aux] at h_vv1
+        | bool _ => simp [ValVisβ_aux] at h_vv1
+        | nilV => simp [ValVisβ_aux] at h_vv1
+        | sym _ => simp [ValVisβ_aux] at h_vv1
+        | cons _ _ => simp [ValVisβ_aux] at h_vv1
+        | closure _ _ _ => simp [ValVisβ_aux] at h_vv1
+        | builtinBaseApply => simp [ValVisβ_aux] at h_vv1
+      subst h_opb
+      cases h_ap : applyPrim name args_b with
+      | none => simp [applyDirect, h_ap] at heval
+      | some v_b' =>
+          obtain ⟨r_a, hp_a⟩ := applyPrim_conv_rev name args_a args_b T_a.heap T_b.heap h_lvv v_b' h_ap
+          have hev_a : applyDirect 1 ptable level (.prim name) args_a T_a = some (r_a, T_a) := by
+            simp [applyDirect, hp_a]
+          obtain ⟨h_vv, h_tower', h_he, hv_ra, hv_rb⟩ :=
+            rev_applyDirect_upgrade hresp h_tower hbr hpop hpargs h_vv_op h_lvv hv_opa hv_opb
+              hv_argsa hv_argsb hev_a heval0
+          exact ⟨1, r_a, T_a, hev_a, h_vv, h_tower', h_he, hv_ra, hv_rb⟩
+  | builtinBaseApply =>
+      have h_opb : op_b = .builtinBaseApply := by
+        cases op_b with
+        | builtinBaseApply => rfl
+        | num _ => simp [ValVisβ_aux] at h_vv1
+        | bool _ => simp [ValVisβ_aux] at h_vv1
+        | nilV => simp [ValVisβ_aux] at h_vv1
+        | sym _ => simp [ValVisβ_aux] at h_vv1
+        | cons _ _ => simp [ValVisβ_aux] at h_vv1
+        | closure _ _ _ => simp [ValVisβ_aux] at h_vv1
+        | prim _ => simp [ValVisβ_aux] at h_vv1
+      subst h_opb
+      rcases args_b with _ | ⟨aOb, _ | ⟨olb, _ | ⟨_, _⟩⟩⟩
+      · simp [applyDirect] at heval
+      · simp [applyDirect] at heval
+      · -- args_b = [aOb, olb]
+        rcases args_a with _ | ⟨actualOp_a, _ | ⟨operandsList_a, _ | _⟩⟩
+        · exact h_lvv.elim
+        · exact h_lvv.2.elim
+        · -- args_a = [actualOp_a, operandsList_a]
+          simp only [applyDirect] at heval
+          have h_vv_actual := h_lvv.1
+          have h_vv_olist := h_lvv.2.1
+          have hv_actual_a := hv_argsa.1
+          have hv_olist_a := hv_argsa.2.1
+          have hv_actual_b := hv_argsb.1
+          have hv_olist_b := hv_argsb.2.1
+          have hpc := hpargs
+          simp only [PureValList, Bool.and_eq_true, and_true] at hpc
+          cases hl_b : valToList olb with
+          | none => rw [hl_b] at heval; simp at heval
+          | some operands_b =>
+              rw [hl_b] at heval; simp only at heval
+              obtain ⟨operands_a, hl_a, h_lvv_ops, hv_ops_a, hv_ops_b⟩ :=
+                valToList_bisimβ_rev operandsList_a olb operands_b T_a.heap T_b.heap
+                  h_vv_olist hl_b hv_olist_a hv_olist_b
+              have hp_ops : PureValList operands_a = true := valToList_PureValList hpc.2 hl_a
+              obtain ⟨k', r_a', T_a'', h_ad_a, _, _, _, _, _⟩ :=
+                ih_ad ptable level actualOp_a aOb operands_a operands_b T_a T_b r_b T_b'
+                  hresp h_tower hbr hpc.1 hp_ops h_vv_actual h_lvv_ops
+                  hv_actual_a hv_actual_b hv_ops_a hv_ops_b heval
+              have hev_a : applyDirect (k' + 1) ptable level .builtinBaseApply
+                  [actualOp_a, operandsList_a] T_a = some (r_a', T_a'') := by
+                simp only [applyDirect, hl_a, h_ad_a]
+              obtain ⟨h_vv, h_tower', h_he, hv_ra, hv_rb⟩ :=
+                rev_applyDirect_upgrade hresp h_tower hbr hpop hpargs h_vv_op h_lvv hv_opa hv_opb
+                  hv_argsa hv_argsb hev_a heval0
+              exact ⟨k' + 1, r_a', T_a'', hev_a, h_vv, h_tower', h_he, hv_ra, hv_rb⟩
+        · exact h_lvv.2.2.elim
+      · simp [applyDirect] at heval
+  | closure ps body cenv =>
+      obtain ⟨body', cenv_b, rfl⟩ := ValVisβ_closure_inv h_vv_op
+      obtain ⟨_, hβ_body, h_env_cenv⟩ := closure_ValVisβ_imp h_vv_op
+      simp only [applyDirect] at heval
+      by_cases hlen_b : ps.length = args_b.length
+      · have hlen_a : ps.length = args_a.length := hlen_b.trans (ListValVisβ.length_eq h_lvv).symm
+        have hne_b : (ps.length != args_b.length) = false := by simp [hlen_b]
+        rw [hne_b] at heval; simp only [Bool.false_eq_true, ↓reduceIte] at heval
+        obtain ⟨hh_a', hh_b', hev_a', hev_b', h_env_alloc, ⟨ext_a, hex_a⟩, ⟨ext_b, hex_b⟩⟩ :=
+          EnvVisβ_allocStep_chain args_a args_b ps cenv cenv_b T_a.heap T_b.heap
+            hlen_a.symm hlen_b.symm h_lvv hv_argsa hv_argsb h_tower.hv_a h_tower.hv_b
+            hv_opa hv_opb h_env_cenv
+        obtain ⟨hlva', hlvb', hlvisβ'⟩ :=
+          level_fields_extend ext_a ext_b h_tower.hv_a h_tower.hv_b
+            h_tower.valid_a h_tower.valid_b h_tower.visβ
+        have h_tower_alloc : TowerInvβ
+            { T_a with heap := (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).1 }
+            { T_b with heap := (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).1 } :=
+          { hv_a := hh_a', hv_b := hh_b', count := h_tower.count
+            valid_a := by rw [hex_a]; exact hlva', valid_b := by rw [hex_b]; exact hlvb'
+            visβ := by rw [hex_a, hex_b]; exact hlvisβ'
+            pol_eq := h_tower.pol_eq, pol_resp := h_tower.pol_resp }
+        have hpargs_b : PureValList args_b = true := ListValVisβ_pureValList h_lvv hpargs
+        have hbr_alloc : BReady
+            { T_b with heap := (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).1 } := by
+          refine ⟨?_, allocStep_foldl_pureHeap (args_b.zip ps) T_b.heap cenv_b hbr.2
+                    (pureValList_zip_fst hpargs_b)⟩
+          rw [hex_b]; exact hbr.1.extends (StateExtends.of_heap_append T_b ext_b)
+        obtain ⟨k', r_a', T_a'', h_eval_a, _, _, _, _, _⟩ :=
+          ih_eval ptable level body body'
+            (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).2
+            (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).2
+            { T_a with heap := (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).1 }
+            { T_b with heap := (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).1 }
+            r_b T_b' hβ_body hpop hresp
+            (WFCtxTβ.ofTower h_tower_alloc hev_a' hev_b' h_env_alloc) hbr_alloc heval
+        have hev_a : applyDirect (k' + 1) ptable level (.closure ps body cenv) args_a T_a
+            = some (r_a', T_a'') := by
+          simp only [applyDirect]
+          have hne_a : (ps.length != args_a.length) = false := by simp [hlen_a]
+          rw [hne_a]; simp only [Bool.false_eq_true, ↓reduceIte]; exact h_eval_a
+        obtain ⟨h_vv, h_tower', h_he, hv_ra, hv_rb⟩ :=
+          rev_applyDirect_upgrade hresp h_tower hbr hpop hpargs h_vv_op h_lvv hv_opa hv_opb
+            hv_argsa hv_argsb hev_a heval0
+        exact ⟨k' + 1, r_a', T_a'', hev_a, h_vv, h_tower', h_he, hv_ra, hv_rb⟩
+      · have hne_b : (ps.length != args_b.length) = true := by simp [hlen_b]
+        rw [hne_b] at heval; simp at heval
+
 end LeanBlack
 
 
