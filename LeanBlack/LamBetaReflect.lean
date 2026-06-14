@@ -3245,6 +3245,34 @@ theorem frameβ_tower : ∀ n, FrameStmtβP n := by
 /-- The eval clause of the fundamental lemma, extracted for direct use. -/
 theorem frameβ_eval_FL (n : Nat) : FrameβEvalStmtWP n := (frameβ_tower n).1
 
+/-! ## 7t. The forward observational refinement — discharged.
+
+The §7n forward bridge `obsConv_refine_of_FL` took the fundamental lemma as an
+*abstract* hypothesis `hFL`.  With `frameβ_eval_FL` now in hand, we discharge it:
+no `hFL` parameter, and the `d`-window `BuiltinReadyN d` premise is replaced by
+the assembled all-levels gate `BReady`.  The FL is instantiated **diagonally**
+(`env_a = env_b = env`, `T_a = T_b = T`) via `WFCtxTβ.refl`, so it speaks about
+the single-sided observation; `ValVisβ_isGround_eq` collapses the related ground
+result to *equality*.  This is the forward half of the conditional ground
+`CtxEquiv`; the reverse half awaits the reverse simulation (its operational core
+is the `eval_beta_builtin` / `eval_letE` shared reduct, symmetric). -/
+theorem obsConv_refine_forward {M N : Expr} (hβ : BetaRel M N)
+    (C : Ctx) (ptable : PolicyTable) (level : Nat) (env : Env) (T : TowerState) (g : Val)
+    (hg : g.isGround = true)
+    (hresp : PolicyTableRespectsBisimT ptable)
+    (hpure : Pure (C.plug M) = true)
+    (hbr : BReady T)
+    (hh : HeapValid T.heap) (hev_env : EnvValid env T.heap)
+    (hlv : ∀ n e, T.envAt? n = some e → EnvValid e T.heap)
+    (hpr : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+    (hobs : ObsConv (C.plug M) ptable level env T g) :
+    ObsConv (C.plug N) ptable level env T g := by
+  obtain ⟨k, T', hev⟩ := hobs
+  obtain ⟨r_b, T_b', hev_b, hvv, _⟩ :=
+    frameβ_eval_FL k ptable level (C.plug M) (C.plug N) env env T T g T'
+      (hβ.congr C) hpure hresp (WFCtxTβ.refl hh hev_env hlv hpr) hbr hev
+  exact ⟨k, T_b', (ValVisβ_isGround_eq hg hvv) ▸ hev_b⟩
+
 end LeanBlack
 
 
