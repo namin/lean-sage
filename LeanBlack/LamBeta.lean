@@ -44,12 +44,16 @@
     agreement), `frameβ_seq_eval` (`.seq`, list-structured via
     `seq_cons_inv`), `frameβ_evalList_eval` (the `evalList` argument-list
     traversal, the two-IH list clause over `ListValVisβ` that bridges into
-    `.app`), and `EnvVisβ_allocStep_chain` (§6g, the closure-apply argument
-    binding — the gate-free half of `applyDirect`'s closure case, a β-port of
-    `Bisim.alloc_chain_bisim`). Proof that the §4 substrate composes into real
-    fundamental-lemma cases. Only the `WFCtxTβ` statement-wrapper upgrade and
-    the reflective gate dispatch (`applyVia`'s `base-apply` lookup, the
-    closure-body eval, `.em`/`.set`) remain (the open core).
+    `.app`), `EnvVisβ_allocStep_chain` (§6g, the closure-apply argument
+    binding — a β-port of `Bisim.alloc_chain_bisim`), and **§6h
+    `frameβ_applyDirect_closure_eval`** (the gate-free closure case of
+    `applyDirect` — function *elimination*: the closure bodies are run by the
+    eval IH over `BetaRel body body'`, the relational crux of route (a), with
+    `closure_ValVisβ_imp` + `ListValVisβ.length_eq` as helpers). Proof that the
+    §4 substrate composes into real fundamental-lemma cases. What remains is the
+    reflective gate dispatch (`applyVia`'s `base-apply` lookup + cross-level
+    call), `applyDirect`'s mechanical `.prim`/`.builtinBaseApply` subcases, the
+    `WFCtxTβ` statement-wrapper upgrade, and `.em`/`.set` (the open core).
 
   The weakening `ValVis_weak ⊆ ValVisβ` holds by the same structural
   induction as `Bisim.ValVis_aux_to_weak` with `BetaRel.refl` discharging
@@ -281,11 +285,13 @@ def FrameStmtβ_eval (n : Nat) : Prop :=
 
     This is the function-*introduction* half of `FrameStmtβ_eval`, and it
     is exactly the `.lam` carve-out the artifact left open, now closed at
-    the value-relation level. The residual open core is the *elimination*
-    side — `.app` / `applyVia`, where the closure is run and the gate
-    threading (route (b)) bites — together with the structural cases
-    (`.ifte` / `.letE` / `.seq` / `.set` / `.em` / `.primApp`), each a
-    `BetaRel`-inversion plus an IH thread. -/
+    the value-relation level. Its function-*elimination* counterpart — running
+    a closure on related arguments — is `frameβ_applyDirect_closure_eval` (§6h),
+    also gate-free; together they close the closure introduction/elimination
+    pair. The residual open core is the *gated* elimination path — `applyVia`'s
+    `base-apply` lookup + cross-level call (route (b)) — plus the structural
+    cases (`.ifte` / `.letE` / `.seq` discharged in §6; `.set` / `.em`
+    reflective, still open). -/
 theorem frameβ_lam_case (n : Nat) (ptable : PolicyTable) (level : Nat)
     (ps : List String) (body exp_b : Expr)
     (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState)
@@ -824,12 +830,16 @@ Quot.sound}).** The body-independent substrate the allocating cases need:
 §6 then assembles the eval obligation (`HeapEvolutionβ`, `WFβ`) and
 discharges **every gate-free structural case** on it: the allocating
 binder (`.letE`, `frameβ_letE_eval`), the branch (`.ifte`,
-`frameβ_ifte_eval`), the sequence (`.seq`, `frameβ_seq_eval`), and the
+`frameβ_ifte_eval`), the sequence (`.seq`, `frameβ_seq_eval`), the
 argument-list traversal (`evalList`, `frameβ_evalList_eval` — §6f, the
 two-IH list clause producing `ListValVisβ`-related results, the bridge
-into `.app`) — the proof that this substrate composes into real
+into `.app`), and — §6h — the **gate-free closure case of `applyDirect`**
+(`frameβ_applyDirect_closure_eval`, function elimination: closure bodies run
+by the eval IH over `BetaRel body body'`, helpers `closure_ValVisβ_imp` /
+`ListValVisβ.length_eq`) — the proof that this substrate composes into real
 fundamental-lemma cases. Together with the §3 atoms/`.lam`, the **entire
-gate-free fragment of the faithful eval/evalList clauses is now closed**.
+gate-free fragment of the faithful eval/evalList clauses is now closed**, and
+both halves of the closure introduction/elimination pair are in hand.
 
 **Still open (the genuine core, now sharply isolated).**
 
@@ -844,22 +854,28 @@ gate-free fragment of the faithful eval/evalList clauses is now closed**.
    deliberately, *with* those cases below: a wrapper carrying half-formed
    reflective fields would misstate the boundary.
 2. *The elimination side* — `applyVia` / `applyDirect`, the **gate
-   threading** (route (b)). The structural and allocation halves are now in
-   hand: `app_inv` (§4d) supplies the `BetaRel` inversion (the disjunction
-   whose root-contraction branch is the genuine novelty), `BetaRelList` the
-   argument relation, `frameβ_evalList_eval` (§6f) discharges the argument-
-   list traversal to `ListValVisβ`-related results, and `EnvVisβ_allocStep_chain`
-   (§6g) carries `EnvVisβ` through the closure-apply argument binding (the
-   gate-free half of `applyDirect`'s closure case). What remains is the
-   genuinely reflective core: `applyVia`'s **gate dispatch** — the level-(level+1)
-   `base-apply` lookup and cross-level closure call — and, in `applyDirect`'s
-   closure case, the body eval (eval IH at fuel `n` over `BetaRel body_a body_b`
-   and §6g's `EnvVisβ`). This, with the reflective `.em` / `.set` and the
-   policy/level fields of `WFCtxTβ`, is where the real research risk sits;
-   `BuiltinReady` (standard gate) is the premise that is meant to tame it. The
-   de-risking first target is the concrete Wand pair `(λx. x) 0` / `let x = 0 in x`
-   under a binder, whose redex/contractum closures `ValVisβ_relates_beta_closures`
-   (§2) already relates.
+   threading** (route (b)). The structural, allocation, *and closure-body*
+   halves are now in hand: `app_inv` (§4d) supplies the `BetaRel` inversion (the
+   disjunction whose root-contraction branch is the genuine novelty),
+   `BetaRelList` the argument relation, `frameβ_evalList_eval` (§6f) discharges
+   the argument-list traversal to `ListValVisβ`-related results,
+   `EnvVisβ_allocStep_chain` (§6g) carries `EnvVisβ` through the closure-apply
+   argument binding, and `frameβ_applyDirect_closure_eval` (§6h) **runs the
+   closure body** — the eval IH at fuel `n` over `BetaRel body body'` on §6g's
+   `EnvVisβ` call envs — closing the gate-free closure case of `applyDirect`
+   end-to-end. What remains is the genuinely reflective core: `applyVia`'s
+   **gate dispatch** — the level-(level+1) `base-apply` lookup and cross-level
+   closure call — and `applyDirect`'s mechanical residue (`.prim` /
+   `.builtinBaseApply` subcases — ground/deterministic ports of `frame_tower`
+   needing β-analogs of `applyPrim_bisim` / `valToList_bisim`). This, with the
+   reflective `.em` / `.set` and the policy/level fields of `WFCtxTβ`, is where
+   the real research risk sits; `BuiltinReady` (standard gate) is the premise
+   that is meant to tame it: under it `applyVia` reduces to `applyDirect`'s
+   closure case, which §6h now discharges. The de-risking first target is the
+   concrete Wand pair `(λx. x) 0` / `let x = 0 in x` under a binder, whose
+   redex/contractum closures `ValVisβ_relates_beta_closures` (§2) already
+   relates and whose closure-apply `frameβ_applyDirect_closure_eval` (§6h) now
+   runs.
 
 With every structural case discharged, the remaining work is exactly
 (1) the statement wrapper and (2) the gate — no structural plumbing is
@@ -1660,5 +1676,147 @@ theorem EnvVisβ_allocStep_chain
               refine ⟨hh_ra, hh_rb, hev_ra, hev_rb, h_env_r, ?_, ?_⟩
               · exact ⟨[a_a] ++ ext_a, by rw [hex_a, List.append_assoc]⟩
               · exact ⟨[a_b] ++ ext_b, by rw [hex_b, List.append_assoc]⟩
+
+/-! ### 6h. The `applyDirect` closure case — the function-elimination milestone
+
+§3's `frameβ_lam_case` discharges function *introduction* (forming a closure
+from `BetaRel`-related bodies); this section discharges the gate-free half of
+function *elimination* — actually *running* a closure. `applyDirect`'s closure
+case (`Eval.lean:200`) is **gate-free**: it checks arity, folds `allocStep` to
+bind the arguments, and evaluates the body directly — no `base-apply` lookup
+(that is `applyVia`'s job, the gated path). So it falls squarely inside the
+`WFβ` framework, and §6g (`EnvVisβ_allocStep_chain`) already supplies the
+argument binding. What remains is exactly the move §0/§2 name as the crux: the
+closure *bodies* are only `BetaRel`-related (different code), so the body eval
+is an eval-IH call over `BetaRel body_a body_b` — the genuine relational
+content of "related closures send related arguments to related results"
+(route (a)). This is the elimination-side analog of `frameβ_lam_case`, and the
+last gate-free piece of `applyDirect`'s closure subcase.
+
+It is the β-port of `frame_tower`'s `applyDirect` closure subcase
+(`Frame.lean:2984`), with the two structural divergences β forces:
+
+* the two operands carry *different* bodies — `closure_ValVisβ_imp` extracts
+  `ps_a = ps_b`, `BetaRel body_a body_b`, `EnvVisβ cenv_a cenv_b`, where
+  `frame_tower` gets literal body/cenv equality via
+  `closure_ValVis_imp_cenv_EnvVis`; and
+* the two post-alloc call envs are merely `EnvVisβ`-related (§6g), where
+  `frame_tower` proves them Lean-equal (`allocStep_chain_aligned`).
+
+The gate-free `WFβ` invariant set suffices throughout: no policy/level fields,
+no `BuiltinReady`. The two helpers DUMP_LAM §3a flags as missing come first. -/
+
+/-- Two `ListValVisβ`-related value lists have equal length — the cross-side
+    arity agreement the closure-apply needs (the b-side arity check `ps.length
+    == args_b.length` must agree with the a-side). Mirror of
+    `ListValVis.length_eq` (`Bisim.lean:1305`). -/
+theorem ListValVisβ.length_eq : ∀ {xs ys : List Val} {h_a h_b : Heap},
+    ListValVisβ xs ys h_a h_b → xs.length = ys.length
+  | [],      [],      _, _, _ => rfl
+  | [],      _ :: _,  _, _, h => absurd h (by simp [ListValVisβ])
+  | _ :: _,  [],      _, _, h => absurd h (by simp [ListValVisβ])
+  | _ :: xs, _ :: ys, _, _, ⟨_, h_tail⟩ => by
+      simp [List.length_cons, ListValVisβ.length_eq h_tail]
+
+/-- **The closure inversion.** Universal-depth `ValVisβ` between two closures
+    yields equal params, `BetaRel`-related bodies, and `EnvVisβ`-related
+    captured envs — the closure clause of `ValVisβ_aux`, lifted to all depths.
+    The β-analog of `closure_ValVis_imp_cenv_EnvVis` (`Bisim.lean:3003`), which
+    gets literal body/cenv equality; here the body is only `BetaRel`, the cenv
+    only `EnvVisβ`. This is what feeds the body eval its `BetaRel body_a body_b`
+    and the `allocStep` fold its `EnvVisβ cenv_a cenv_b`. -/
+theorem closure_ValVisβ_imp
+    {ps_a ps_b : List String} {body_a body_b : Expr} {cenv_a cenv_b : Env}
+    {h_a h_b : Heap}
+    (h_vv : ValVisβ (.closure ps_a body_a cenv_a) (.closure ps_b body_b cenv_b) h_a h_b) :
+    ps_a = ps_b ∧ BetaRel body_a body_b ∧ EnvVisβ cenv_a cenv_b h_a h_b := by
+  have h1 := h_vv 1
+  rw [ValVisβ_aux_closure] at h1
+  refine ⟨h1.1, h1.2.1, ?_⟩
+  intro d
+  have hd := h_vv (d + 1)
+  rw [ValVisβ_aux_closure] at hd
+  exact hd.2.2
+
+/-- **The `applyDirect` closure case, gate-free.** Running two `BetaRel`-body
+    closures (`ValVisβ`-related, hence same params / `EnvVisβ` cenvs) on
+    `ListValVisβ`-related argument lists yields `ValVisβ`-related results, with
+    the full gate-free invariant set (`HeapValid` both sides, `HeapEvolutionβ`,
+    `ValValid` both results) preserved.
+
+    Stated as a standalone case taking the eval-clause IH (`FrameβEvalStmt n`),
+    in the per-case style of `frameβ_letE_eval` / `frameβ_ifte_eval`. The arity
+    agrees cross-side (`ListValVisβ.length_eq`); §6g
+    (`EnvVisβ_allocStep_chain`) binds the arguments to `EnvVisβ`-related call
+    envs over the divergent alloc heaps; the body is run by the eval IH over
+    `BetaRel body body'` (`closure_ValVisβ_imp`). This closes the gate-free
+    half of `applyDirect`'s closure case — the elimination-side milestone. -/
+theorem frameβ_applyDirect_closure_eval (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (ps : List String) (body body' : Expr) (cenv_a cenv_b : Env)
+    (args_a args_b : List Val) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState)
+    (ih : FrameβEvalStmt n)
+    (hβ_body : BetaRel body body')
+    (h_env_cenv : EnvVisβ cenv_a cenv_b T_a.heap T_b.heap)
+    (h_lvv : ListValVisβ args_a args_b T_a.heap T_b.heap)
+    (hh_a : HeapValid T_a.heap) (hh_b : HeapValid T_b.heap)
+    (hev_a : EnvValid cenv_a T_a.heap) (hev_b : EnvValid cenv_b T_b.heap)
+    (hv_argsa : ListValValid args_a T_a.heap) (hv_argsb : ListValValid args_b T_b.heap)
+    (heval : applyDirect (n + 1) ptable level (.closure ps body cenv_a) args_a T_a
+              = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      applyDirect (n + 1) ptable level (.closure ps body' cenv_b) args_b T_b
+        = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
+      HeapValid T_a'.heap ∧ HeapValid T_b'.heap ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧
+      ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  simp only [applyDirect] at heval
+  by_cases hlen : ps.length = args_a.length
+  · -- arity matches on the a-side; `ListValVisβ.length_eq` carries it to the b-side
+    have hlen_b : ps.length = args_b.length := by
+      rw [hlen]; exact ListValVisβ.length_eq h_lvv
+    have hne_a : (ps.length != args_a.length) = false := by simp [hlen]
+    rw [hne_a] at heval
+    simp only [Bool.false_eq_true, ↓reduceIte] at heval
+    -- arity in the orientation §6g expects
+    have hlen_a' : args_a.length = ps.length := hlen.symm
+    have hlen_b' : args_b.length = ps.length := hlen_b.symm
+    -- §6g: bind the arguments — `EnvVisβ` on the call envs over divergent heaps
+    obtain ⟨hh_a', hh_b', hev_a', hev_b', h_env_alloc, ⟨ext_a, hex_a⟩, ⟨ext_b, hex_b⟩⟩ :=
+      EnvVisβ_allocStep_chain args_a args_b ps cenv_a cenv_b T_a.heap T_b.heap
+        hlen_a' hlen_b' h_lvv hv_argsa hv_argsb hh_a hh_b hev_a hev_b h_env_cenv
+    -- the alloc'd tower states the body is evaluated against
+    let T_a_alloc : TowerState :=
+      { T_a with heap := (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv_a)).1 }
+    let T_b_alloc : TowerState :=
+      { T_b with heap := (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).1 }
+    have hwf_alloc : WFβ
+        (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv_a)).2
+        (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).2
+        T_a_alloc T_b_alloc :=
+      ⟨hh_a', hh_b', hev_a', hev_b'⟩
+    -- the eval IH on the body — the genuine relational step (over `BetaRel body body'`)
+    obtain ⟨r_b, T_b', h_eval_b, h_vv_r, hwf_body, h_he_body, _h_env_body, hv_ra, hv_rb⟩ :=
+      ih ptable level body body'
+        (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv_a)).2
+        (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).2
+        T_a_alloc T_b_alloc r_a T_a'
+        hβ_body hwf_alloc h_env_alloc heval
+    -- chain the heap evolutions: argument-alloc step, then the body eval
+    have h_he_alloc : HeapEvolutionβ T_a T_b T_a_alloc T_b_alloc :=
+      HeapEvolutionβ.from_heapExt hh_a hh_b ⟨ext_a, hex_a⟩ ⟨ext_b, hex_b⟩
+    have h_he_chain : HeapEvolutionβ T_a T_b T_a' T_b' :=
+      h_he_alloc.trans h_he_body
+    refine ⟨r_b, T_b', ?_, h_vv_r, hwf_body.hv_a, hwf_body.hv_b, h_he_chain, hv_ra, hv_rb⟩
+    -- reduce `applyDirect` on the b-side (arity matches, same fold, body eval)
+    simp only [applyDirect]
+    have hne_b : (ps.length != args_b.length) = false := by simp [hlen_b]
+    rw [hne_b]
+    simp only [Bool.false_eq_true, ↓reduceIte]
+    exact h_eval_b
+  · -- arity mismatch on the a-side: `applyDirect` returns `none`, contradicting `heval`
+    have hne : (ps.length != args_a.length) = true := by simp [hlen]
+    rw [hne] at heval
+    simp at heval
 
 end LeanBlack
