@@ -2577,6 +2577,167 @@ theorem allocStep_foldl_pureHeap : ∀ (lst : List (Val × String)) (h : Heap) (
       have hrec := allocStep_foldl_pureHeap tl (h ++ [v]) (.cons p h.length cenv) hh' htl
       simpa only [List.foldl_cons, allocStep, Heap.alloc] using hrec
 
+/-- Every zipped `(value, param)` pair drawn from a `PureValList` has a pure value —
+    the hypothesis `allocStep_foldl_pureHeap` consumes for the closure binding. -/
+theorem pureValList_zip_fst : ∀ {as : List Val} {bs : List String},
+    PureValList as = true → ∀ vp ∈ as.zip bs, PureVal vp.1 = true
+  | [], _, _, vp, hvp => by simp at hvp
+  | _ :: _, [], _, vp, hvp => by simp at hvp
+  | a :: as, b :: bs, hpa, vp, hvp => by
+      simp only [PureValList, Bool.and_eq_true] at hpa
+      simp only [List.zip_cons_cons, List.mem_cons] at hvp
+      rcases hvp with rfl | hvp
+      · exact hpa.1
+      · exact pureValList_zip_fst hpa.2 vp hvp
+
+/-- `applyDirect` over `BReady` — re-cut of `frameβ_applyDirect_evalW`. Carries
+    `PureVal op_a` + `PureValList args_a` + `BReady T_b`. The closure case runs the body
+    via the eval IH with `Pure body` (from `PureVal op_a`) and `BReady` at the
+    arg-bound state (`BuiltinReadyAll.extends` for the gate, `allocStep_foldl_pureHeap`
+    for `PureHeap`); `.builtinBaseApply` re-dispatches with `valToList_PureValList`;
+    `.prim` is ground (premises unused). -/
+def FrameβApplyDirectStmtWP (n : Nat) : Prop :=
+  ∀ (ptable : PolicyTable) (level : Nat) (op_a op_b : Val)
+    (args_a args_b : List Val) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState),
+    PolicyTableRespectsBisimT ptable →
+    TowerInvβ T_a T_b →
+    BReady T_b →
+    PureVal op_a = true →
+    PureValList args_a = true →
+    ValVisβ op_a op_b T_a.heap T_b.heap →
+    ListValVisβ args_a args_b T_a.heap T_b.heap →
+    ValValid op_a T_a.heap → ValValid op_b T_b.heap →
+    ListValValid args_a T_a.heap → ListValValid args_b T_b.heap →
+    applyDirect n ptable level op_a args_a T_a = some (r_a, T_a') →
+    ∃ r_b T_b',
+      applyDirect n ptable level op_b args_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ TowerInvβ T_a' T_b' ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap
+
+theorem frameβ_applyDirect_evalWP (n : Nat)
+    (ih_eval : FrameβEvalStmtWP n) (ih_ad : FrameβApplyDirectStmtWP n) :
+    FrameβApplyDirectStmtWP (n + 1) := by
+  intro ptable level op_a op_b args_a args_b T_a T_b r_a T_a'
+        hresp_pt h_tower hbr hpop hpargs h_vv_op h_lvv hv_opa hv_opb hv_argsa hv_argsb heval
+  have h_vv1 := h_vv_op 1
+  cases op_a with
+  | num _ => simp [applyDirect] at heval
+  | bool _ => simp [applyDirect] at heval
+  | nilV => simp [applyDirect] at heval
+  | sym _ => simp [applyDirect] at heval
+  | cons _ _ => simp [applyDirect] at heval
+  | prim name =>
+      have h_opb : op_b = .prim name := by
+        cases op_b with
+        | prim n' => simp only [ValVisβ_aux] at h_vv1; rw [h_vv1]
+        | num _ => simp [ValVisβ_aux] at h_vv1
+        | bool _ => simp [ValVisβ_aux] at h_vv1
+        | nilV => simp [ValVisβ_aux] at h_vv1
+        | sym _ => simp [ValVisβ_aux] at h_vv1
+        | cons _ _ => simp [ValVisβ_aux] at h_vv1
+        | closure _ _ _ => simp [ValVisβ_aux] at h_vv1
+        | builtinBaseApply => simp [ValVisβ_aux] at h_vv1
+      subst h_opb
+      simp only [applyDirect] at heval
+      cases hp_a : applyPrim name args_a with
+      | none => rw [hp_a] at heval; simp at heval
+      | some v_a' =>
+          rw [hp_a] at heval
+          simp only [Option.some.injEq, Prod.mk.injEq] at heval
+          obtain ⟨hr, hT⟩ := heval; subst hr; subst hT
+          obtain ⟨r_b, hp_b, h_vv_r, hv_ra, hv_rb⟩ :=
+            applyPrim_bisimβ name args_a args_b T_a.heap T_b.heap h_lvv hv_argsa hv_argsb v_a' hp_a
+          exact ⟨r_b, T_b, by simp only [applyDirect, hp_b], h_vv_r, h_tower,
+                 HeapEvolutionβ.refl _ _, hv_ra, hv_rb⟩
+  | builtinBaseApply =>
+      have h_opb : op_b = .builtinBaseApply := by
+        cases op_b with
+        | builtinBaseApply => rfl
+        | num _ => simp [ValVisβ_aux] at h_vv1
+        | bool _ => simp [ValVisβ_aux] at h_vv1
+        | nilV => simp [ValVisβ_aux] at h_vv1
+        | sym _ => simp [ValVisβ_aux] at h_vv1
+        | cons _ _ => simp [ValVisβ_aux] at h_vv1
+        | closure _ _ _ => simp [ValVisβ_aux] at h_vv1
+        | prim _ => simp [ValVisβ_aux] at h_vv1
+      subst h_opb
+      unfold applyDirect at heval
+      match args_a, args_b, h_lvv, hv_argsa, hv_argsb, hpargs with
+      | [], _, _, _, _, _ => simp at heval
+      | _ :: [], _, _, _, _, _ => simp at heval
+      | _ :: _ :: _ :: _, _, _, _, _, _ => simp at heval
+      | [_aO_a, _ol_a], [], h_lvv', _, _, _ => exact h_lvv'.elim
+      | [_aO_a, _ol_a], [_], h_lvv', _, _, _ => exact h_lvv'.2.elim
+      | [_aO_a, _ol_a], _ :: _ :: _ :: _, h_lvv', _, _, _ => exact h_lvv'.2.2.elim
+      | [actualOp_a, operandsList_a], [actualOp_b, operandsList_b],
+          ⟨h_vv_actual, h_vv_olist, _⟩, ⟨hv_actual_a, hv_olist_a, _⟩,
+          ⟨hv_actual_b, hv_olist_b, _⟩, hpargs' =>
+          simp only at heval
+          simp only [PureValList, Bool.and_eq_true, and_true] at hpargs'
+          cases hl_a : valToList operandsList_a with
+          | none => rw [hl_a] at heval; simp at heval
+          | some operands_a =>
+              rw [hl_a] at heval
+              simp only at heval
+              obtain ⟨operands_b, hl_b, h_lvv_ops, hv_ops_a, hv_ops_b⟩ :=
+                valToList_bisimβ operands_a operandsList_a operandsList_b
+                  T_a.heap T_b.heap hl_a h_vv_olist hv_olist_a hv_olist_b
+              have hp_ops : PureValList operands_a = true := valToList_PureValList hpargs'.2 hl_a
+              obtain ⟨r_b, T_b', h_eval_b, h_vv_r, h_tower', h_he', hv_ra, hv_rb⟩ :=
+                ih_ad ptable level actualOp_a actualOp_b operands_a operands_b
+                  T_a T_b r_a T_a' hresp_pt h_tower hbr hpargs'.1 hp_ops h_vv_actual h_lvv_ops
+                  hv_actual_a hv_actual_b hv_ops_a hv_ops_b heval
+              exact ⟨r_b, T_b', by simp only [applyDirect, hl_b, h_eval_b], h_vv_r,
+                     h_tower', h_he', hv_ra, hv_rb⟩
+  | closure ps body cenv =>
+      obtain ⟨body', cenv_b, rfl⟩ := ValVisβ_closure_inv h_vv_op
+      obtain ⟨_, hβ_body, h_env_cenv⟩ := closure_ValVisβ_imp h_vv_op
+      simp only [applyDirect] at heval
+      by_cases hlen : ps.length = args_a.length
+      · have hlen_b : ps.length = args_b.length := by rw [hlen]; exact ListValVisβ.length_eq h_lvv
+        have hne_a : (ps.length != args_a.length) = false := by simp [hlen]
+        rw [hne_a] at heval
+        simp only [Bool.false_eq_true, ↓reduceIte] at heval
+        obtain ⟨hh_a', hh_b', hev_a', hev_b', h_env_alloc, ⟨ext_a, hex_a⟩, ⟨ext_b, hex_b⟩⟩ :=
+          EnvVisβ_allocStep_chain args_a args_b ps cenv cenv_b T_a.heap T_b.heap
+            hlen.symm hlen_b.symm h_lvv hv_argsa hv_argsb h_tower.hv_a h_tower.hv_b
+            hv_opa hv_opb h_env_cenv
+        obtain ⟨hlva', hlvb', hlvisβ'⟩ :=
+          level_fields_extend ext_a ext_b h_tower.hv_a h_tower.hv_b
+            h_tower.valid_a h_tower.valid_b h_tower.visβ
+        have h_tower_alloc : TowerInvβ
+            { T_a with heap := (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).1 }
+            { T_b with heap := (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).1 } :=
+          { hv_a := hh_a', hv_b := hh_b', count := h_tower.count
+            valid_a := by rw [hex_a]; exact hlva', valid_b := by rw [hex_b]; exact hlvb'
+            visβ := by rw [hex_a, hex_b]; exact hlvisβ'
+            pol_eq := h_tower.pol_eq, pol_resp := h_tower.pol_resp }
+        have hpargs_b : PureValList args_b = true := ListValVisβ_pureValList h_lvv hpargs
+        have hbr_alloc : BReady
+            { T_b with heap := (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).1 } := by
+          refine ⟨?_, allocStep_foldl_pureHeap (args_b.zip ps) T_b.heap cenv_b hbr.2
+                    (pureValList_zip_fst hpargs_b)⟩
+          rw [hex_b]; exact hbr.1.extends (StateExtends.of_heap_append T_b ext_b)
+        obtain ⟨r_b, T_b', h_eval_b, h_vv_r, h_ctx_body, h_he_body, hv_ra, hv_rb⟩ :=
+          ih_eval ptable level body body'
+            (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).2
+            (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).2
+            { T_a with heap := (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).1 }
+            { T_b with heap := (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).1 }
+            r_a T_a' hβ_body hpop hresp_pt
+            (WFCtxTβ.ofTower h_tower_alloc hev_a' hev_b' h_env_alloc) hbr_alloc heval
+        have h_he_alloc : HeapEvolutionβ T_a T_b
+            { T_a with heap := (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).1 }
+            { T_b with heap := (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).1 } :=
+          HeapEvolutionβ.from_heapExt h_tower.hv_a h_tower.hv_b ⟨ext_a, hex_a⟩ ⟨ext_b, hex_b⟩
+        refine ⟨r_b, T_b', ?_, h_vv_r, h_ctx_body.toTower,
+                h_he_alloc.trans h_he_body, hv_ra, hv_rb⟩
+        simp only [applyDirect]
+        have hne_b : (ps.length != args_b.length) = false := by simp [hlen_b]
+        rw [hne_b]; simp only [Bool.false_eq_true, ↓reduceIte]; exact h_eval_b
+      · have hne : (ps.length != args_a.length) = true := by simp [hlen]
+        rw [hne] at heval; simp at heval
+
 end LeanBlack
 
 
