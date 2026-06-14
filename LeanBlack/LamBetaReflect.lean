@@ -1835,6 +1835,43 @@ theorem app_lam_redex_min_fuel {k : Nat} {ptable : PolicyTable} {level : Nat}
   | 2 => simp [eval, evalList] at h
   | _ + 3 => omega
 
+/-- A converging `applyVia` forces the depth margin `level + 1 < maxDepth`:
+    `applyVia` materializes `level + 1` *before* dispatching on the operator, and
+    `materialize (level+1)` succeeds iff `level + 1 < maxDepth` (state-independent,
+    `TowerState.materialize`). -/
+theorem applyVia_converges_depth {k : Nat} {ptable : PolicyTable} {level : Nat}
+    {op : Val} {args : List Val} {T : TowerState} {p : Val × TowerState}
+    (h : applyVia (k + 1) ptable level op args T = some p) : level + 1 < Tower.maxDepth := by
+  cases hm : T.materialize (level + 1) with
+  | none => rw [applyVia_materialize_none k ptable level op args T hm] at h; exact absurd h (by simp)
+  | some Tm =>
+      unfold TowerState.materialize at hm
+      split at hm
+      · exact absurd hm (by simp)
+      · omega
+
+/-- A converging β-redex `(λx.B) V` forces the depth margin `level + 1 < maxDepth`
+    — the apply step routes through the reflective `base-apply` gate at `level + 1`
+    (Obstruction B: at the top level the redex cannot fire).  Unfolds the redex to
+    its `applyVia` (mirroring `gate_redex_to_letE`'s operand extraction) and applies
+    `applyVia_converges_depth`. -/
+theorem app_lam_redex_depth {k : Nat} {ptable : PolicyTable} {level : Nat}
+    {x : String} {B V : Expr} {env : Env} {T : TowerState} {p : Val × TowerState}
+    (h : eval k ptable level (.app [.lam [x] B, V]) env T = some p) :
+    level + 1 < Tower.maxDepth := by
+  obtain ⟨m, rfl⟩ : ∃ m, k = m + 3 := ⟨k - 3, by have := app_lam_redex_min_fuel h; omega⟩
+  rw [eval_app_lam_v_step (m + 2) ptable level x B V env T,
+      eval_lam (m + 1) ptable level [x] B env T] at h
+  simp only at h
+  rw [evalList_single m ptable level V env T] at h
+  cases h_ev : eval (m + 1) ptable level V env T with
+  | none => rw [h_ev] at h; simp at h
+  | some pr =>
+      obtain ⟨v_val, T'⟩ := pr
+      rw [h_ev] at h
+      simp only at h
+      exact applyVia_converges_depth h
+
 /-- **The standard-gate discharge of the redex→contractum bridge.** Under the
     standard gate live at the *input* state (depth margin, level+1 materialized,
     builtin `base-apply`) and a **pure** operand (so the gate survives the operand's
@@ -2978,6 +3015,75 @@ theorem frameβ_app_structural_evalWP (n : Nat) (ptable : PolicyTable) (level : 
                   (EnvValid.length_mono h_ctx.ev_a h_he_chain.len_a)
                   (EnvValid.length_mono h_ctx.ev_b h_he_chain.len_b)
                   (h_he_chain.envVisβ_preserve env_a env_b h_ctx.ev_a h_ctx.ev_b h_ctx.env_visβ)
+
+/-! ### 7p (cont.). eval's `.app` — the root-contraction branch, premised.
+
+The premised re-cut of `frameβ_app_root_evalW` (§7m): the recognized standard-gate
+premise (`h_depth`/`h_mat0`/`h_builtin0`/`h_heap`/`h_pure_op`) is now **derived**
+from `BReady T_b` plus the redex *firing*.  The structural lemma maps the a-side
+`.app args` to the *reduced* b-side redex `.app [λx.body', v']`; that redex's
+convergence forces `level + 1 < maxDepth` (`app_lam_redex_depth` — the apply routes
+through the level+1 gate), whence `BReady`'s all-levels gate supplies the
+materialized-depth and builtin `base-apply` facts, and `Pure (.app args)` supplies
+the pure operand.  `gate_redex_to_letE_anyfuel` then closes redex ≡ contractum. -/
+theorem frameβ_app_root_evalWP (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (args : List Expr) (x : String) (body v exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState)
+    (ih_eval : FrameβEvalStmtWP n) (ih_list : FrameβEvalListStmtWP n)
+    (ih_via : FrameβApplyViaStmtWP n)
+    (hresp_pt : PolicyTableRespectsBisimT ptable)
+    (h1 : BetaRel (.app args) (.app [.lam [x] body, v]))
+    (h2 : BetaRel (.letE x v body) exp_b)
+    (hpure : Pure (.app args) = true)
+    (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (hbr : BReady T_b)
+    (heval : eval (n + 1) ptable level (.app args) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  obtain ⟨f, a, rfl, hf, ha⟩ := h1.app_to_redex_inv
+  obtain ⟨v', body', rfl, hv', hbody'⟩ := h2.letE_inv
+  have hbrl : BetaRelList [f, a] [.lam [x] body', v'] :=
+    .cons (hf.trans (BetaRel.congr hbody' (.lam [x] .hole))) (.cons (ha.trans hv') .nil)
+  obtain ⟨r_b, T_b', h_redex_b, h_vv, h_ctx', h_he, hv_ra, hv_rb⟩ :=
+    frameβ_app_structural_evalWP n ptable level [f, a] [.lam [x] body', v']
+      env_a env_b T_a T_b r_a T_a' ih_eval ih_list ih_via hresp_pt hbrl hpure h_ctx hbr heval
+  -- the gate facts, derived from `BReady` + the redex firing
+  have h_depth : level + 1 < Tower.maxDepth := app_lam_redex_depth h_redex_b
+  have h_pa : Pure a = true := by
+    simp only [Pure, PureList, Bool.and_eq_true, Bool.and_true] at hpure; exact hpure.2
+  have h_pure_v' : Pure v' = true := (ha.trans hv').pure_preserve h_pa
+  refine ⟨r_b, T_b', ?_, h_vv, h_ctx', h_he, hv_ra, hv_rb⟩
+  exact gate_redex_to_letE_anyfuel (n + 1) ptable level x body' v' env_b T_b
+    h_depth (by have := hbr.1.1; omega) (hbr.1.2 level h_depth) h_pure_v' hbr.2
+    r_b T_b' h_redex_b
+
+/-- §7p (cont.). eval's `.app` case, dispatched. `BetaRel.app_inv` splits a
+    `BetaRel (.app args) exp_b` into the **structural** branch (`exp_b = .app args'`,
+    handled by `frameβ_app_structural_evalWP`) and the **root** branch (β fires,
+    handled by `frameβ_app_root_evalWP`).  This is the last eval case needed for the
+    mutual `FrameβEvalStmtWP` clause. -/
+theorem frameβ_app_evalWP (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (args : List Expr) (exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState)
+    (ih_eval : FrameβEvalStmtWP n) (ih_list : FrameβEvalListStmtWP n)
+    (ih_via : FrameβApplyViaStmtWP n)
+    (hresp_pt : PolicyTableRespectsBisimT ptable)
+    (hβ : BetaRel (.app args) exp_b)
+    (hpure : Pure (.app args) = true)
+    (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (hbr : BReady T_b)
+    (heval : eval (n + 1) ptable level (.app args) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  rcases hβ.app_inv with ⟨args', rfl, hbrl⟩ | ⟨x, body, v, h1, h2⟩
+  · exact frameβ_app_structural_evalWP n ptable level args args' env_a env_b T_a T_b r_a T_a'
+      ih_eval ih_list ih_via hresp_pt hbrl hpure h_ctx hbr heval
+  · exact frameβ_app_root_evalWP n ptable level args x body v exp_b env_a env_b T_a T_b r_a T_a'
+      ih_eval ih_list ih_via hresp_pt h1 h2 hpure h_ctx hbr heval
 
 end LeanBlack
 
