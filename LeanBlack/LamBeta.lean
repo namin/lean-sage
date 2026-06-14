@@ -53,12 +53,16 @@
     `frameβ_applyDirect_builtinBaseApply_eval`** (the gate-free `.builtinBaseApply`
     case — the *standard gate's dispatcher*, what `applyVia` falls through to
     under `BuiltinReady`: `valToList_bisimβ` transports the operand payload and
-    the `applyDirect` IH `FrameβApplyDirectStmt` re-dispatches). Proof that the
-    §4 substrate composes into real fundamental-lemma cases. What remains is the
-    reflective gate dispatch (`applyVia`'s `base-apply` lookup + cross-level
-    call), `applyDirect`'s ground `.prim` subcase (the last `applyDirect`
-    op-shape — pure arithmetic, behind a β-port of `applyPrim_bisim`), the
-    `WFCtxTβ` statement-wrapper upgrade, and `.em`/`.set` (the open core).
+    the `applyDirect` IH `FrameβApplyDirectStmt` re-dispatches), and **§6j
+    `frameβ_applyDirect_eval`** (the ground `.prim` case via `applyPrim_bisimβ`,
+    then the **whole `applyDirect` clause assembled** — `FrameβEvalStmt n →
+    FrameβApplyDirectStmt n → FrameβApplyDirectStmt (n+1)`, a complete
+    mutual-induction clause). Proof that the §4 substrate composes into real
+    fundamental-lemma cases. The gate-free fragment is now complete: every eval
+    structural case, `evalList`, and the **entire `applyDirect` clause**. What
+    remains is the reflective gate dispatch (`applyVia`'s `base-apply` lookup +
+    cross-level call), the `WFCtxTβ` statement-wrapper upgrade, and `.em`/`.set`
+    (the open core).
 
   The weakening `ValVis_weak ⊆ ValVisβ` holds by the same structural
   induction as `Bisim.ValVis_aux_to_weak` with `BetaRel.refl` discharging
@@ -859,29 +863,28 @@ both halves of the closure introduction/elimination pair are in hand.
    deliberately, *with* those cases below: a wrapper carrying half-formed
    reflective fields would misstate the boundary.
 2. *The elimination side* — `applyVia` / `applyDirect`, the **gate
-   threading** (route (b)). The structural, allocation, *and closure-body*
-   halves are now in hand: `app_inv` (§4d) supplies the `BetaRel` inversion (the
-   disjunction whose root-contraction branch is the genuine novelty),
-   `BetaRelList` the argument relation, `frameβ_evalList_eval` (§6f) discharges
-   the argument-list traversal to `ListValVisβ`-related results,
+   threading** (route (b)). **The entire `applyDirect` clause is now proven**
+   (`frameβ_applyDirect_eval`, §6j): `app_inv` (§4d) supplies the `BetaRel`
+   inversion (the disjunction whose root-contraction branch is the genuine
+   novelty), `BetaRelList` the argument relation, `frameβ_evalList_eval` (§6f)
+   discharges the argument-list traversal to `ListValVisβ`-related results,
    `EnvVisβ_allocStep_chain` (§6g) carries `EnvVisβ` through the closure-apply
    argument binding, `frameβ_applyDirect_closure_eval` (§6h) **runs the closure
-   body** — the eval IH at fuel `n` over `BetaRel body body'` on §6g's `EnvVisβ`
-   call envs — and `frameβ_applyDirect_builtinBaseApply_eval` (§6i, with
-   `valToList_bisimβ`) discharges the **standard gate's dispatcher**. Of the four
-   `applyDirect` op-shapes, three are now closed (closure §6h, builtinBaseApply
-   §6i, and the trivial non-applicable shapes); only the ground `.prim` subcase
-   remains (pure arithmetic, a β-port of `applyPrim_bisim`). What remains beyond
-   that is the genuinely reflective core: `applyVia`'s **gate dispatch** — the
-   level-(level+1) `base-apply` lookup and cross-level closure call. This, with
-   the reflective `.em` / `.set` and the policy/level fields of `WFCtxTβ`, is
-   where the real research risk sits; `BuiltinReady` (standard gate) is the
-   premise that is meant to tame it: under it `applyVia` reduces to
-   `applyDirect`'s `.builtinBaseApply` cell (§6i) → the closure case (§6h),
-   both now discharged. The de-risking first target is the concrete Wand pair
-   `(λx. x) 0` / `let x = 0 in x` under a binder, whose redex/contractum
-   closures `ValVisβ_relates_beta_closures` (§2) already relates and whose
-   closure-apply `frameβ_applyDirect_closure_eval` (§6h) now runs.
+   body** (the eval IH at fuel `n` over `BetaRel body body'` on §6g's `EnvVisβ`
+   call envs), `frameβ_applyDirect_builtinBaseApply_eval` (§6i, with
+   `valToList_bisimβ`) the **standard gate's dispatcher**, and `applyPrim_bisimβ`
+   (§6j) the ground `.prim` arithmetic — all four op-shapes, assembled into the
+   mutual clause `FrameβApplyDirectStmt`. What remains is the genuinely reflective
+   core: `applyVia`'s **gate dispatch** — the level-(level+1) `base-apply` lookup
+   and cross-level closure call. This, with the reflective `.em` / `.set` and the
+   policy/level fields of `WFCtxTβ`, is where the real research risk sits;
+   `BuiltinReady` (standard gate) is the premise that is meant to tame it: under
+   it `applyVia` reduces to `applyDirect`'s `.builtinBaseApply` cell (§6i) → the
+   closure case (§6h), both now discharged — i.e. to `frameβ_applyDirect_eval`.
+   The de-risking first target is the concrete Wand pair `(λx. x) 0` /
+   `let x = 0 in x` under a binder, whose redex/contractum closures
+   `ValVisβ_relates_beta_closures` (§2) already relates and whose closure-apply
+   `frameβ_applyDirect_eval` (§6j) now runs.
 
 With every structural case discharged, the remaining work is exactly
 (1) the statement wrapper and (2) the gate — no structural plumbing is
@@ -894,10 +897,11 @@ the faithful obligation for the **eval** clause and discharges **every
 gate-free structural case** on it — the allocating binder (`.letE`, §6c),
 the branch (`.ifte`, §6d), the sequence (`.seq`, §6e), and the
 argument-list traversal (`evalList`, §6f) — plus the closure-apply
-allocation chain (§6g) and the gate-free **`applyDirect` cases**: the closure
-case (§6h, function elimination) and the `.builtinBaseApply` case (§6i, the
-standard gate's dispatcher). The milestone showing the substrate composes into
-real fundamental-lemma cases, which the §3 sketch could not.
+allocation chain (§6g) and the **entire gate-free `applyDirect` clause**: the
+closure case (§6h, function elimination), the `.builtinBaseApply` case (§6i,
+the standard gate's dispatcher), and the ground `.prim` case assembled into
+`frameβ_applyDirect_eval` (§6j). The milestone showing the substrate composes
+into real fundamental-lemma cases, which the §3 sketch could not.
 
 Pieces: `HeapEvolutionβ` (the cross-side heap-evolution carrier), `WFβ`
 (the gate-free fragment's context invariant), `frameβ_letE_eval` (the
@@ -2024,5 +2028,451 @@ theorem frameβ_applyDirect_builtinBaseApply_eval (n : Nat) (ptable : PolicyTabl
               hv_ops_a hv_ops_b heval
           refine ⟨r_b, T_b', ?_, h_vv_r, hh_a', hh_b', h_he', hv_ra, hv_rb⟩
           simp only [applyDirect, hl_b, h_eval_b]
+
+/-! ### 6j. The `applyDirect` `.prim` case — ground primitives, and the full
+    `applyDirect` clause
+
+The last `applyDirect` op-shape: `.prim name` runs a ground primitive
+(`applyPrim`, `Eval.lean:204`). It is gate-free and *heap-independent*: the
+arithmetic/predicate prims return `.num`/`.bool` (depth-agnostic, so `ValVisβ`
+collapses to equality), and the structural prims (`cons`/`car`/`cdr`) are pure
+congruences/projections on `ValVisβ`. The β-port of `applyPrim_bisim`
+(`Bisim.lean:2524`); conceptually the lightest case, included for faithful
+completeness of the clause (none of the reflective content lives here).
+
+First a small family of `ValVisβ` constructor inversions + a closed-value
+collapse (`closedVal_ValVisβ_eq`: on a closure-free value `ValVisβ` *is*
+equality), then `applyPrim_bisimβ`, then the assembled clause
+`frameβ_applyDirect_eval`. -/
+
+/-- `ValVisβ` against a numeral forces equality. -/
+theorem ValVisβ_num_inv {a : Int} {v_b : Val} {h_a h_b : Heap}
+    (h : ValVisβ (.num a) v_b h_a h_b) : v_b = .num a := by
+  have h1 := h 1; cases v_b <;> simp_all [ValVisβ_aux]
+
+/-- `ValVisβ` against a boolean forces equality. -/
+theorem ValVisβ_bool_inv {c : Bool} {v_b : Val} {h_a h_b : Heap}
+    (h : ValVisβ (.bool c) v_b h_a h_b) : v_b = .bool c := by
+  have h1 := h 1; cases v_b <;> simp_all [ValVisβ_aux]
+
+/-- `ValVisβ` against `nilV` forces `nilV`. -/
+theorem ValVisβ_nilV_inv {v_b : Val} {h_a h_b : Heap}
+    (h : ValVisβ .nilV v_b h_a h_b) : v_b = .nilV := by
+  have h1 := h 1; cases v_b <;> simp_all [ValVisβ_aux]
+
+/-- `ValVisβ` against a closure yields a closure with the same params (the
+    body / cenv only `BetaRel`- / `EnvVisβ`-related — `closure_ValVisβ_imp`). -/
+theorem ValVisβ_closure_inv {ps : List String} {body : Expr} {cenv : Env}
+    {v_b : Val} {h_a h_b : Heap}
+    (h : ValVisβ (.closure ps body cenv) v_b h_a h_b) :
+    ∃ body' cenv', v_b = .closure ps body' cenv' := by
+  have h1 := h 1
+  cases v_b with
+  | closure ps_b body_b cenv_b =>
+      obtain ⟨hps, _, _⟩ := closure_ValVisβ_imp h
+      exact ⟨body_b, cenv_b, by rw [hps]⟩
+  | num _ => simp [ValVisβ_aux] at h1
+  | bool _ => simp [ValVisβ_aux] at h1
+  | nilV => simp [ValVisβ_aux] at h1
+  | sym _ => simp [ValVisβ_aux] at h1
+  | cons _ _ => simp [ValVisβ_aux] at h1
+  | prim _ => simp [ValVisβ_aux] at h1
+  | builtinBaseApply => simp [ValVisβ_aux] at h1
+
+/-- `ValVisβ` against a cons yields a cons with `ValVisβ`-related components. -/
+theorem ValVisβ_cons_inv {x y : Val} {v_b : Val} {h_a h_b : Heap}
+    (h : ValVisβ (.cons x y) v_b h_a h_b) :
+    ∃ x_b y_b, v_b = .cons x_b y_b ∧
+      ValVisβ x x_b h_a h_b ∧ ValVisβ y y_b h_a h_b := by
+  have h1 := h 1
+  cases v_b with
+  | cons x_b y_b =>
+      exact ⟨x_b, y_b, rfl,
+             fun d => (h (d + 1)).1, fun d => (h (d + 1)).2⟩
+  | num _ => simp [ValVisβ_aux] at h1
+  | bool _ => simp [ValVisβ_aux] at h1
+  | nilV => simp [ValVisβ_aux] at h1
+  | sym _ => simp [ValVisβ_aux] at h1
+  | closure _ _ _ => simp [ValVisβ_aux] at h1
+  | prim _ => simp [ValVisβ_aux] at h1
+  | builtinBaseApply => simp [ValVisβ_aux] at h1
+
+/-- **On a closure-free value, `ValVisβ` is equality.** `closedValB v_a` rules
+    out closures — the only place `ValVisβ` differs from raw equality — so a
+    `ValVisβ`-related `v_b` must equal `v_a`. The collapse the ground prims use
+    (their numeric/cons arguments are closure-free). -/
+theorem closedVal_ValVisβ_eq : ∀ (v_a v_b : Val) (h_a h_b : Heap),
+    closedValB v_a = true → ValVisβ v_a v_b h_a h_b → v_b = v_a
+  | .num _,  v_b, _, _, _, h => ValVisβ_num_inv h
+  | .bool _, v_b, _, _, _, h => ValVisβ_bool_inv h
+  | .nilV,   v_b, _, _, _, h => ValVisβ_nilV_inv h
+  | .sym _,  v_b, _, _, _, h => by have h1 := h 1; cases v_b <;> simp_all [ValVisβ_aux]
+  | .prim _, v_b, _, _, _, h => by have h1 := h 1; cases v_b <;> simp_all [ValVisβ_aux]
+  | .builtinBaseApply, v_b, _, _, _, h => by
+      have h1 := h 1; cases v_b <;> simp_all [ValVisβ_aux]
+  | .cons x y, v_b, h_a, h_b, hclosed, h => by
+      simp only [closedValB, Bool.and_eq_true] at hclosed
+      obtain ⟨hx, hy⟩ := hclosed
+      obtain ⟨x_b, y_b, rfl, hvx, hvy⟩ := ValVisβ_cons_inv h
+      rw [closedVal_ValVisβ_eq x x_b h_a h_b hx hvx,
+          closedVal_ValVisβ_eq y y_b h_a h_b hy hvy]
+  | .closure _ _ _, _, _, _, hclosed, _ => by simp [closedValB] at hclosed
+
+/-- A value `mulConsList` accepts is a closure-free numeral list. -/
+theorem mulConsList_closedVal : ∀ {v : Val} {k : Int},
+    mulConsList v = some k → closedValB v = true
+  | .nilV, _, _ => rfl
+  | .cons (.num _) rest, k, h => by
+      simp only [mulConsList, Option.map_eq_some_iff] at h
+      obtain ⟨k', hk', _⟩ := h
+      simp only [closedValB, Bool.and_eq_true]
+      exact ⟨trivial, mulConsList_closedVal hk'⟩
+
+/-- **`applyPrim` respects `ValVisβ`.** For `ListValVisβ`-related argument
+    lists, `applyPrim name` agrees up to `ValVisβ` (plus result validity). The
+    β-port of `applyPrim_bisim` (`Bisim.lean:2524`): numeric/predicate prims
+    return ground values (so `ValVisβ` is equality — the relevant arguments are
+    closure-free, `closedVal_ValVisβ_eq` / the constructor inversions), and
+    `cons`/`car`/`cdr` are congruences/projections on `ValVisβ`. -/
+theorem applyPrim_bisimβ (name : String) (args_a args_b : List Val) (h_a h_b : Heap)
+    (h_lvv : ListValVisβ args_a args_b h_a h_b)
+    (hv_a : ListValValid args_a h_a) (hv_b : ListValValid args_b h_b)
+    (r_a : Val) (h : applyPrim name args_a = some r_a) :
+    ∃ r_b, applyPrim name args_b = some r_b ∧
+           ValVisβ r_a r_b h_a h_b ∧ ValValid r_a h_a ∧ ValValid r_b h_b := by
+  unfold applyPrim at h ⊢
+  by_cases hp_plus : name = "+"
+  · subst hp_plus
+    simp only [↓reduceIte] at h ⊢
+    cases args_a with
+    | nil => simp [applyPrim_plus] at h
+    | cons v0 rest => cases rest with
+      | nil => simp [applyPrim_plus] at h
+      | cons v1 rest2 => cases rest2 with
+        | cons _ _ => simp [applyPrim_plus] at h
+        | nil => cases v0 with
+          | num a => cases v1 with
+            | num b =>
+                simp only [applyPrim_plus, Option.some.injEq] at h; subst h
+                match args_b, h_lvv with
+                | [vb0, vb1], ⟨hv0, hv1, _⟩ =>
+                    obtain rfl := ValVisβ_num_inv hv0
+                    obtain rfl := ValVisβ_num_inv hv1
+                    exact ⟨.num (a + b), by simp [applyPrim_plus],
+                           fun d => by cases d <;> simp [ValVisβ_aux], trivial, trivial⟩
+                | [], hl => exact hl.elim
+                | [_], hl => exact hl.2.elim
+                | _ :: _ :: _ :: _, hl => exact hl.2.2.elim
+            | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _
+            | builtinBaseApply => simp [applyPrim_plus] at h
+          | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _
+          | builtinBaseApply => simp [applyPrim_plus] at h
+  by_cases hp_minus : name = "-"
+  · subst hp_minus
+    simp only [↓reduceIte, hp_plus] at h ⊢
+    cases args_a with
+    | nil => simp [applyPrim_minus] at h
+    | cons v0 rest => cases rest with
+      | nil => simp [applyPrim_minus] at h
+      | cons v1 rest2 => cases rest2 with
+        | cons _ _ => simp [applyPrim_minus] at h
+        | nil => cases v0 with
+          | num a => cases v1 with
+            | num b =>
+                simp only [applyPrim_minus, Option.some.injEq] at h; subst h
+                match args_b, h_lvv with
+                | [vb0, vb1], ⟨hv0, hv1, _⟩ =>
+                    obtain rfl := ValVisβ_num_inv hv0
+                    obtain rfl := ValVisβ_num_inv hv1
+                    exact ⟨.num (a - b), by simp [applyPrim_minus],
+                           fun d => by cases d <;> simp [ValVisβ_aux], trivial, trivial⟩
+                | [], hl => exact hl.elim
+                | [_], hl => exact hl.2.elim
+                | _ :: _ :: _ :: _, hl => exact hl.2.2.elim
+            | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _
+            | builtinBaseApply => simp [applyPrim_minus] at h
+          | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _
+          | builtinBaseApply => simp [applyPrim_minus] at h
+  by_cases hp_times : name = "*"
+  · subst hp_times
+    simp only [↓reduceIte, hp_plus, hp_minus] at h ⊢
+    cases args_a with
+    | nil => simp [applyPrim_times] at h
+    | cons v0 rest => cases rest with
+      | nil => simp [applyPrim_times] at h
+      | cons v1 rest2 => cases rest2 with
+        | cons _ _ => simp [applyPrim_times] at h
+        | nil => cases v0 with
+          | num a => cases v1 with
+            | num b =>
+                simp only [applyPrim_times, Option.some.injEq] at h; subst h
+                match args_b, h_lvv with
+                | [vb0, vb1], ⟨hv0, hv1, _⟩ =>
+                    obtain rfl := ValVisβ_num_inv hv0
+                    obtain rfl := ValVisβ_num_inv hv1
+                    exact ⟨.num (a * b), by simp [applyPrim_times],
+                           fun d => by cases d <;> simp [ValVisβ_aux], trivial, trivial⟩
+                | [], hl => exact hl.elim
+                | [_], hl => exact hl.2.elim
+                | _ :: _ :: _ :: _, hl => exact hl.2.2.elim
+            | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _
+            | builtinBaseApply => simp [applyPrim_times] at h
+          | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _
+          | builtinBaseApply => simp [applyPrim_times] at h
+  by_cases hp_mul : name = "mul-list"
+  · subst hp_mul
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times] at h ⊢
+    cases args_a with
+    | nil => simp [applyPrim_mulList] at h
+    | cons v rest => cases rest with
+      | cons _ _ => simp [applyPrim_mulList] at h
+      | nil =>
+          simp only [applyPrim_mulList] at h
+          cases hm : mulConsList v with
+          | none => rw [hm] at h; simp at h
+          | some k =>
+              rw [hm] at h
+              simp only [Option.map_some, Option.some.injEq] at h; subst h
+              match args_b, h_lvv with
+              | [vb], ⟨hv, _⟩ =>
+                  obtain rfl := closedVal_ValVisβ_eq v vb h_a h_b (mulConsList_closedVal hm) hv
+                  exact ⟨.num k, by simp [applyPrim_mulList, hm],
+                         fun d => by cases d <;> simp [ValVisβ_aux], trivial, trivial⟩
+              | [], hl => exact hl.elim
+              | _ :: _ :: _, hl => exact hl.2.elim
+  by_cases hp_eq : name = "="
+  · subst hp_eq
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul] at h ⊢
+    cases args_a with
+    | nil => simp [applyPrim_eq] at h
+    | cons v0 rest => cases rest with
+      | nil => simp [applyPrim_eq] at h
+      | cons v1 rest2 => cases rest2 with
+        | cons _ _ => simp [applyPrim_eq] at h
+        | nil => cases v0 with
+          | num a => cases v1 with
+            | num b =>
+                simp only [applyPrim_eq, Option.some.injEq] at h; subst h
+                match args_b, h_lvv with
+                | [vb0, vb1], ⟨hv0, hv1, _⟩ =>
+                    obtain rfl := ValVisβ_num_inv hv0
+                    obtain rfl := ValVisβ_num_inv hv1
+                    exact ⟨.bool (a == b), by simp [applyPrim_eq],
+                           fun d => by cases d <;> simp [ValVisβ_aux], trivial, trivial⟩
+                | [], hl => exact hl.elim
+                | [_], hl => exact hl.2.elim
+                | _ :: _ :: _ :: _, hl => exact hl.2.2.elim
+            | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _
+            | builtinBaseApply => simp [applyPrim_eq] at h
+          | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _
+          | builtinBaseApply => simp [applyPrim_eq] at h
+  by_cases hp_numQ : name = "num?"
+  · subst hp_numQ
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq] at h ⊢
+    cases args_a with
+    | nil => simp [applyPrim_numQ] at h
+    | cons v_a rest => cases rest with
+      | cons _ _ => simp [applyPrim_numQ] at h
+      | nil =>
+          match args_b, h_lvv with
+          | [v_b], ⟨hv, _⟩ =>
+              have hv1 := hv 1
+              obtain ⟨bb, rfl⟩ : ∃ bb : Bool, r_a = .bool bb := by
+                cases v_a <;> (simp only [applyPrim_numQ, Option.some.injEq] at h; exact ⟨_, h.symm⟩)
+              refine ⟨.bool bb, ?_, fun d => by cases d <;> simp [ValVisβ_aux], trivial, trivial⟩
+              cases v_a <;> cases v_b <;> simp_all [applyPrim_numQ, ValVisβ_aux]
+          | [], hl => exact hl.elim
+          | _ :: _ :: _, hl => exact hl.2.elim
+  by_cases hp_boolQ : name = "bool?"
+  · subst hp_boolQ
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ] at h ⊢
+    cases args_a with
+    | nil => simp [applyPrim_boolQ] at h
+    | cons v_a rest => cases rest with
+      | cons _ _ => simp [applyPrim_boolQ] at h
+      | nil =>
+          match args_b, h_lvv with
+          | [v_b], ⟨hv, _⟩ =>
+              have hv1 := hv 1
+              obtain ⟨bb, rfl⟩ : ∃ bb : Bool, r_a = .bool bb := by
+                cases v_a <;> (simp only [applyPrim_boolQ, Option.some.injEq] at h; exact ⟨_, h.symm⟩)
+              refine ⟨.bool bb, ?_, fun d => by cases d <;> simp [ValVisβ_aux], trivial, trivial⟩
+              cases v_a <;> cases v_b <;> simp_all [applyPrim_boolQ, ValVisβ_aux]
+          | [], hl => exact hl.elim
+          | _ :: _ :: _, hl => exact hl.2.elim
+  by_cases hp_closureQ : name = "closure?"
+  · subst hp_closureQ
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ,
+               hp_boolQ] at h ⊢
+    cases args_a with
+    | nil => simp [applyPrim_closureQ] at h
+    | cons v_a rest => cases rest with
+      | cons _ _ => simp [applyPrim_closureQ] at h
+      | nil =>
+          match args_b, h_lvv with
+          | [v_b], ⟨hv, _⟩ =>
+              have hv1 := hv 1
+              obtain ⟨bb, rfl⟩ : ∃ bb : Bool, r_a = .bool bb := by
+                cases v_a <;> (simp only [applyPrim_closureQ, Option.some.injEq] at h; exact ⟨_, h.symm⟩)
+              refine ⟨.bool bb, ?_, fun d => by cases d <;> simp [ValVisβ_aux], trivial, trivial⟩
+              cases v_a <;> cases v_b <;> simp_all [applyPrim_closureQ, ValVisβ_aux]
+          | [], hl => exact hl.elim
+          | _ :: _ :: _, hl => exact hl.2.elim
+  by_cases hp_primQ : name = "prim?"
+  · subst hp_primQ
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ,
+               hp_boolQ, hp_closureQ] at h ⊢
+    cases args_a with
+    | nil => simp [applyPrim_primQ] at h
+    | cons v_a rest => cases rest with
+      | cons _ _ => simp [applyPrim_primQ] at h
+      | nil =>
+          match args_b, h_lvv with
+          | [v_b], ⟨hv, _⟩ =>
+              have hv1 := hv 1
+              obtain ⟨bb, rfl⟩ : ∃ bb : Bool, r_a = .bool bb := by
+                cases v_a <;> (simp only [applyPrim_primQ, Option.some.injEq] at h; exact ⟨_, h.symm⟩)
+              refine ⟨.bool bb, ?_, fun d => by cases d <;> simp [ValVisβ_aux], trivial, trivial⟩
+              cases v_a <;> cases v_b <;> simp_all [applyPrim_primQ, ValVisβ_aux]
+          | [], hl => exact hl.elim
+          | _ :: _ :: _, hl => exact hl.2.elim
+  by_cases hp_cons : name = "cons"
+  · subst hp_cons
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ,
+               hp_boolQ, hp_closureQ, hp_primQ] at h ⊢
+    cases args_a with
+    | nil => simp [applyPrim_cons] at h
+    | cons a0 rest => cases rest with
+      | nil => simp [applyPrim_cons] at h
+      | cons a1 rest2 => cases rest2 with
+        | cons _ _ => simp [applyPrim_cons] at h
+        | nil =>
+            simp only [applyPrim_cons, Option.some.injEq] at h; subst h
+            obtain ⟨hva0, hva1, _⟩ := hv_a
+            match args_b, h_lvv, hv_b with
+            | [b0, b1], ⟨hv0, hv1, _⟩, ⟨hvb0, hvb1, _⟩ =>
+                refine ⟨.cons b0 b1, by simp [applyPrim_cons], ?_, ⟨hva0, hva1⟩, ⟨hvb0, hvb1⟩⟩
+                intro d; cases d with
+                | zero => trivial
+                | succ d' => exact ⟨hv0 d', hv1 d'⟩
+            | [], hl, _ => exact hl.elim
+            | [_], hl, _ => exact hl.2.elim
+            | _ :: _ :: _ :: _, hl, _ => exact hl.2.2.elim
+  by_cases hp_car : name = "car"
+  · subst hp_car
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ,
+               hp_boolQ, hp_closureQ, hp_primQ, hp_cons] at h ⊢
+    cases args_a with
+    | nil => simp [applyPrim_car] at h
+    | cons a0 rest => cases rest with
+      | cons _ _ => simp [applyPrim_car] at h
+      | nil => cases a0 with
+        | cons x y =>
+            simp only [applyPrim_car, Option.some.injEq] at h; subst h
+            match args_b, h_lvv, hv_b with
+            | [b0], ⟨hv, _⟩, ⟨hvb0, _⟩ =>
+                obtain ⟨xb, yb, rfl, hvx, _⟩ := ValVisβ_cons_inv hv
+                exact ⟨xb, by simp [applyPrim_car], hvx, hv_a.1.1, hvb0.1⟩
+            | [], hl, _ => exact hl.elim
+            | _ :: _ :: _, hl, _ => exact hl.2.elim
+        | num _ | bool _ | nilV | sym _ | closure _ _ _ | prim _
+        | builtinBaseApply => simp [applyPrim_car] at h
+  by_cases hp_cdr : name = "cdr"
+  · subst hp_cdr
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ,
+               hp_boolQ, hp_closureQ, hp_primQ, hp_cons, hp_car] at h ⊢
+    cases args_a with
+    | nil => simp [applyPrim_cdr] at h
+    | cons a0 rest => cases rest with
+      | cons _ _ => simp [applyPrim_cdr] at h
+      | nil => cases a0 with
+        | cons x y =>
+            simp only [applyPrim_cdr, Option.some.injEq] at h; subst h
+            match args_b, h_lvv, hv_b with
+            | [b0], ⟨hv, _⟩, ⟨hvb0, _⟩ =>
+                obtain ⟨xb, yb, rfl, _, hvy⟩ := ValVisβ_cons_inv hv
+                exact ⟨yb, by simp [applyPrim_cdr], hvy, hv_a.1.2, hvb0.2⟩
+            | [], hl, _ => exact hl.elim
+            | _ :: _ :: _, hl, _ => exact hl.2.elim
+        | num _ | bool _ | nilV | sym _ | closure _ _ _ | prim _
+        | builtinBaseApply => simp [applyPrim_cdr] at h
+  by_cases hp_nullQ : name = "null?"
+  · subst hp_nullQ
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ,
+               hp_boolQ, hp_closureQ, hp_primQ, hp_cons, hp_car, hp_cdr] at h ⊢
+    cases args_a with
+    | nil => simp [applyPrim_nullQ] at h
+    | cons v_a rest => cases rest with
+      | cons _ _ => simp [applyPrim_nullQ] at h
+      | nil =>
+          match args_b, h_lvv with
+          | [v_b], ⟨hv, _⟩ =>
+              have hv1 := hv 1
+              obtain ⟨bb, rfl⟩ : ∃ bb : Bool, r_a = .bool bb := by
+                cases v_a <;> (simp only [applyPrim_nullQ, Option.some.injEq] at h; exact ⟨_, h.symm⟩)
+              refine ⟨.bool bb, ?_, fun d => by cases d <;> simp [ValVisβ_aux], trivial, trivial⟩
+              cases v_a <;> cases v_b <;> simp_all [applyPrim_nullQ, ValVisβ_aux]
+          | [], hl => exact hl.elim
+          | _ :: _ :: _, hl => exact hl.2.elim
+  -- Unknown name: `applyPrim` returns `none`, contradicting `h`.
+  exfalso
+  simp only [hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ, hp_boolQ,
+             hp_closureQ, hp_primQ, hp_cons, hp_car, hp_cdr, hp_nullQ,
+             ↓reduceIte] at h
+  exact absurd h (by simp)
+
+/-- **The entire gate-free `applyDirect` clause, proved.** From the eval IH
+    and the `applyDirect` IH at fuel `n`, the `applyDirect` clause at `n+1` —
+    the `applyDirect` node of the eventual mutual `frame_tower`-β induction.
+    All four op-shapes: closure (§6h, via `closure_ValVisβ_imp`), the standard
+    gate `.builtinBaseApply` (§6i), ground `.prim` (`applyPrim_bisimβ`, §6j),
+    and the non-applicable shapes (`applyDirect` returns `none`, contradicting
+    the hypothesis). With this, `FrameβApplyDirectStmt` is a fully proven
+    clause of the mutual statement — only the `applyVia` gate dispatch and the
+    reflective eval cases (`.em`/`.set`/`.app`) remain for `∀ n, FrameStmtβ`. -/
+theorem frameβ_applyDirect_eval (n : Nat)
+    (ih_eval : FrameβEvalStmt n) (ih_ad : FrameβApplyDirectStmt n) :
+    FrameβApplyDirectStmt (n + 1) := by
+  intro ptable level op_a op_b args_a args_b T_a T_b r_a T_a'
+        h_vv_op h_lvv hh_a hh_b hv_opa hv_opb hv_argsa hv_argsb heval
+  cases op_a with
+  | num _ => simp [applyDirect] at heval
+  | bool _ => simp [applyDirect] at heval
+  | nilV => simp [applyDirect] at heval
+  | sym _ => simp [applyDirect] at heval
+  | cons _ _ => simp [applyDirect] at heval
+  | builtinBaseApply =>
+      exact frameβ_applyDirect_builtinBaseApply_eval n ptable level op_b args_a args_b
+        T_a T_b r_a T_a' ih_ad h_vv_op h_lvv hh_a hh_b hv_argsa hv_argsb heval
+  | prim name =>
+      have h_opb : op_b = .prim name := by
+        have h1 := h_vv_op 1
+        cases op_b with
+        | prim n' => simp only [ValVisβ_aux] at h1; rw [h1]
+        | num _ => simp [ValVisβ_aux] at h1
+        | bool _ => simp [ValVisβ_aux] at h1
+        | nilV => simp [ValVisβ_aux] at h1
+        | sym _ => simp [ValVisβ_aux] at h1
+        | cons _ _ => simp [ValVisβ_aux] at h1
+        | closure _ _ _ => simp [ValVisβ_aux] at h1
+        | builtinBaseApply => simp [ValVisβ_aux] at h1
+      subst h_opb
+      simp only [applyDirect] at heval
+      cases hp_a : applyPrim name args_a with
+      | none => rw [hp_a] at heval; simp at heval
+      | some v_a' =>
+          rw [hp_a] at heval
+          simp only [Option.some.injEq, Prod.mk.injEq] at heval
+          obtain ⟨hr, hT⟩ := heval; subst hr; subst hT
+          obtain ⟨r_b, hp_b, h_vv_r, hv_ra, hv_rb⟩ :=
+            applyPrim_bisimβ name args_a args_b T_a.heap T_b.heap h_lvv hv_argsa hv_argsb v_a' hp_a
+          exact ⟨r_b, T_b, by simp only [applyDirect, hp_b], h_vv_r, hh_a, hh_b,
+                 HeapEvolutionβ.refl _ _, hv_ra, hv_rb⟩
+  | closure ps body cenv =>
+      obtain ⟨body', cenv_b, rfl⟩ := ValVisβ_closure_inv h_vv_op
+      obtain ⟨_, hβ_body, h_env_cenv⟩ := closure_ValVisβ_imp h_vv_op
+      exact frameβ_applyDirect_closure_eval n ptable level ps body body' cenv cenv_b
+        args_a args_b T_a T_b r_a T_a'
+        ih_eval hβ_body h_env_cenv h_lvv hh_a hh_b hv_opa hv_opb hv_argsa hv_argsb heval
 
 end LeanBlack
