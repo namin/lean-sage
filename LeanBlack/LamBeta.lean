@@ -1860,7 +1860,7 @@ It is the β-port of `frame_tower`'s `applyDirect` closure subcase
   `frame_tower` proves them Lean-equal (`allocStep_chain_aligned`).
 
 The gate-free `WFβ` invariant set suffices throughout: no policy/level fields,
-no `BuiltinReady`. The two helpers DUMP_LAM §3a flags as missing come first. -/
+no `BuiltinReady`. The two `.app`-shape evaluation helpers come first. -/
 
 /-- Two `ListValVisβ`-related value lists have equal length — the cross-side
     arity agreement the closure-apply needs (the b-side arity check `ps.length
@@ -1983,7 +1983,7 @@ it unwraps its `[actualOp, operandsList]` payload (`valToList` on the operands),
 then re-dispatches to `applyDirect` on `actualOp`. This is exactly what
 `applyVia` falls through to under `BuiltinReady` (the gate cell *is*
 `.builtinBaseApply`, `Eval.lean:184`), so it is the operational core of route
-(b)'s *standard*-gate path — the de-risking target DUMP_LAM §3b names. Like the
+(b)'s *standard*-gate path — a de-risking target for that path. Like the
 rest of `applyDirect`, it is **gate-free** (reads no policy/level), so it stays
 in the `WFβ` framework.
 

@@ -1,6 +1,6 @@
 /-
   lean-sage: β-infrastructure for the *reflective* cases of the `.lam`
-  fundamental lemma — the open core of `DUMP_LAM.md` (step 1 + step 3c).
+  fundamental lemma — the cross-side fundamental lemma and its reflective eval cases.
 
   The gate-free fragment is closed in `LamBeta.lean` (every eval structural
   case, `evalList`, and the entire `applyDirect` clause). What remains is the
@@ -54,8 +54,9 @@
   (`frameβ_app_root_evalW_cond`) — is now **discharged**: `redex_to_letE_fixed` (the
   fixed-fuel companion to `beta_letE_conv_equiv`) + `gate_redex_to_letE` (operand
   convergence extracted from the redex, the standard gate carried through the operand by
-  purity) give `gate_redex_to_letE_anyfuel`, so the premise is exactly `DUMP_LAM` §0's
-  standard-gate `BuiltinReady` + heap/operand purity — the same side conditions
+  purity) give `gate_redex_to_letE_anyfuel`, so the premise is exactly the standard-gate
+  condition (depth margin, level+1 materialized, builtin base-apply) + heap/operand
+  purity — the same side conditions
   `contextual_beta_pure` carries. The **payoff bridge** is also built (§7n,
   `obsConv_refine_of_FL` + `obsConv_refine_of_FL_rev`): the cross-side fundamental lemma
   ⟹ ground `ObsConv` agreement (`↔`) in every context (`BetaRel.congr` lifts the relation
@@ -66,7 +67,6 @@
   (re-cut the mutual statement to carry the `Pure` + `BuiltinReadyN` premise — `.set` /
   `.installPolicy` vacuous under `Pure`; `.app` root done) for the forward `hFL`, and the
   reverse simulation for `hFL_rev` (its operational core is `gate_redex_to_letE`'s `↔`).
-  (DUMP_LAM §4 has the plans.)
 -/
 import LeanBlack.LamBeta
 import LeanBlack.Frame
@@ -1645,7 +1645,7 @@ theorem frameβ_installPolicy_caseW (n : Nat) (ptable : PolicyTable) (level : Na
 
 /-! ## 7m. eval's `.app` — the structural branch (no root contraction)
 
-The first of the two remaining eval cases (`DUMP_LAM.md` §3 step 3a). `.app`'s
+The first of the two remaining eval cases. `.app`'s
 `BetaRel` inversion (`BetaRel.app_inv`, `LamBeta` §4d) is a *disjunction*: a
 **structural** branch — `exp_b = .app args'` with `BetaRelList args args'`, no
 redex contracted at the root — and the **root-contraction** branch (where β
@@ -1661,8 +1661,9 @@ It is **unconditional** (no `BuiltinReady` premise): both sides run an `.app`, s
 `applyVia`'s cross-side gate dispatch (`frameβ_applyVia_eval`) handles the gate
 uniformly — the `base-apply` cells are `ValVisβ`-related, forcing the same branch.
 The conditional-β premise is needed only by the root-contraction branch, where the
-a-side runs an application and the b-side a `.letE` (`DUMP_LAM.md` §0 Obstruction
-B). That branch — the genuine research crux — is the single remaining eval case
+a-side runs an application and the b-side a `.letE` (Obstruction B —
+`beta_not_unconditional_CtxEquiv`, `CtxEquiv.lean`). That branch — the genuine
+research crux — is the single remaining eval case
 after this (with `.set`). -/
 
 /-- **eval's `.app`, structural branch.** Given `BetaRelList args args'` (the
@@ -1739,7 +1740,8 @@ operational and *on the b-side only*: the reduced redex `.app [λx.body', v']` a
 its contractum `.letE x v' body'` (= `exp_b`) must produce the **same** outcome at
 `(env_b, T_b)`.
 
-That last step is exactly `DUMP_LAM.md` §0 Obstruction B: redex≡contractum holds
+That last step is exactly Obstruction B (`beta_not_unconditional_CtxEquiv`,
+`CtxEquiv.lean`): redex≡contractum holds
 only under the **standard gate** (`applyVia` falls through to `applyDirect`); a
 non-standard gate or top-of-tower separates them. So it is the operational content
 of the conditional `BuiltinReady` premise — provided here as an explicit hypothesis
@@ -1755,8 +1757,8 @@ premise threading) remains for the mutual assembly. -/
     Everything else — exposing the redex (`app_to_redex_inv`), reducing the
     contractum (`letE_inv`), lifting to the reduced redex (`BetaRel.congr`), and the
     cross-side simulation (`frameβ_app_structural_evalW`) — is discharged. `h_gate_b`
-    is the operational form of the standard-gate `BuiltinReady` condition (`DUMP_LAM`
-    §0 Obstruction B); it is `beta_letE_pure_EvalEquivAt` instantiated at `(env_b,
+    is the operational form of the standard-gate `BuiltinReady` condition (Obstruction
+    B); it is `beta_letE_pure_EvalEquivAt` instantiated at `(env_b,
     T_b)` once the premise is threaded into the statement. -/
 theorem frameβ_app_root_evalW_cond (n : Nat) (ptable : PolicyTable) (level : Nat)
     (args : List Expr) (x : String) (body v exp_b : Expr)
@@ -1793,7 +1795,7 @@ theorem frameβ_app_root_evalW_cond (n : Nat) (ptable : PolicyTable) (level : Na
 /-! ### 7m (cont.). Discharging the b-side gate bridge from the standard gate
 
 `h_gate_b` is the operational content of the standard-gate `BuiltinReady` condition
-(`DUMP_LAM.md` §0 Obstruction B). Its **fixed-fuel** core is `redex_to_letE_fixed`:
+(Obstruction B). Its **fixed-fuel** core is `redex_to_letE_fixed`:
 the ∃-fuel `beta_letE_conv_equiv` (`ContextualBeta.lean`) does not suffice — the
 reflective fundamental lemma's conclusion fixes the b-side output fuel — so the
 redex→contractum bridge is re-derived at a *fixed* fuel. Both sides reduce to body
@@ -1880,7 +1882,7 @@ theorem app_lam_redex_depth {k : Nat} {ptable : PolicyTable} {level : Nat}
     convergence is *extracted* from the converging redex (`eval_app_lam_v_step` /
     `evalList_single`), so this needs no separate operand hypothesis. This is the
     operational content of `frameβ_app_root_evalW_cond`'s `h_gate_b` under the
-    recognized `BuiltinReady` + pure-operand conditions (`DUMP_LAM` §0 Obstruction B,
+    recognized `BuiltinReady` + pure-operand conditions (Obstruction B,
     matching `contextual_beta_pure`'s side conditions). -/
 theorem gate_redex_to_letE (m : Nat) (ptable : PolicyTable) (level : Nat)
     (x : String) (B V : Expr) (env : Env) (T : TowerState)
@@ -1978,7 +1980,7 @@ theorem gate_letE_to_redex_anyfuel (k : Nat) (ptable : PolicyTable) (level : Nat
 
 /-- **eval's `.app` root-contraction branch, under the recognized conditional
     premise** — `frameβ_app_root_evalW_cond` with its abstract `h_gate_b` discharged.
-    The premise is now exactly `DUMP_LAM.md` §0's standard-gate `BuiltinReady` (depth
+    The premise is now exactly the standard-gate `BuiltinReady` (depth
     margin, level+1 materialized, builtin `base-apply` on the b-side) plus heap/operand
     purity — the same side conditions `contextual_beta_pure` carries for the lam-free
     cases. The cross-side relational work is the structural branch
