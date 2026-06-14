@@ -35,10 +35,13 @@
   The **entire gate-free eval clause is now done over `FrameβEvalStmtW`**: the
   non-recursive cases (`.num`/`.bool`/`.var`/`.lam`, §7g) and the recursive
   structural cases (`.ifte`/`.seq`/`.letE`, §7h — `.letE` via `level_fields_alloc`
-  + `EnvVisβ_alloc_cons`). Remaining for the eval clause: the hard reflective
-  cases `.set` (cross-side meta-mutation — `isMetaMutation` compares indices
-  `EnvVisβ` does not pin; needs a β-`PolicyRespectsBisim` + different-index
-  update machinery) and the gated `.app` (`applyVia`).
+  + `EnvVisβ_alloc_cons`). The **`applyDirect` clause is also re-threaded onto the
+  level-tracking tower invariant `TowerInvβ`** (`frameβ_applyDirect_evalW`, §7i),
+  the prerequisite for the gated `.app`. Remaining: the gated `.app` (`applyVia`'s
+  gate dispatch — reuses `frameβ_applyDirect_evalW` + `materialize_MatInvβ`) and
+  the hard `.set` (cross-side meta-mutation — `isMetaMutation` compares indices
+  `EnvVisβ` does not pin; needs a β-`PolicyRespectsBisim` + different-index update
+  machinery).
 -/
 import LeanBlack.LamBeta
 import LeanBlack.Frame
@@ -947,6 +950,213 @@ theorem frameβ_letE_evalW (n : Nat) (ptable : PolicyTable) (level : Nat)
         policies_resp_all := h_ctx_body.policies_resp_all
         level_envs_visβ := h_ctx_body.level_envs_visβ }
 
+/-! ## 7i. The tower invariant `TowerInvβ`, and the level-tracking `applyDirect`
+
+`applyVia` / `applyDirect` take `op`/`args` but no ambient env; their cross-side
+context is the *tower* invariant — the env-agnostic level/policy/heap fields of
+`WFCtxTβ`. `applyDirect`'s gate-free clause (`LamBeta`, over `WFβ`) tracked only
+`HeapValid` because it never *directly* touches levels — but its closure-body
+eval can `.em`-materialize, so for the mutual statement the clause must carry the
+full level invariant. `TowerInvβ` packages it; `WFCtxTβ.ofTower` / `.toTower`
+convert at the body-eval boundary; `level_fields_extend` lifts the level fields
+across the arg-allocation heap extension. -/
+
+/-- The env-agnostic cross-side tower invariant — `WFCtxTβ` minus the ambient
+    env fields. The context `applyDirect` / `applyVia` thread. -/
+structure TowerInvβ (T_a T_b : TowerState) : Prop where
+  hv_a : HeapValid T_a.heap
+  hv_b : HeapValid T_b.heap
+  count : T_a.levels.length = T_b.levels.length
+  valid_a : ∀ n env, T_a.envAt? n = some env → EnvValid env T_a.heap
+  valid_b : ∀ n env, T_b.envAt? n = some env → EnvValid env T_b.heap
+  visβ : ∀ n ea eb, T_a.envAt? n = some ea → T_b.envAt? n = some eb →
+    EnvVisβ ea eb T_a.heap T_b.heap
+  pol_eq : ∀ n, T_a.policyAt? n = T_b.policyAt? n
+  pol_resp : ∀ n p, T_a.policyAt? n = some p → PolicyRespectsBisimT p
+
+/-- Build a `WFCtxTβ` from a `TowerInvβ` and an env pair's own fields. -/
+def WFCtxTβ.ofTower {T_a T_b : TowerState} {env_a env_b : Env} {level : Nat}
+    (h : TowerInvβ T_a T_b)
+    (ev_a : EnvValid env_a T_a.heap) (ev_b : EnvValid env_b T_b.heap)
+    (env_visβ : EnvVisβ env_a env_b T_a.heap T_b.heap) :
+    WFCtxTβ env_a env_b T_a T_b level :=
+  { policy_eq_at := h.pol_eq level, hv_a := h.hv_a, hv_b := h.hv_b, ev_a := ev_a, ev_b := ev_b
+    policy_resp := fun p hp => h.pol_resp level p hp, env_visβ := env_visβ
+    level_envs_valid_a := h.valid_a, level_envs_valid_b := h.valid_b
+    level_count_eq := h.count, policies_eq := h.pol_eq, policies_resp_all := h.pol_resp
+    level_envs_visβ := h.visβ }
+
+/-- Extract the tower invariant from a `WFCtxTβ`. -/
+def WFCtxTβ.toTower {T_a T_b : TowerState} {env_a env_b : Env} {level : Nat}
+    (h : WFCtxTβ env_a env_b T_a T_b level) : TowerInvβ T_a T_b :=
+  ⟨h.hv_a, h.hv_b, h.level_count_eq, h.level_envs_valid_a, h.level_envs_valid_b,
+   h.level_envs_visβ, h.policies_eq, h.policies_resp_all⟩
+
+/-- The level fields lift across an arbitrary heap extension on each side
+    (generalizes `level_fields_alloc` from a single cell). -/
+theorem level_fields_extend {T_a T_b : TowerState} (ext_a ext_b : Heap)
+    (hh_a : HeapValid T_a.heap) (hh_b : HeapValid T_b.heap)
+    (hva : ∀ n env, T_a.envAt? n = some env → EnvValid env T_a.heap)
+    (hvb : ∀ n env, T_b.envAt? n = some env → EnvValid env T_b.heap)
+    (hvisβ : ∀ n ea eb, T_a.envAt? n = some ea → T_b.envAt? n = some eb →
+        EnvVisβ ea eb T_a.heap T_b.heap) :
+    (∀ n env, T_a.envAt? n = some env → EnvValid env (T_a.heap ++ ext_a)) ∧
+    (∀ n env, T_b.envAt? n = some env → EnvValid env (T_b.heap ++ ext_b)) ∧
+    (∀ n ea eb, T_a.envAt? n = some ea → T_b.envAt? n = some eb →
+        EnvVisβ ea eb (T_a.heap ++ ext_a) (T_b.heap ++ ext_b)) := by
+  refine ⟨fun n env hen => EnvValid.heap_extends (hva n env hen) ⟨ext_a, rfl⟩,
+          fun n env hen => EnvValid.heap_extends (hvb n env hen) ⟨ext_b, rfl⟩, ?_⟩
+  intro n ea eb hena henb
+  exact EnvVisβ_extends ea eb T_a.heap T_b.heap ext_a ext_b hh_a hh_b
+    (hva n ea hena) (hvb n eb henb) (hvisβ n ea eb hena henb)
+
+/-- The level-tracking `applyDirect` clause: gate-free `applyDirect` over
+    `TowerInvβ` (the body eval can materialize, so the level invariant is
+    threaded). The β-analog of `FrameStmtT`'s `applyDirect` conjunct, with the
+    `TowerCross` output as `TowerInvβ`. -/
+def FrameβApplyDirectStmtW (n : Nat) : Prop :=
+  ∀ (ptable : PolicyTable) (level : Nat) (op_a op_b : Val)
+    (args_a args_b : List Val) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState),
+    PolicyTableRespectsBisimT ptable →
+    TowerInvβ T_a T_b →
+    ValVisβ op_a op_b T_a.heap T_b.heap →
+    ListValVisβ args_a args_b T_a.heap T_b.heap →
+    ValValid op_a T_a.heap → ValValid op_b T_b.heap →
+    ListValValid args_a T_a.heap → ListValValid args_b T_b.heap →
+    applyDirect n ptable level op_a args_a T_a = some (r_a, T_a') →
+    ∃ r_b T_b',
+      applyDirect n ptable level op_b args_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ TowerInvβ T_a' T_b' ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap
+
+/-- **The level-tracking `applyDirect` clause, proved.** Re-thread of the
+    gate-free `frameβ_applyDirect_eval` (`LamBeta` §6j) onto `TowerInvβ`: the
+    closure case runs its body via the level-tracking eval IH `FrameβEvalStmtW`
+    (so `.em` inside a closure body is handled), with the level fields lifted
+    across the argument allocation by `level_fields_extend`; `.builtinBaseApply`
+    re-dispatches via the `applyDirect`-W IH; `.prim` leaves the state (hence
+    `TowerInvβ`) unchanged. The applyDirect node of the mutual `FrameStmtβ`. -/
+theorem frameβ_applyDirect_evalW (n : Nat)
+    (ih_eval : FrameβEvalStmtW n) (ih_ad : FrameβApplyDirectStmtW n) :
+    FrameβApplyDirectStmtW (n + 1) := by
+  intro ptable level op_a op_b args_a args_b T_a T_b r_a T_a'
+        hresp_pt h_tower h_vv_op h_lvv hv_opa hv_opb hv_argsa hv_argsb heval
+  have h_vv1 := h_vv_op 1
+  cases op_a with
+  | num _ => simp [applyDirect] at heval
+  | bool _ => simp [applyDirect] at heval
+  | nilV => simp [applyDirect] at heval
+  | sym _ => simp [applyDirect] at heval
+  | cons _ _ => simp [applyDirect] at heval
+  | prim name =>
+      have h_opb : op_b = .prim name := by
+        cases op_b with
+        | prim n' => simp only [ValVisβ_aux] at h_vv1; rw [h_vv1]
+        | num _ => simp [ValVisβ_aux] at h_vv1
+        | bool _ => simp [ValVisβ_aux] at h_vv1
+        | nilV => simp [ValVisβ_aux] at h_vv1
+        | sym _ => simp [ValVisβ_aux] at h_vv1
+        | cons _ _ => simp [ValVisβ_aux] at h_vv1
+        | closure _ _ _ => simp [ValVisβ_aux] at h_vv1
+        | builtinBaseApply => simp [ValVisβ_aux] at h_vv1
+      subst h_opb
+      simp only [applyDirect] at heval
+      cases hp_a : applyPrim name args_a with
+      | none => rw [hp_a] at heval; simp at heval
+      | some v_a' =>
+          rw [hp_a] at heval
+          simp only [Option.some.injEq, Prod.mk.injEq] at heval
+          obtain ⟨hr, hT⟩ := heval; subst hr; subst hT
+          obtain ⟨r_b, hp_b, h_vv_r, hv_ra, hv_rb⟩ :=
+            applyPrim_bisimβ name args_a args_b T_a.heap T_b.heap h_lvv hv_argsa hv_argsb v_a' hp_a
+          exact ⟨r_b, T_b, by simp only [applyDirect, hp_b], h_vv_r, h_tower,
+                 HeapEvolutionβ.refl _ _, hv_ra, hv_rb⟩
+  | builtinBaseApply =>
+      have h_opb : op_b = .builtinBaseApply := by
+        cases op_b with
+        | builtinBaseApply => rfl
+        | num _ => simp [ValVisβ_aux] at h_vv1
+        | bool _ => simp [ValVisβ_aux] at h_vv1
+        | nilV => simp [ValVisβ_aux] at h_vv1
+        | sym _ => simp [ValVisβ_aux] at h_vv1
+        | cons _ _ => simp [ValVisβ_aux] at h_vv1
+        | closure _ _ _ => simp [ValVisβ_aux] at h_vv1
+        | prim _ => simp [ValVisβ_aux] at h_vv1
+      subst h_opb
+      unfold applyDirect at heval
+      match args_a, args_b, h_lvv, hv_argsa, hv_argsb with
+      | [], _, _, _, _ => simp at heval
+      | _ :: [], _, _, _, _ => simp at heval
+      | _ :: _ :: _ :: _, _, _, _, _ => simp at heval
+      | [_aO_a, _ol_a], [], h_lvv', _, _ => exact h_lvv'.elim
+      | [_aO_a, _ol_a], [_], h_lvv', _, _ => exact h_lvv'.2.elim
+      | [_aO_a, _ol_a], _ :: _ :: _ :: _, h_lvv', _, _ => exact h_lvv'.2.2.elim
+      | [actualOp_a, operandsList_a], [actualOp_b, operandsList_b],
+          ⟨h_vv_actual, h_vv_olist, _⟩, ⟨hv_actual_a, hv_olist_a, _⟩,
+          ⟨hv_actual_b, hv_olist_b, _⟩ =>
+          simp only at heval
+          cases hl_a : valToList operandsList_a with
+          | none => rw [hl_a] at heval; simp at heval
+          | some operands_a =>
+              rw [hl_a] at heval
+              simp only at heval
+              obtain ⟨operands_b, hl_b, h_lvv_ops, hv_ops_a, hv_ops_b⟩ :=
+                valToList_bisimβ operands_a operandsList_a operandsList_b
+                  T_a.heap T_b.heap hl_a h_vv_olist hv_olist_a hv_olist_b
+              obtain ⟨r_b, T_b', h_eval_b, h_vv_r, h_tower', h_he', hv_ra, hv_rb⟩ :=
+                ih_ad ptable level actualOp_a actualOp_b operands_a operands_b
+                  T_a T_b r_a T_a' hresp_pt h_tower h_vv_actual h_lvv_ops
+                  hv_actual_a hv_actual_b hv_ops_a hv_ops_b heval
+              exact ⟨r_b, T_b', by simp only [applyDirect, hl_b, h_eval_b], h_vv_r,
+                     h_tower', h_he', hv_ra, hv_rb⟩
+  | closure ps body cenv =>
+      obtain ⟨body', cenv_b, rfl⟩ := ValVisβ_closure_inv h_vv_op
+      obtain ⟨_, hβ_body, h_env_cenv⟩ := closure_ValVisβ_imp h_vv_op
+      simp only [applyDirect] at heval
+      by_cases hlen : ps.length = args_a.length
+      · have hlen_b : ps.length = args_b.length := by rw [hlen]; exact ListValVisβ.length_eq h_lvv
+        have hne_a : (ps.length != args_a.length) = false := by simp [hlen]
+        rw [hne_a] at heval
+        simp only [Bool.false_eq_true, ↓reduceIte] at heval
+        -- bind the arguments (§6g): EnvVisβ call envs + the heap-extension witnesses
+        obtain ⟨hh_a', hh_b', hev_a', hev_b', h_env_alloc, ⟨ext_a, hex_a⟩, ⟨ext_b, hex_b⟩⟩ :=
+          EnvVisβ_allocStep_chain args_a args_b ps cenv cenv_b T_a.heap T_b.heap
+            hlen.symm hlen_b.symm h_lvv hv_argsa hv_argsb h_tower.hv_a h_tower.hv_b
+            hv_opa hv_opb h_env_cenv
+        -- lift the level fields across the argument allocation
+        obtain ⟨hlva', hlvb', hlvisβ'⟩ :=
+          level_fields_extend ext_a ext_b h_tower.hv_a h_tower.hv_b
+            h_tower.valid_a h_tower.valid_b h_tower.visβ
+        -- `TowerInvβ` at the alloc'd states (levels/policies unchanged; heaps += ext)
+        have h_tower_alloc : TowerInvβ
+            { T_a with heap := (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).1 }
+            { T_b with heap := (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).1 } :=
+          { hv_a := hh_a', hv_b := hh_b', count := h_tower.count
+            valid_a := by rw [hex_a]; exact hlva', valid_b := by rw [hex_b]; exact hlvb'
+            visβ := by rw [hex_a, hex_b]; exact hlvisβ'
+            pol_eq := h_tower.pol_eq, pol_resp := h_tower.pol_resp }
+        -- `WFCtxTβ` for the closure body call, then run it by the level-tracking eval IH
+        obtain ⟨r_b, T_b', h_eval_b, h_vv_r, h_ctx_body, h_he_body, hv_ra, hv_rb⟩ :=
+          ih_eval ptable level body body'
+            (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).2
+            (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).2
+            { T_a with heap := (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).1 }
+            { T_b with heap := (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).1 }
+            r_a T_a' hβ_body hresp_pt
+            (WFCtxTβ.ofTower h_tower_alloc hev_a' hev_b' h_env_alloc) heval
+        have h_he_alloc : HeapEvolutionβ T_a T_b
+            { T_a with heap := (args_a.zip ps |>.foldl allocStep (T_a.heap, cenv)).1 }
+            { T_b with heap := (args_b.zip ps |>.foldl allocStep (T_b.heap, cenv_b)).1 } :=
+          HeapEvolutionβ.from_heapExt h_tower.hv_a h_tower.hv_b ⟨ext_a, hex_a⟩ ⟨ext_b, hex_b⟩
+        refine ⟨r_b, T_b', ?_, h_vv_r, h_ctx_body.toTower,
+                h_he_alloc.trans h_he_body, hv_ra, hv_rb⟩
+        simp only [applyDirect]
+        have hne_b : (ps.length != args_b.length) = false := by simp [hlen_b]
+        rw [hne_b]; simp only [Bool.false_eq_true, ↓reduceIte]; exact h_eval_b
+      · have hne : (ps.length != args_a.length) = true := by simp [hlen]
+        rw [hne] at heval; simp at heval
+
 end LeanBlack
+
 
 
