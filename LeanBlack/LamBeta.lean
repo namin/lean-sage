@@ -924,6 +924,13 @@ Quot.sound}).** The body-independent substrate the allocating cases need:
   root case gets its operand-purity side condition), and — since `Pure (.set _ _) =
   Pure (.installPolicy _) = false` — those two cases become **vacuous**, dissolving the
   one remaining hard eval case on the pure path (matching `contextual_beta_pure`).
+* **`ValVisβ_refl` / `EnvVisβ_refl`** (+ `WFCtxTβ.refl` in `LamBetaReflect`) and
+  **`ValVisβ_isGround_eq`** — the simulation is reflexive on `ValValid`/`HeapValid`
+  data, and collapses to *equality* on ground (`.num`/`.bool`) values. These are the
+  step-4 *observation bridge* foundations: reflexivity instantiates the **cross-side**
+  fundamental lemma **diagonally** (`env_a=env_b`, `T_a=T_b`) to speak about a
+  single-sided ground `ObsConv`, and the ground collapse makes the two sides' ground
+  observations *agree* — turning the `ValVisβ` simulation into ground `CtxEquiv`.
 
 §6 then assembles the eval obligation (`HeapEvolutionβ`, `WFβ`) and
 discharges **every gate-free structural case** on it: the allocating
@@ -2206,6 +2213,71 @@ theorem closedVal_ValVisβ_eq : ∀ (v_a v_b : Val) (h_a h_b : Heap),
       rw [closedVal_ValVisβ_eq x x_b h_a h_b hx hvx,
           closedVal_ValVisβ_eq y y_b h_a h_b hy hvy]
   | .closure _ _ _, _, _, _, hclosed, _ => by simp [closedValB] at hclosed
+
+/-- **On a ground value, `ValVisβ` is equality.** The collapse the step-4
+    observation bridge uses: when the fundamental lemma's a-side result is a
+    *ground* value (`.num` / `.bool` — the only values `CtxEquiv` observes), the
+    `ValVisβ`-related b-side result is *equal* to it, so the ground observations
+    agree. -/
+theorem ValVisβ_isGround_eq {v_a v_b : Val} {h_a h_b : Heap}
+    (hg : v_a.isGround = true) (h : ValVisβ v_a v_b h_a h_b) : v_b = v_a := by
+  cases v_a with
+  | num a => exact ValVisβ_num_inv h
+  | bool c => exact ValVisβ_bool_inv h
+  | nilV => simp [Val.isGround] at hg
+  | sym _ => simp [Val.isGround] at hg
+  | prim _ => simp [Val.isGround] at hg
+  | builtinBaseApply => simp [Val.isGround] at hg
+  | cons _ _ => simp [Val.isGround] at hg
+  | closure _ _ _ => simp [Val.isGround] at hg
+
+/-! ### `ValVisβ` / `EnvVisβ` reflexivity (on valid data)
+
+A value/env is `ValVisβ`/`EnvVisβ`-related *to itself* over a deeply-valid heap:
+closure bodies relate by `BetaRel.refl`, and each captured cell — present and
+valid by `HeapValid` — relates by the depth induction. This is what lets the
+*cross-side* fundamental lemma be instantiated *diagonally* (`env_a = env_b`,
+`T_a = T_b`) to speak about a single-sided `ObsConv` observation (step 4). -/
+
+/-- `ValVisβ_aux` at every depth is reflexive on a `ValValid` value over a
+    `HeapValid` heap. -/
+theorem ValVisβ_aux_refl : ∀ (n : Nat) (v : Val) (h : Heap),
+    HeapValid h → ValValid v h → ValVisβ_aux n v v h h
+  | 0, _, _, _, _ => trivial
+  | _ + 1, .num _, _, _, _ => rfl
+  | _ + 1, .bool _, _, _, _ => rfl
+  | _ + 1, .nilV, _, _, _ => trivial
+  | _ + 1, .sym _, _, _, _ => rfl
+  | _ + 1, .prim _, _, _, _ => rfl
+  | _ + 1, .builtinBaseApply, _, _, _ => trivial
+  | n + 1, .cons x y, h, hh, hv =>
+      ⟨ValVisβ_aux_refl n x h hh hv.1, ValVisβ_aux_refl n y h hh hv.2⟩
+  | n + 1, .closure ps body cenv, h, hh, hv => by
+      refine ⟨rfl, .refl _, ?_⟩
+      intro z
+      cases hz : cenv.lookup z with
+      | none => simp only []
+      | some i =>
+          have hlt : i < h.length := hv z i hz
+          have hsome : h[i]? = some h[i] := List.getElem?_eq_getElem hlt
+          simp only [hsome]
+          exact ValVisβ_aux_refl n h[i] h hh (hh i h[i] hsome)
+
+/-- **`ValVisβ` is reflexive** on a `ValValid` value over a `HeapValid` heap. -/
+theorem ValVisβ_refl {v : Val} {h : Heap} (hh : HeapValid h) (hv : ValValid v h) :
+    ValVisβ v v h h := fun n => ValVisβ_aux_refl n v h hh hv
+
+/-- **`EnvVisβ` is reflexive** on an `EnvValid` env over a `HeapValid` heap. -/
+theorem EnvVisβ_refl {env : Env} {h : Heap} (hh : HeapValid h) (hv : EnvValid env h) :
+    EnvVisβ env env h h := by
+  intro n z
+  cases hz : env.lookup z with
+  | none => simp only []
+  | some i =>
+      have hlt : i < h.length := hv z i hz
+      have hsome : h[i]? = some h[i] := List.getElem?_eq_getElem hlt
+      simp only [hsome]
+      exact ValVisβ_aux_refl n h[i] h hh (hh i h[i] hsome)
 
 /-- A value `mulConsList` accepts is a closure-free numeral list. -/
 theorem mulConsList_closedVal : ∀ {v : Val} {k : Int},

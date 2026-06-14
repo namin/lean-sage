@@ -1011,6 +1011,26 @@ def WFCtxTβ.toTower {T_a T_b : TowerState} {env_a env_b : Env} {level : Nat}
   ⟨h.hv_a, h.hv_b, h.level_count_eq, h.level_envs_valid_a, h.level_envs_valid_b,
    h.level_envs_visβ, h.policies_eq, h.policies_resp_all⟩
 
+/-- **The diagonal `WFCtxTβ`** — reflexivity of the cross-side context invariant.
+    From a single tower/env's well-formedness (heap valid, env valid, level envs
+    valid, policies respect bisim), `WFCtxTβ env env T T level` holds: the cross-
+    side fields collapse to reflexivity (`EnvVisβ_refl`; equal level counts and
+    policies). This instantiates the *cross-side* fundamental lemma *diagonally*
+    to reason about a single-sided `ObsConv` observation (step 4). -/
+theorem WFCtxTβ.refl {env : Env} {T : TowerState} {level : Nat}
+    (hh : HeapValid T.heap) (hev : EnvValid env T.heap)
+    (hlv : ∀ n e, T.envAt? n = some e → EnvValid e T.heap)
+    (hpr : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p) :
+    WFCtxTβ env env T T level :=
+  { policy_eq_at := rfl, hv_a := hh, hv_b := hh, ev_a := hev, ev_b := hev
+    policy_resp := fun p hp => hpr level p hp
+    env_visβ := EnvVisβ_refl hh hev
+    level_envs_valid_a := hlv, level_envs_valid_b := hlv
+    level_count_eq := rfl, policies_eq := fun _ => rfl, policies_resp_all := hpr
+    level_envs_visβ := fun n ea eb hea heb => by
+      obtain rfl : ea = eb := by rw [hea] at heb; exact (Option.some.inj heb)
+      exact EnvVisβ_refl hh (hlv n ea hea) }
+
 /-- The level fields lift across an arbitrary heap extension on each side
     (generalizes `level_fields_alloc` from a single cell). -/
 theorem level_fields_extend {T_a T_b : TowerState} (ext_a ext_b : Heap)
