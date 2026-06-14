@@ -77,6 +77,55 @@ theorem BetaRel.congr {a b : Expr} (h : BetaRel a b) (D : Ctx) :
   | refl => exact .refl _
   | tail _ step ih => exact .tail ih (step.congr D)
 
+/-! ### `BetaRel` inversions — building blocks for the fundamental
+    lemma's base and closure cases. -/
+
+/-- β never fires from a numeral (it has no redex position). -/
+theorem BetaRel.num_eq {i : Int} {b : Expr} (h : BetaRel (.num i) b) :
+    b = .num i := by
+  induction h with
+  | refl => rfl
+  | tail _ step ih =>
+      subst ih; obtain ⟨C, _, _, _, hC, _⟩ := step
+      cases C <;> simp [Ctx.plug] at hC
+
+/-- β never fires from a boolean. -/
+theorem BetaRel.bool_eq {c : Bool} {b : Expr} (h : BetaRel (.bool c) b) :
+    b = .bool c := by
+  induction h with
+  | refl => rfl
+  | tail _ step ih =>
+      subst ih; obtain ⟨C, _, _, _, hC, _⟩ := step
+      cases C <;> simp [Ctx.plug] at hC
+
+/-- β never fires from a variable. -/
+theorem BetaRel.var_eq {y : String} {b : Expr} (h : BetaRel (.var y) b) :
+    b = .var y := by
+  induction h with
+  | refl => rfl
+  | tail _ step ih =>
+      subst ih; obtain ⟨C, _, _, _, hC, _⟩ := step
+      cases C <;> simp [Ctx.plug] at hC
+
+/-- **β under a binder stays under the binder, β-relating the body.**
+    The closure-case inversion the fundamental lemma needs: relating a
+    `λ` yields a `λ` with the same params and a β-related body. -/
+theorem BetaRel.lam_inv {ps : List String} {body b : Expr}
+    (h : BetaRel (.lam ps body) b) :
+    ∃ body', b = .lam ps body' ∧ BetaRel body body' := by
+  induction h with
+  | refl => exact ⟨body, rfl, .refl _⟩
+  | tail _ step ih =>
+      obtain ⟨body', rfl, hbody'⟩ := ih
+      obtain ⟨C, x, bb, v, hC, hbb⟩ := step
+      cases C with
+      | lam ps2 C' =>
+          simp only [Ctx.plug, Expr.lam.injEq] at hC
+          obtain ⟨rfl, rfl⟩ := hC
+          exact ⟨C'.plug (.letE x v bb), by rw [hbb]; simp [Ctx.plug],
+                 hbody'.tail ⟨C', x, bb, v, rfl, rfl⟩⟩
+      | _ => simp [Ctx.plug] at hC
+
 /-! ## 2. The body-relaxed value/env relations -/
 
 /-- `ValVis_aux_weak` with its closure-body clause relaxed from
@@ -130,6 +179,29 @@ theorem ValVisβ_aux_closure (n : Nat)
     ↔ (ps_a = ps_b ∧ BetaRel body_a body_b ∧
        EnvVisβ_aux n cenv_a cenv_b h_a h_b) := by
   simp [ValVisβ_aux, EnvVisβ_aux]
+
+/-- **`ValVisβ` does exactly what it is for.** It relates the
+    redex-closure `λ-capturing (λx. x) 0` and the contractum-closure
+    `λ-capturing (let x = 0 in x)` — β-related bodies under a binder —
+    which `ValVis_weak` *cannot* (it demands `body_a = body_b`). This is
+    the artifact's own Wand pair, and it is the whole point of the
+    relaxation: the closures that `lam_EvalEquiv_congruence_fails`
+    (`CtxEquiv.lean`) shows are distinct *values* are nonetheless related
+    by `ValVisβ`. -/
+theorem ValVisβ_relates_beta_closures :
+    ValVisβ (.closure [] (.app [.lam ["x"] (.var "x"), .num 0]) .nil)
+            (.closure [] (.letE "x" (.num 0) (.var "x")) .nil) [] []
+    ∧ ¬ ValVis_weak (.closure [] (.app [.lam ["x"] (.var "x"), .num 0]) .nil)
+            (.closure [] (.letE "x" (.num 0) (.var "x")) .nil) [] [] := by
+  refine ⟨fun n => ?_, fun h => ?_⟩
+  · cases n with
+    | zero => trivial
+    | succ n =>
+        rw [ValVisβ_aux_closure]
+        exact ⟨rfl, BetaRel.beta .hole "x" (.var "x") (.num 0),
+               fun x => by simp [Env.lookup]⟩
+  · have h1 := h 1
+    simp [ValVis_aux_weak] at h1
 
 /-! ## 3. The fundamental lemma the `.lam` case needs (stated, not proved)
 
