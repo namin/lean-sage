@@ -3273,6 +3273,68 @@ theorem obsConv_refine_forward {M N : Expr} (hβ : BetaRel M N)
       (hβ.congr C) hpure hresp (WFCtxTβ.refl hh hev_env hlv hpr) hbr hev
   exact ⟨k, T_b', (ValVisβ_isGround_eq hg hvv) ▸ hev_b⟩
 
+/-! ## 7u. The backward direction and the pointwise conditional equivalence.
+
+`CtxEquiv` is an `↔`, so the conditional `.lam` congruence needs *both*
+observational refinements.  The forward one is now real (`obsConv_refine_forward`,
+§7t).  The backward one — the contractum's ground convergence forces the redex's —
+is the **single remaining obligation**, isolated here as `ReverseSimβ`: the reverse
+cross-side simulation (the b-side drives).  Note the **`∃ k'` fuel**: the redex
+needs strictly more fuel than its contractum (`app_lam_redex_min_fuel`), so a
+same-fuel reverse statement is *false* — this corrects the (unsatisfiable) shape
+the old §7n `obsConv_refine_of_FL_rev` carried.  `ReverseSimβ`'s root core is
+already free and symmetric (the shared-reduct equations `eval_beta_builtin` /
+`eval_letE`); what remains is threading it through arbitrary contexts (the reverse
+of `frameβ_tower`). -/
+def ReverseSimβ : Prop :=
+  ∀ (k : Nat) (pt : PolicyTable) (lvl : Nat) (ea eb : Expr)
+    (va vb : Env) (Sa Sb : TowerState) (rb : Val) (Sb' : TowerState),
+    BetaRel ea eb → Pure ea = true → PolicyTableRespectsBisimT pt →
+    WFCtxTβ va vb Sa Sb lvl → BReady Sb →
+    eval k pt lvl eb vb Sb = some (rb, Sb') →
+    ∃ (k' : Nat) (ra : Val) (Sa' : TowerState),
+      eval k' pt lvl ea va Sa = some (ra, Sa') ∧ ValVisβ ra rb Sa'.heap Sb'.heap
+
+/-- **Backward observational refinement, modulo the reverse simulation.** Given
+    `ReverseSimβ`, the contractum's ground convergence pins the redex's
+    (diagonal instantiation + `ValVisβ_isGround_eq_right`). -/
+theorem obsConv_refine_backward {M N : Expr} (hβ : BetaRel M N) (hrev : ReverseSimβ)
+    (C : Ctx) (ptable : PolicyTable) (level : Nat) (env : Env) (T : TowerState) (g : Val)
+    (hg : g.isGround = true)
+    (hresp : PolicyTableRespectsBisimT ptable)
+    (hpure : Pure (C.plug M) = true)
+    (hbr : BReady T)
+    (hh : HeapValid T.heap) (hev_env : EnvValid env T.heap)
+    (hlv : ∀ n e, T.envAt? n = some e → EnvValid e T.heap)
+    (hpr : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+    (hobs : ObsConv (C.plug N) ptable level env T g) :
+    ObsConv (C.plug M) ptable level env T g := by
+  obtain ⟨k, T', hev⟩ := hobs
+  obtain ⟨k', r_a, T_a', hev_a, hvv⟩ :=
+    hrev k ptable level (C.plug M) (C.plug N) env env T T g T'
+      (hβ.congr C) hpure hresp (WFCtxTβ.refl hh hev_env hlv hpr) hbr hev
+  exact ⟨k', T_a', (ValVisβ_isGround_eq_right hg hvv) ▸ hev_a⟩
+
+/-- **The conditional pointwise ground equivalence for a β pair.** Forward is
+    discharged (`frameβ_eval_FL`); backward is modulo `ReverseSimβ`.  This is the
+    `CtxEquiv` *body* (a single context/state instance of the `↔`) restricted to
+    the standard-gate (`BReady`), pure, well-formed states the relation is genuinely
+    conditional on (`beta_not_unconditional_CtxEquiv` shows the unconditional `↔`
+    is false).  Once `ReverseSimβ` lands, this — closed under context composition —
+    lifts through `.lam` via `CtxEquiv.under_lam`. -/
+theorem obsConv_iff_beta {M N : Expr} (hβ : BetaRel M N) (hrev : ReverseSimβ)
+    (C : Ctx) (ptable : PolicyTable) (level : Nat) (env : Env) (T : TowerState) (g : Val)
+    (hg : g.isGround = true)
+    (hresp : PolicyTableRespectsBisimT ptable)
+    (hpure : Pure (C.plug M) = true)
+    (hbr : BReady T)
+    (hh : HeapValid T.heap) (hev_env : EnvValid env T.heap)
+    (hlv : ∀ n e, T.envAt? n = some e → EnvValid e T.heap)
+    (hpr : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p) :
+    ObsConv (C.plug M) ptable level env T g ↔ ObsConv (C.plug N) ptable level env T g :=
+  ⟨obsConv_refine_forward hβ C ptable level env T g hg hresp hpure hbr hh hev_env hlv hpr,
+   obsConv_refine_backward hβ hrev C ptable level env T g hg hresp hpure hbr hh hev_env hlv hpr⟩
+
 end LeanBlack
 
 
