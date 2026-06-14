@@ -56,11 +56,16 @@
   convergence extracted from the redex, the standard gate carried through the operand by
   purity) give `gate_redex_to_letE_anyfuel`, so the premise is exactly `DUMP_LAM` §0's
   standard-gate `BuiltinReady` + heap/operand purity — the same side conditions
-  `contextual_beta_pure` carries. **What remains**: thread that recognized premise through
-  the mutual statement (so each case carries it), and the hard `.set` (cross-side
-  meta-mutation — `isMetaMutation` compares indices `EnvVisβ` does not pin; needs a
-  β-`PolicyRespectsBisim` + different-index update machinery). Then the mutual
-  `FrameStmtβ` assembly. (DUMP_LAM §4 step 3 has the plans.)
+  `contextual_beta_pure` carries. The **payoff bridge** is also built (§7n,
+  `obsConv_refine_of_FL`): the cross-side fundamental lemma ⟹ forward ground `ObsConv`
+  refinement in every context (`BetaRel.congr` lifts the relation into `C`,
+  `WFCtxTβ.refl` diagonalizes the cross-side FL onto the single-sided observation,
+  `ValVisβ_isGround_eq` collapses ground results to equality) — the forward half of the
+  conditional ground `CtxEquiv` that `CtxEquiv.under_lam` lifts through `.lam` for free.
+  **What remains**: the mechanical FL assembly (re-cut the mutual statement to carry the
+  `Pure` + `BuiltinReadyN` premise; `.set`/`.installPolicy` are vacuous under `Pure`), and
+  the backward observation direction (the operational `↔` companion to `gate_redex_to_letE`).
+  (DUMP_LAM §4 has the plans.)
 -/
 import LeanBlack.LamBeta
 import LeanBlack.Frame
@@ -1924,6 +1929,52 @@ theorem frameβ_app_root_evalW (n : Nat) (ptable : PolicyTable) (level : Nat)
   refine ⟨r_b, T_b', ?_, h_vv, h_ctx', h_he, hv_ra, hv_rb⟩
   exact gate_redex_to_letE_anyfuel (n + 1) ptable level x body' v' env_b T_b
     h_depth h_mat0 h_builtin0 (h_pure_op x v' body' rfl) h_heap r_b T_b' h_redex_b
+
+/-! ## 7n. The step-4 observation bridge (forward), modulo the fundamental lemma
+
+The payoff direction: the cross-side `ValVisβ` fundamental lemma yields ground
+`ObsConv` **refinement** in every context — the forward half of the (conditional)
+ground `CtxEquiv` that `CtxEquiv.under_lam` (`CtxEquiv.lean`, already proved) lifts
+through the binder *for free*. Three pieces compose: `BetaRel.congr` lifts `BetaRel
+M N` into the context `C`; `WFCtxTβ.refl` instantiates the **cross-side** FL
+**diagonally** (`env_a=env_b`, `T_a=T_b`) so it speaks about the *single-sided*
+observation; and `ValVisβ_isGround_eq` collapses the related ground result to
+*equality*, so the two sides converge to the *same* ground value. The fundamental
+lemma itself (`hFL`, the cross-side eval simulation) is the remaining obligation —
+its β-firing crux `.app` root is done (`frameβ_app_root_evalW`); assembling the
+mutual statement that carries the `Pure` + `BuiltinReadyN` premise is the mechanical
+remainder. -/
+
+/-- **FL ⟹ forward ground-observational refinement (conditional).** Given the
+    cross-side eval fundamental lemma `hFL`, at any well-formed, standard-gate, pure
+    state, `M`'s convergences to a *ground* value are matched by `N` (for a
+    `BetaRel`-pair `M`/`N`). This is the forward half of the conditional ground
+    `CtxEquiv` — combined with the (operational) backward direction and the free
+    `CtxEquiv.under_lam`, it gives the conditional `.lam` congruence. -/
+theorem obsConv_refine_of_FL {M N : Expr} (d : Nat) (hβ : BetaRel M N)
+    (hFL : ∀ (k : Nat) (pt : PolicyTable) (lvl : Nat) (ea eb : Expr)
+             (va vb : Env) (Sa Sb : TowerState) (ra : Val) (Sa' : TowerState),
+        BetaRel ea eb → Pure ea = true → PolicyTableRespectsBisimT pt →
+        WFCtxTβ va vb Sa Sb lvl →
+        BuiltinReadyN d pt lvl vb Sb → PureHeap Sb.heap →
+        eval k pt lvl ea va Sa = some (ra, Sa') →
+        ∃ rb Sb', eval k pt lvl eb vb Sb = some (rb, Sb') ∧
+          ValVisβ ra rb Sa'.heap Sb'.heap)
+    (C : Ctx) (ptable : PolicyTable) (level : Nat) (env : Env) (T : TowerState) (g : Val)
+    (hg : g.isGround = true)
+    (hresp : PolicyTableRespectsBisimT ptable)
+    (hpure : Pure (C.plug M) = true)
+    (hready : BuiltinReadyN d ptable level env T) (hheap : PureHeap T.heap)
+    (hh : HeapValid T.heap) (hev_env : EnvValid env T.heap)
+    (hlv : ∀ n e, T.envAt? n = some e → EnvValid e T.heap)
+    (hpr : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+    (hobs : ObsConv (C.plug M) ptable level env T g) :
+    ObsConv (C.plug N) ptable level env T g := by
+  obtain ⟨k, T', hev⟩ := hobs
+  obtain ⟨r_b, T_b', hev_b, hvv⟩ :=
+    hFL k ptable level (C.plug M) (C.plug N) env env T T g T'
+      (hβ.congr C) hpure hresp (WFCtxTβ.refl hh hev_env hlv hpr) hready hheap hev
+  exact ⟨k, T_b', (ValVisβ_isGround_eq hg hvv) ▸ hev_b⟩
 
 end LeanBlack
 
