@@ -42,13 +42,17 @@
   the same dispatch branch, then the `applyDirect` IH; route (b)'s gate threading).
   the **`evalList` clause is re-threaded onto `WFCtxTβ`** (`frameβ_evalList_evalW`,
   §7k), and the **minor eval cases `.quote` / `.installPolicy` are done** (§7l, via
-  the `setPolicyAt` lemmas). The only eval constructors left are the **two deep
-  cruxes**: eval's `.app` — whose `app_inv` *root-contraction* branch is the
-  conditional-β crux (where β fires: redex `(λx.body) v` vs. contractum
-  `let x=v in body`, needing the standard-gate `BuiltinReady` condition) — and
-  `.set` (cross-side meta-mutation — `isMetaMutation` compares indices `EnvVisβ`
-  does not pin; needs a β-`PolicyRespectsBisim` + different-index update machinery).
-  Then the mutual `FrameStmtβ` assembly. (DUMP_LAM §4 step 3 has the plans.)
+  the `setPolicyAt` lemmas). eval's `.app` splits (`BetaRel.app_inv`) into a
+  structural and a root-contraction branch; the **structural branch is now done**
+  (`frameβ_app_structural_evalW`, §7m — unconditional: both sides run an `.app`, so
+  the gated `applyVia` clause §7j handles the gate; composes the eval IH + §7k +
+  §7j). The eval constructors still open are the **two deep cruxes**: eval's `.app`
+  **root-contraction** branch — the conditional-β crux (where β fires: redex
+  `(λx.body) v` vs. contractum `let x=v in body`, needing the standard-gate
+  `BuiltinReady` condition) — and `.set` (cross-side meta-mutation — `isMetaMutation`
+  compares indices `EnvVisβ` does not pin; needs a β-`PolicyRespectsBisim` +
+  different-index update machinery). Then the mutual `FrameStmtβ` assembly.
+  (DUMP_LAM §4 step 3 has the plans.)
 -/
 import LeanBlack.LamBeta
 import LeanBlack.Frame
@@ -1604,6 +1608,87 @@ theorem frameβ_installPolicy_caseW (n : Nat) (ptable : PolicyTable) (level : Na
       · exact HeapEvolutionβ.from_heapExt h_ctx.hv_a h_ctx.hv_b
           ⟨[], by rw [TowerState.setPolicyAt_heap]; simp⟩
           ⟨[], by rw [TowerState.setPolicyAt_heap]; simp⟩
+
+/-! ## 7m. eval's `.app` — the structural branch (no root contraction)
+
+The first of the two remaining eval cases (`DUMP_LAM.md` §3 step 3a). `.app`'s
+`BetaRel` inversion (`BetaRel.app_inv`, `LamBeta` §4d) is a *disjunction*: a
+**structural** branch — `exp_b = .app args'` with `BetaRelList args args'`, no
+redex contracted at the root — and the **root-contraction** branch (where β
+fires). This section discharges the structural branch: a faithful β-port of
+`frame_tower`'s `.app` case (`Frame.lean:1152`), composing the three
+already-proven reflective clauses — the eval IH on the head, the `evalList`
+clause (§7k) on the argument tail, and the gated `applyVia` clause (§7j) on the
+application — then rebuilding the output `WFCtxTβ` from the `applyVia` output
+`TowerInvβ` (`WFCtxTβ.ofTower`) with the ambient-env fields lifted across the
+composed `HeapEvolutionβ`.
+
+It is **unconditional** (no `BuiltinReady` premise): both sides run an `.app`, so
+`applyVia`'s cross-side gate dispatch (`frameβ_applyVia_eval`) handles the gate
+uniformly — the `base-apply` cells are `ValVisβ`-related, forcing the same branch.
+The conditional-β premise is needed only by the root-contraction branch, where the
+a-side runs an application and the b-side a `.letE` (`DUMP_LAM.md` §0 Obstruction
+B). That branch — the genuine research crux — is the single remaining eval case
+after this (with `.set`). -/
+
+/-- **eval's `.app`, structural branch.** Given `BetaRelList args args'` (the
+    `app_inv` inl case), `.app args` (a-side) and `.app args'` (b-side) simulate:
+    eval the head by the eval IH, the argument tail by the `evalList` clause, and
+    apply by the `applyVia` clause. Takes the fuel-`n` eval / evalList / applyVia
+    clauses as IHs, exactly as `frame_tower`'s `.app` case takes `ih_eval` /
+    `ih_evalList` / `ih_applyVia`. -/
+theorem frameβ_app_structural_evalW (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (args args' : List Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_a : Val) (T_a' : TowerState)
+    (ih_eval : FrameβEvalStmtW n) (ih_list : FrameβEvalListStmtW n)
+    (ih_via : FrameβApplyViaStmtW n)
+    (hresp_pt : PolicyTableRespectsBisimT ptable)
+    (hβ_args : BetaRelList args args')
+    (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (heval : eval (n + 1) ptable level (.app args) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level (.app args') env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  cases hβ_args with
+  | nil => simp only [eval] at heval; exact absurd heval (by simp)
+  | cons hβ_f hβ_rest =>
+      rename_i f f' rest rest'
+      simp only [eval] at heval
+      cases hf : eval n ptable level f env_a T_a with
+      | none => rw [hf] at heval; simp at heval
+      | some pr =>
+          obtain ⟨fv_a, T_a_inner⟩ := pr
+          rw [hf] at heval; simp only at heval
+          obtain ⟨fv_b, T_b_inner, h_eval_f_b, h_vv_f, h_ctx1, h_he1, hv_fva, hv_fvb⟩ :=
+            ih_eval ptable level f f' env_a env_b T_a T_b fv_a T_a_inner hβ_f hresp_pt h_ctx hf
+          cases ha : evalList n ptable level rest env_a T_a_inner with
+          | none => rw [ha] at heval; simp at heval
+          | some pr2 =>
+              obtain ⟨avs_a, T_a_inner2⟩ := pr2
+              rw [ha] at heval; simp only at heval
+              obtain ⟨avs_b, T_b_inner2, h_eval_args_b, h_lvv, h_ctx2, h_he2, hv_avsa, hv_avsb⟩ :=
+                ih_list ptable level rest rest' env_a env_b T_a_inner T_b_inner avs_a T_a_inner2
+                  hβ_rest hresp_pt h_ctx1 ha
+              -- lift the head value (ValVisβ + ValValid) across the args evolution
+              have h_vv_f' : ValVisβ fv_a fv_b T_a_inner2.heap T_b_inner2.heap :=
+                h_he2.valVisβ_preserve fv_a fv_b hv_fva hv_fvb h_vv_f
+              have hv_fva2 : ValValid fv_a T_a_inner2.heap :=
+                ValValid.length_mono fv_a hv_fva h_he2.len_a
+              have hv_fvb2 : ValValid fv_b T_b_inner2.heap :=
+                ValValid.length_mono fv_b hv_fvb h_he2.len_b
+              -- apply via the gated `applyVia` clause (§7j)
+              obtain ⟨r_b, T_b', h_eval_av_b, h_vv, h_tower3, h_he3, hv_ra, hv_rb⟩ :=
+                ih_via ptable level fv_a fv_b avs_a avs_b T_a_inner2 T_b_inner2 r_a T_a'
+                  hresp_pt h_ctx2.toTower h_vv_f' h_lvv hv_fva2 hv_fvb2 hv_avsa hv_avsb heval
+              have h_he_chain : HeapEvolutionβ T_a T_b T_a' T_b' :=
+                h_he1.trans (h_he2.trans h_he3)
+              refine ⟨r_b, T_b', ?_, h_vv, ?_, h_he_chain, hv_ra, hv_rb⟩
+              · simp only [eval, h_eval_f_b, h_eval_args_b]; exact h_eval_av_b
+              · exact WFCtxTβ.ofTower h_tower3
+                  (EnvValid.length_mono h_ctx.ev_a h_he_chain.len_a)
+                  (EnvValid.length_mono h_ctx.ev_b h_he_chain.len_b)
+                  (h_he_chain.envVisβ_preserve env_a env_b h_ctx.ev_a h_ctx.ev_b h_ctx.env_visβ)
 
 end LeanBlack
 
