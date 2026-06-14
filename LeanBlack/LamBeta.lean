@@ -41,10 +41,13 @@
     `frameβ_letE_eval` (`.letE`, a port of `frame_tower`'s `.letE` with
     `EnvVisβ_alloc_cons` replacing the cons-env equality), `frameβ_ifte_eval`
     (`.ifte`, with `ValVisβ_bool_false_iff` forcing cross-side branch
-    agreement), and `frameβ_seq_eval` (`.seq`, list-structured via
-    `seq_cons_inv`). Proof that the §4 substrate composes into real
+    agreement), `frameβ_seq_eval` (`.seq`, list-structured via
+    `seq_cons_inv`), and `frameβ_evalList_eval` (the `evalList`
+    argument-list traversal, the two-IH list clause over `ListValVisβ` that
+    bridges into `.app`). Proof that the §4 substrate composes into real
     fundamental-lemma cases. Only the `WFCtxTβ` statement-wrapper upgrade
-    and the gated/reflective `.app`/`.em`/`.set` remain (the open core).
+    and the gated/reflective application (`applyVia`/`applyDirect`,
+    `.em`/`.set`) remain (the open core).
 
   The weakening `ValVis_weak ⊆ ValVisβ` holds by the same structural
   induction as `Bisim.ValVis_aux_to_weak` with `BetaRel.refl` discharging
@@ -819,10 +822,12 @@ Quot.sound}).** The body-independent substrate the allocating cases need:
 §6 then assembles the eval obligation (`HeapEvolutionβ`, `WFβ`) and
 discharges **every gate-free structural case** on it: the allocating
 binder (`.letE`, `frameβ_letE_eval`), the branch (`.ifte`,
-`frameβ_ifte_eval`), and the sequence (`.seq`, `frameβ_seq_eval`) — the
-proof that this substrate composes into real fundamental-lemma cases.
-Together with the §3 atoms/`.lam`, the **entire gate-free fragment of the
-faithful eval clause is now closed**.
+`frameβ_ifte_eval`), the sequence (`.seq`, `frameβ_seq_eval`), and the
+argument-list traversal (`evalList`, `frameβ_evalList_eval` — §6f, the
+two-IH list clause producing `ListValVisβ`-related results, the bridge
+into `.app`) — the proof that this substrate composes into real
+fundamental-lemma cases. Together with the §3 atoms/`.lam`, the **entire
+gate-free fragment of the faithful eval/evalList clauses is now closed**.
 
 **Still open (the genuine core, now sharply isolated).**
 
@@ -836,13 +841,15 @@ faithful eval clause is now closed**.
    `applyDirect` clauses (with a trivial `ListValVisβ`). Deferred
    deliberately, *with* those cases below: a wrapper carrying half-formed
    reflective fields would misstate the boundary.
-2. *The elimination side* — `.app` / `applyVia`, the **gate threading**
-   (route (b)). The structural half is now in hand: `app_inv` (§4d) supplies
-   the `BetaRel` inversion (the disjunction whose root-contraction branch is
-   the genuine novelty), and `BetaRelList` the `evalList` relation. What
-   remains is the *evaluation* of the app: the closure is **run** through the
-   `base-apply` gate, so its body evaluates and the two sides — redex-applied
-   vs. contractum-bound — must be shown to reach `ValVisβ`-related results.
+2. *The elimination side* — `.app` / `applyVia` / `applyDirect`, the **gate
+   threading** (route (b)). The structural half is now in hand: `app_inv`
+   (§4d) supplies the `BetaRel` inversion (the disjunction whose root-
+   contraction branch is the genuine novelty), `BetaRelList` the argument
+   relation, and `frameβ_evalList_eval` (§6f) discharges the whole argument-
+   list traversal to `ListValVisβ`-related results. What remains is purely the
+   *application*: `applyVia` / `applyDirect`, where the closure is **run**
+   through the `base-apply` gate — its body evaluates and the two sides
+   (redex-applied vs. contractum-bound) must reach `ValVisβ`-related results.
    This, with the reflective `.em` / `.set`, is where the real research risk
    sits; `BuiltinReady` (standard gate) is the premise that is meant to tame
    it. The de-risking first target is the concrete Wand pair `(λx. x) 0` /
@@ -858,16 +865,18 @@ left between here and the full `.lam` congruence. -/
 §4 supplies the statement-*independent* substrate. This section assembles
 the faithful obligation for the **eval** clause and discharges **every
 gate-free structural case** on it — the allocating binder (`.letE`, §6c),
-the branch (`.ifte`, §6d), and the sequence (`.seq`, §6e) — the milestone
-showing the substrate composes into real fundamental-lemma cases, which
-the §3 sketch could not.
+the branch (`.ifte`, §6d), the sequence (`.seq`, §6e), and the
+argument-list traversal (`evalList`, §6f) — the milestone showing the
+substrate composes into real fundamental-lemma cases, which the §3 sketch
+could not.
 
 Pieces: `HeapEvolutionβ` (the cross-side heap-evolution carrier), `WFβ`
 (the gate-free fragment's context invariant), `frameβ_letE_eval` (the
 `.letE` step, a port of `frame_tower`'s `.letE`), `frameβ_ifte_eval` (the
 `.ifte` step, where `ValVisβ_bool_false_iff` forces both sides to the same
-branch), and `frameβ_seq_eval` (the `.seq` step, list-structured via
-`seq_cons_inv`).
+branch), `frameβ_seq_eval` (the `.seq` step, list-structured via
+`seq_cons_inv`), and `frameβ_evalList_eval` (the `evalList` step, the
+two-IH list traversal that bridges into `.app`).
 
 `WFβ` carries the **load-bearing allocation invariants** the §3 sketch
 dropped — `HeapValid` / `EnvValid` on both sides — and nothing else. It is
@@ -1347,5 +1356,106 @@ theorem frameβ_seq_eval (n : Nat) (ptable : PolicyTable) (level : Nat)
                       h_env_out, hv_ra, hv_rb⟩
               rw [eval_seq_cons_step n ptable level e' f' rest2' env_b T_b T_e_b v_b h_eval_e_b]
               exact h_eval_rest_b
+
+/-! ### 6f. The `evalList` clause — argument-list threading, gate-free
+
+`evalList` is the argument-list traversal `.app` / `.primApp` run before
+applying. It is the last gate-free structural clause, and the bridge into
+the elimination side: `app_inv` (§4d) supplies the `BetaRelList` on the
+arguments, and this clause carries it to `ListValVisβ`-related value lists.
+
+Unlike the single-expression cases, `evalList` recurses on *two* clauses —
+`eval n` on the head, `evalList n` on the tail — so as a standalone lemma
+it takes **both** induction hypotheses the `frame_tower` mutual induction
+supplies at its own `evalList` node (`Frame.lean:2244`): the eval clause
+`FrameβEvalStmt n` and the evalList clause `FrameβEvalListStmt n`. The proof
+is a faithful β-port: `BetaRelList` heads/tails the shared list, and the
+`ListValVis` / `ValVis` / `HeapEvolution` machinery becomes the β-relations.
+No gate premise — like the other structural cases, `evalList` applies
+nothing. -/
+
+/-- Pointwise `ValVisβ` on value lists — the result side matching
+    `BetaRelList`. Mirror of `Bisim.ListValVis` (`ValVis ↦ ValVisβ`); the
+    `ListValVisβ` the full mutual statement's `evalList` clause produces. -/
+def ListValVisβ : List Val → List Val → Heap → Heap → Prop
+  | [],      [],      _,   _   => True
+  | x :: xs, y :: ys, h_a, h_b => ValVisβ x y h_a h_b ∧ ListValVisβ xs ys h_a h_b
+  | _,       _,       _,   _   => False
+
+/-- The `evalList` clause, β-analog of `FrameStmtT`'s second conjunct
+    (`Frame.lean:912`): `ListValVis ↦ ListValVisβ`, the shared `exps`
+    replaced by a `BetaRelList` pair, full output invariant set kept,
+    gate premises absent. -/
+def FrameβEvalListStmt (n : Nat) : Prop :=
+  ∀ (ptable : PolicyTable) (level : Nat) (exps_a exps_b : List Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (rs_a : List Val) (T_a' : TowerState),
+    BetaRelList exps_a exps_b →
+    WFβ env_a env_b T_a T_b →
+    EnvVisβ env_a env_b T_a.heap T_b.heap →
+    evalList n ptable level exps_a env_a T_a = some (rs_a, T_a') →
+    ∃ rs_b T_b',
+      evalList n ptable level exps_b env_b T_b = some (rs_b, T_b') ∧
+      ListValVisβ rs_a rs_b T_a'.heap T_b'.heap ∧
+      WFβ env_a env_b T_a' T_b' ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧
+      EnvVisβ env_a env_b T_a'.heap T_b'.heap ∧
+      ListValValid rs_a T_a'.heap ∧ ListValValid rs_b T_b'.heap
+
+/-- **The `evalList` inductive step.** From the eval clause and the evalList
+    clause at fuel `n`, the evalList clause at fuel `n+1` — exactly the
+    `frame_tower` mutual induction's `evalList` node, faithfully β-ported.
+    The head is threaded by the eval IH, the tail by the evalList IH; the
+    head's `ValVisβ` / `ValValid` are lifted across the tail's
+    `HeapEvolutionβ` (`valVisβ_preserve` / `length_mono`). -/
+theorem frameβ_evalList_eval (n : Nat)
+    (ih_eval : FrameβEvalStmt n) (ih_list : FrameβEvalListStmt n) :
+    FrameβEvalListStmt (n + 1) := by
+  intro ptable level exps_a exps_b env_a env_b T_a T_b rs_a T_a'
+        hβ hwf henv heval
+  cases hβ with
+  | nil =>
+      simp only [evalList, Option.some.injEq, Prod.mk.injEq] at heval
+      obtain ⟨hr, hT⟩ := heval; subst hr; subst hT
+      exact ⟨[], T_b, by simp [evalList], trivial, hwf,
+             HeapEvolutionβ.refl _ _, henv, trivial, trivial⟩
+  | cons hβ_e hβ_rest =>
+      rename_i e e' rest rest'
+      simp only [evalList] at heval
+      cases he : eval n ptable level e env_a T_a with
+      | none => rw [he] at heval; simp at heval
+      | some pr =>
+          obtain ⟨v_a, T_a_inner⟩ := pr
+          rw [he] at heval
+          simp only at heval
+          cases hrest : evalList n ptable level rest env_a T_a_inner with
+          | none => rw [hrest] at heval; simp at heval
+          | some pr2 =>
+              obtain ⟨vs_a, T_a_inner2⟩ := pr2
+              rw [hrest] at heval
+              simp only [Option.some.injEq, Prod.mk.injEq] at heval
+              obtain ⟨hr, hT⟩ := heval; subst hr; subst hT
+              -- IH on head `e`
+              obtain ⟨v_b, T_b_inner, h_eval_e_b, h_vv_v, hwf_inner,
+                      h_he_inner, h_env_inner, hv_va, hv_vb⟩ :=
+                ih_eval ptable level e e' env_a env_b T_a T_b v_a T_a_inner
+                  hβ_e hwf henv he
+              -- IH on tail `rest`
+              obtain ⟨vs_b, T_b_inner2, h_eval_rest_b, h_lvv, hwf_inner2,
+                      h_he_inner2, h_env_inner2, hv_vsa, hv_vsb⟩ :=
+                ih_list ptable level rest rest' env_a env_b T_a_inner T_b_inner
+                  vs_a T_a_inner2 hβ_rest hwf_inner h_env_inner hrest
+              -- lift the head's value relation/validity across the tail's evolution
+              have h_vv_v' : ValVisβ v_a v_b T_a_inner2.heap T_b_inner2.heap :=
+                h_he_inner2.valVisβ_preserve v_a v_b hv_va hv_vb h_vv_v
+              have hv_va' : ValValid v_a T_a_inner2.heap :=
+                ValValid.length_mono v_a hv_va h_he_inner2.len_a
+              have hv_vb' : ValValid v_b T_b_inner2.heap :=
+                ValValid.length_mono v_b hv_vb h_he_inner2.len_b
+              have h_he_chain : HeapEvolutionβ T_a T_b T_a_inner2 T_b_inner2 :=
+                h_he_inner.trans h_he_inner2
+              refine ⟨v_b :: vs_b, T_b_inner2, ?_, ⟨h_vv_v', h_lvv⟩,
+                      hwf_inner2, h_he_chain, h_env_inner2,
+                      ⟨hv_va', hv_vsa⟩, ⟨hv_vb', hv_vsb⟩⟩
+              simp [evalList, h_eval_e_b, h_eval_rest_b]
 
 end LeanBlack
