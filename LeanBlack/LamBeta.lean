@@ -282,4 +282,78 @@ theorem frameβ_lam_case (n : Nat) (ptable : PolicyTable) (level : Nat)
          ValVisβ_lam_closures ps body body' env_a env_b T_a.heap T_b.heap hbody henv,
          henv⟩
 
+/-- Base case: numerals (non-allocating, gate-free). -/
+theorem frameβ_num_case (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (i : Int) (exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState)
+    (hβ : BetaRel (.num i) exp_b)
+    (henv : EnvVisβ env_a env_b T_a.heap T_b.heap)
+    (heval : eval (n + 1) ptable level (.num i) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
+      EnvVisβ env_a env_b T_a'.heap T_b'.heap := by
+  have hb := hβ.num_eq; subst hb
+  simp only [eval] at heval
+  injection heval with h1; injection h1 with hr ht; subst hr; subst ht
+  exact ⟨.num i, T_b, by simp [eval],
+         fun m => by cases m <;> simp [ValVisβ_aux], henv⟩
+
+/-- Elimination of a variable (non-allocating): `EnvVisβ` threads the
+    lookup to a `ValVisβ`-related value on the other side. This exercises
+    the env relation, completing the non-allocating fragment. -/
+theorem frameβ_var_case (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (y : String) (exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState)
+    (hβ : BetaRel (.var y) exp_b)
+    (henv : EnvVisβ env_a env_b T_a.heap T_b.heap)
+    (heval : eval (n + 1) ptable level (.var y) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
+      EnvVisβ env_a env_b T_a'.heap T_b'.heap := by
+  have hb := hβ.var_eq; subst hb
+  simp only [eval] at heval
+  cases hla : env_a.lookup y with
+  | none => simp [hla] at heval
+  | some idx_a =>
+    simp only [hla] at heval
+    cases hpa : T_a.heap[idx_a]? with
+    | none => simp [hpa] at heval
+    | some va =>
+      simp only [hpa] at heval
+      injection heval with h1; injection h1 with hr ht; subst hr; subst ht
+      have he := henv 1 y
+      simp only [hla] at he
+      cases hlb : env_b.lookup y with
+      | none => simp [hlb] at he
+      | some idx_b =>
+        simp only [hlb, hpa] at he
+        cases hpb : T_b.heap[idx_b]? with
+        | none => simp [hpb] at he
+        | some vb =>
+          refine ⟨vb, T_b, by simp only [eval, hlb, hpb], fun m => ?_, henv⟩
+          have hm := henv m y
+          simp only [hla, hlb, hpa, hpb] at hm
+          exact hm
+
+/-! ### Reach of this (simplified) `FrameStmtβ_eval`, and the boundary
+
+The **non-allocating fragment is now fully discharged**: `frameβ_num_case`
+(`.bool` is identical), `frameβ_var_case`, `frameβ_lam_case`. None of them
+needs a `BuiltinReady` premise or any heap-evolution invariant — they form
+or read values without extending the heap.
+
+The remaining cases do **not** go through on *this* statement, and the
+reason is structural, not incidental: `.letE` and `.app` *allocate* (bind
+let-values / arguments), so threading the IH requires re-establishing
+`EnvVisβ` / `ValVisβ` across the heap extension. The `HeapEvolution` /
+`ValValid` invariants dropped above "for legibility" are therefore
+**load-bearing** for those cases, not cosmetic. `.app` additionally routes
+through `applyVia` (the gate — route (b)). So the faithful obligation is
+`Frame.FrameStmtT` with `ValVis ↦ ValVisβ` and the shared expression
+replaced by a `BetaRel` pair, the *full* invariant set intact; proving it
+(by the same fuel induction, now with `BetaRel` inversions at each case)
+is the open core. -/
+
 end LeanBlack
