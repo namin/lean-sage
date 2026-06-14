@@ -114,6 +114,59 @@ theorem BetaRel.congr {a b : Expr} (h : BetaRel a b) (D : Ctx) :
   | refl => exact .refl _
   | tail _ step ih => exact .tail ih (step.congr D)
 
+/-! ### `BetaRel` preserves purity
+
+β-contraction preserves `Pure`: the redex `(λx.body) v` and the contractum
+`let x = v in body` have the *same* purity (`Pure body && Pure v` either way), and
+`Pure (C.plug ·)` depends on the hole only through its purity. So a *pure*
+β-related pair stays pure — the fact that lets the conditional fundamental lemma
+carry a single `Pure exp` premise, under which `.set` / `.installPolicy`
+(`Pure = false`) become **vacuous**. -/
+
+/-- `PureList` depends on a list position only through that element's purity. -/
+private theorem pureList_mid_congr (pre post : List Expr) {x y : Expr}
+    (h : Pure x = Pure y) :
+    PureList (pre ++ x :: post) = PureList (pre ++ y :: post) := by
+  induction pre with
+  | nil => simp only [List.nil_append, PureList, h]
+  | cons a pre' ih => simp only [List.cons_append, PureList, ih]
+
+/-- `Pure (C.plug ·)` depends on the hole only through its purity — the purity
+    analog of `Ctx`-composition (purity is a per-slot `&&` of the sub-purities). -/
+theorem Ctx.plug_pure_congr (C : Ctx) {e₁ e₂ : Expr} (h : Pure e₁ = Pure e₂) :
+    Pure (C.plug e₁) = Pure (C.plug e₂) := by
+  induction C with
+  | hole => exact h
+  | ifteCond c et ee ih => simp only [Ctx.plug, Pure, ih]
+  | ifteThen ec c ee ih => simp only [Ctx.plug, Pure, ih]
+  | ifteElse ec et c ih => simp only [Ctx.plug, Pure, ih]
+  | lam ps c ih => simp only [Ctx.plug, Pure, ih]
+  | app pre c post ih => simp only [Ctx.plug, Pure]; exact pureList_mid_congr pre post ih
+  | set x c _ih => simp only [Ctx.plug, Pure]
+  | em c ih => simp only [Ctx.plug, Pure, ih]
+  | primAppFun c args ih => simp only [Ctx.plug, Pure, ih]
+  | primAppArg f pre c post ih =>
+      simp only [Ctx.plug, Pure]; rw [pureList_mid_congr pre post ih]
+  | letEVal x c body ih => simp only [Ctx.plug, Pure, ih]
+  | letEBody x ev c ih => simp only [Ctx.plug, Pure, ih]
+  | seq pre c post ih => simp only [Ctx.plug, Pure]; exact pureList_mid_congr pre post ih
+
+/-- One β-contraction preserves purity exactly (`Pure` is invariant). -/
+theorem BetaStep.pure_eq {a b : Expr} (h : BetaStep a b) : Pure a = Pure b := by
+  obtain ⟨C, x, body, v, rfl, rfl⟩ := h
+  apply Ctx.plug_pure_congr
+  simp only [Pure, PureList, Bool.and_true]
+  exact Bool.and_comm _ _
+
+/-- **β preserves purity.** A pure expression `BetaRel`-reduces only to pure
+    expressions — so a conditional fundamental lemma premised on `Pure exp_a` keeps
+    `exp_b` pure too, and `.set` / `.installPolicy` cannot occur. -/
+theorem BetaRel.pure_preserve {a b : Expr} (h : BetaRel a b) (hpa : Pure a = true) :
+    Pure b = true := by
+  induction h with
+  | refl => exact hpa
+  | tail _ step ih => rw [← step.pure_eq]; exact ih
+
 /-! ### `BetaRel` inversions — building blocks for the fundamental
     lemma's base and closure cases. -/
 
@@ -864,6 +917,13 @@ Quot.sound}).** The body-independent substrate the allocating cases need:
   exactly `[f, a]` with `BetaRel f (λx.body)` and `BetaRel a v` (the `inr`
   branch is ruled out via `letE_inv`). This is what the reflective `.app`
   root-contraction eval case (`LamBetaReflect` §7m) inverts to expose the redex.
+* **`BetaRel.pure_preserve`** (and `Ctx.plug_pure_congr` / `BetaStep.pure_eq`) —
+  **β preserves purity** (redex and contractum have equal `Pure`, and `Pure (C.plug ·)`
+  depends on the hole only through its purity). The basis for the *pure* conditional
+  fundamental lemma: premised on `Pure exp_a`, it keeps `exp_b` pure (so the `.app`
+  root case gets its operand-purity side condition), and — since `Pure (.set _ _) =
+  Pure (.installPolicy _) = false` — those two cases become **vacuous**, dissolving the
+  one remaining hard eval case on the pure path (matching `contextual_beta_pure`).
 
 §6 then assembles the eval obligation (`HeapEvolutionβ`, `WFβ`) and
 discharges **every gate-free structural case** on it: the allocating
