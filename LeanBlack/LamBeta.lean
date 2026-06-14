@@ -45,14 +45,19 @@
     `seq_cons_inv`), `frameβ_evalList_eval` (the `evalList` argument-list
     traversal, the two-IH list clause over `ListValVisβ` that bridges into
     `.app`), `EnvVisβ_allocStep_chain` (§6g, the closure-apply argument
-    binding — a β-port of `Bisim.alloc_chain_bisim`), and **§6h
+    binding — a β-port of `Bisim.alloc_chain_bisim`), **§6h
     `frameβ_applyDirect_closure_eval`** (the gate-free closure case of
     `applyDirect` — function *elimination*: the closure bodies are run by the
     eval IH over `BetaRel body body'`, the relational crux of route (a), with
-    `closure_ValVisβ_imp` + `ListValVisβ.length_eq` as helpers). Proof that the
+    `closure_ValVisβ_imp` + `ListValVisβ.length_eq` as helpers), and **§6i
+    `frameβ_applyDirect_builtinBaseApply_eval`** (the gate-free `.builtinBaseApply`
+    case — the *standard gate's dispatcher*, what `applyVia` falls through to
+    under `BuiltinReady`: `valToList_bisimβ` transports the operand payload and
+    the `applyDirect` IH `FrameβApplyDirectStmt` re-dispatches). Proof that the
     §4 substrate composes into real fundamental-lemma cases. What remains is the
     reflective gate dispatch (`applyVia`'s `base-apply` lookup + cross-level
-    call), `applyDirect`'s mechanical `.prim`/`.builtinBaseApply` subcases, the
+    call), `applyDirect`'s ground `.prim` subcase (the last `applyDirect`
+    op-shape — pure arithmetic, behind a β-port of `applyPrim_bisim`), the
     `WFCtxTβ` statement-wrapper upgrade, and `.em`/`.set` (the open core).
 
   The weakening `ValVis_weak ⊆ ValVisβ` holds by the same structural
@@ -860,22 +865,23 @@ both halves of the closure introduction/elimination pair are in hand.
    `BetaRelList` the argument relation, `frameβ_evalList_eval` (§6f) discharges
    the argument-list traversal to `ListValVisβ`-related results,
    `EnvVisβ_allocStep_chain` (§6g) carries `EnvVisβ` through the closure-apply
-   argument binding, and `frameβ_applyDirect_closure_eval` (§6h) **runs the
-   closure body** — the eval IH at fuel `n` over `BetaRel body body'` on §6g's
-   `EnvVisβ` call envs — closing the gate-free closure case of `applyDirect`
-   end-to-end. What remains is the genuinely reflective core: `applyVia`'s
-   **gate dispatch** — the level-(level+1) `base-apply` lookup and cross-level
-   closure call — and `applyDirect`'s mechanical residue (`.prim` /
-   `.builtinBaseApply` subcases — ground/deterministic ports of `frame_tower`
-   needing β-analogs of `applyPrim_bisim` / `valToList_bisim`). This, with the
-   reflective `.em` / `.set` and the policy/level fields of `WFCtxTβ`, is where
-   the real research risk sits; `BuiltinReady` (standard gate) is the premise
-   that is meant to tame it: under it `applyVia` reduces to `applyDirect`'s
-   closure case, which §6h now discharges. The de-risking first target is the
-   concrete Wand pair `(λx. x) 0` / `let x = 0 in x` under a binder, whose
-   redex/contractum closures `ValVisβ_relates_beta_closures` (§2) already
-   relates and whose closure-apply `frameβ_applyDirect_closure_eval` (§6h) now
-   runs.
+   argument binding, `frameβ_applyDirect_closure_eval` (§6h) **runs the closure
+   body** — the eval IH at fuel `n` over `BetaRel body body'` on §6g's `EnvVisβ`
+   call envs — and `frameβ_applyDirect_builtinBaseApply_eval` (§6i, with
+   `valToList_bisimβ`) discharges the **standard gate's dispatcher**. Of the four
+   `applyDirect` op-shapes, three are now closed (closure §6h, builtinBaseApply
+   §6i, and the trivial non-applicable shapes); only the ground `.prim` subcase
+   remains (pure arithmetic, a β-port of `applyPrim_bisim`). What remains beyond
+   that is the genuinely reflective core: `applyVia`'s **gate dispatch** — the
+   level-(level+1) `base-apply` lookup and cross-level closure call. This, with
+   the reflective `.em` / `.set` and the policy/level fields of `WFCtxTβ`, is
+   where the real research risk sits; `BuiltinReady` (standard gate) is the
+   premise that is meant to tame it: under it `applyVia` reduces to
+   `applyDirect`'s `.builtinBaseApply` cell (§6i) → the closure case (§6h),
+   both now discharged. The de-risking first target is the concrete Wand pair
+   `(λx. x) 0` / `let x = 0 in x` under a binder, whose redex/contractum
+   closures `ValVisβ_relates_beta_closures` (§2) already relates and whose
+   closure-apply `frameβ_applyDirect_closure_eval` (§6h) now runs.
 
 With every structural case discharged, the remaining work is exactly
 (1) the statement wrapper and (2) the gate — no structural plumbing is
@@ -888,9 +894,10 @@ the faithful obligation for the **eval** clause and discharges **every
 gate-free structural case** on it — the allocating binder (`.letE`, §6c),
 the branch (`.ifte`, §6d), the sequence (`.seq`, §6e), and the
 argument-list traversal (`evalList`, §6f) — plus the closure-apply
-allocation chain (§6g, the gate-free half of `applyDirect`'s closure case).
-The milestone showing the substrate composes into real fundamental-lemma
-cases, which the §3 sketch could not.
+allocation chain (§6g) and the gate-free **`applyDirect` cases**: the closure
+case (§6h, function elimination) and the `.builtinBaseApply` case (§6i, the
+standard gate's dispatcher). The milestone showing the substrate composes into
+real fundamental-lemma cases, which the §3 sketch could not.
 
 Pieces: `HeapEvolutionβ` (the cross-side heap-evolution carrier), `WFβ`
 (the gate-free fragment's context invariant), `frameβ_letE_eval` (the
@@ -1818,5 +1825,204 @@ theorem frameβ_applyDirect_closure_eval (n : Nat) (ptable : PolicyTable) (level
     have hne : (ps.length != args_a.length) = true := by simp [hlen]
     rw [hne] at heval
     simp at heval
+
+/-! ### 6i. The `applyDirect` `.builtinBaseApply` case — the standard gate's
+    dispatcher, framed under β
+
+`applyDirect`'s `.builtinBaseApply` op is the **standard `base-apply` gate**:
+it unwraps its `[actualOp, operandsList]` payload (`valToList` on the operands),
+then re-dispatches to `applyDirect` on `actualOp`. This is exactly what
+`applyVia` falls through to under `BuiltinReady` (the gate cell *is*
+`.builtinBaseApply`, `Eval.lean:184`), so it is the operational core of route
+(b)'s *standard*-gate path — the de-risking target DUMP_LAM §3b names. Like the
+rest of `applyDirect`, it is **gate-free** (reads no policy/level), so it stays
+in the `WFβ` framework.
+
+The clause is the β-analog of `frame_tower`'s `applyDirect` `.builtinBaseApply`
+subcase (`Frame.lean:2910`): `valToList_bisimβ` (the verbatim β-port of
+`valToList_bisim` — closures never arise, so only the constructor-matching
+changes) transports the operands to a `ListValVisβ`-related list, and the
+**`applyDirect` IH** (`FrameβApplyDirectStmt n`) re-dispatches on the
+`ValVisβ`-related `actualOp`. Composing with §6h (the closure case) and the
+ground `.prim` subcase (the only remaining `applyDirect` op-shape — pure
+arithmetic, behind a β-port of `applyPrim_bisim`) would close the entire
+gate-free `applyDirect` clause; this is the conceptually load-bearing third
+op-shape.
+
+`FrameβApplyDirectStmt` — the gate-free `applyDirect` clause as a `Prop`, the
+β-analog of `FrameStmtT`'s fourth conjunct (`Frame.lean:953`). Since
+`applyDirect` takes no ambient env and reads no policy/level, the cross-tower
+`TowerCross` output of `FrameStmtT` collapses to the same gate-free invariant
+set §6h produces (`ValVisβ` / `HeapValid` both sides / `HeapEvolutionβ` /
+`ValValid` both results). The op is a `ValVisβ` *pair* (β relates different
+closures), as in §6h. This is the applyDirect clause of the eventual mutual
+`FrameStmtβ` (step 1). -/
+
+def FrameβApplyDirectStmt (n : Nat) : Prop :=
+  ∀ (ptable : PolicyTable) (level : Nat) (op_a op_b : Val)
+    (args_a args_b : List Val) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState),
+    ValVisβ op_a op_b T_a.heap T_b.heap →
+    ListValVisβ args_a args_b T_a.heap T_b.heap →
+    HeapValid T_a.heap → HeapValid T_b.heap →
+    ValValid op_a T_a.heap → ValValid op_b T_b.heap →
+    ListValValid args_a T_a.heap → ListValValid args_b T_b.heap →
+    applyDirect n ptable level op_a args_a T_a = some (r_a, T_a') →
+    ∃ r_b T_b',
+      applyDirect n ptable level op_b args_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
+      HeapValid T_a'.heap ∧ HeapValid T_b'.heap ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧
+      ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap
+
+/-- **`valToList` respects `ValVisβ`.** If `valToList ol_a = some operands_a`
+    and `ol_a` / `ol_b` are `ValVisβ`-related, then `valToList ol_b` succeeds
+    with `ListValVisβ`-related operands (plus pointwise validity). Verbatim
+    β-port of `valToList_bisim` (`Bisim.lean:1501`): `valToList` only succeeds
+    on `nilV`/`cons` chains — closures never arise — so the proof differs from
+    the original only in the relation names (`ValVis`/`ValVis_aux`/`ListValVis`
+    ↦ the β versions). The operand transport the `.builtinBaseApply` case
+    needs. -/
+theorem valToList_bisimβ : ∀ (operands_a : List Val) (ol_a ol_b : Val) (h_a h_b : Heap),
+    valToList ol_a = some operands_a → ValVisβ ol_a ol_b h_a h_b →
+    ValValid ol_a h_a → ValValid ol_b h_b →
+    ∃ operands_b, valToList ol_b = some operands_b ∧
+      ListValVisβ operands_a operands_b h_a h_b ∧
+      ListValValid operands_a h_a ∧ ListValValid operands_b h_b
+  | [], ol_a, ol_b, h_a, h_b, hl_a, h_vv, _, _ => by
+      have h_vv1 := h_vv 1
+      cases ol_a with
+      | nilV =>
+          cases ol_b with
+          | nilV => exact ⟨[], rfl, trivial, trivial, trivial⟩
+          | num _ => simp [ValVisβ_aux] at h_vv1
+          | bool _ => simp [ValVisβ_aux] at h_vv1
+          | sym _ => simp [ValVisβ_aux] at h_vv1
+          | cons _ _ => simp [ValVisβ_aux] at h_vv1
+          | closure _ _ _ => simp [ValVisβ_aux] at h_vv1
+          | prim _ => simp [ValVisβ_aux] at h_vv1
+          | builtinBaseApply => simp [ValVisβ_aux] at h_vv1
+      | cons x rest =>
+          simp only [valToList] at hl_a
+          cases hr : valToList rest with
+          | none => rw [hr] at hl_a; simp at hl_a
+          | some _ => rw [hr] at hl_a; simp at hl_a
+      | num _ => simp [valToList] at hl_a
+      | bool _ => simp [valToList] at hl_a
+      | sym _ => simp [valToList] at hl_a
+      | closure _ _ _ => simp [valToList] at hl_a
+      | prim _ => simp [valToList] at hl_a
+      | builtinBaseApply => simp [valToList] at hl_a
+  | head :: tail, ol_a, ol_b, h_a, h_b, hl_a, h_vv, hv_a, hv_b => by
+      have h_vv1 := h_vv 1
+      cases ol_a with
+      | cons x rest =>
+          simp [valToList] at hl_a
+          cases hr : valToList rest with
+          | none => rw [hr] at hl_a; simp at hl_a
+          | some t =>
+              rw [hr] at hl_a
+              simp at hl_a
+              obtain ⟨hx_eq, ht_eq⟩ := hl_a
+              subst hx_eq
+              subst ht_eq
+              cases ol_b with
+              | cons x_b rest_b =>
+                  have h_vv_head : ValVisβ x x_b h_a h_b := by
+                    intro d
+                    cases d with
+                    | zero => trivial
+                    | succ d' => exact (h_vv d'.succ.succ).1
+                  have h_vv_rest : ValVisβ rest rest_b h_a h_b := by
+                    intro d
+                    cases d with
+                    | zero => trivial
+                    | succ d' => exact (h_vv d'.succ.succ).2
+                  have hv_a' : ValValid x h_a ∧ ValValid rest h_a := hv_a
+                  have hv_b' : ValValid x_b h_b ∧ ValValid rest_b h_b := hv_b
+                  obtain ⟨tail_b, hl_b, h_lvv_tail, hv_tail_a, hv_tail_b⟩ :=
+                    valToList_bisimβ t rest rest_b h_a h_b hr h_vv_rest hv_a'.2 hv_b'.2
+                  refine ⟨x_b :: tail_b, ?_, ⟨h_vv_head, h_lvv_tail⟩,
+                          ⟨hv_a'.1, hv_tail_a⟩, ⟨hv_b'.1, hv_tail_b⟩⟩
+                  simp [valToList, hl_b]
+              | nilV => simp [ValVisβ_aux] at h_vv1
+              | num _ => simp [ValVisβ_aux] at h_vv1
+              | bool _ => simp [ValVisβ_aux] at h_vv1
+              | sym _ => simp [ValVisβ_aux] at h_vv1
+              | closure _ _ _ => simp [ValVisβ_aux] at h_vv1
+              | prim _ => simp [ValVisβ_aux] at h_vv1
+              | builtinBaseApply => simp [ValVisβ_aux] at h_vv1
+      | nilV => simp [valToList] at hl_a
+      | num _ => simp [valToList] at hl_a
+      | bool _ => simp [valToList] at hl_a
+      | sym _ => simp [valToList] at hl_a
+      | closure _ _ _ => simp [valToList] at hl_a
+      | prim _ => simp [valToList] at hl_a
+      | builtinBaseApply => simp [valToList] at hl_a
+  termination_by operands_a _ _ _ _ => operands_a.length
+
+/-- **The `applyDirect` `.builtinBaseApply` case, gate-free.** Taking the
+    `applyDirect` IH (`FrameβApplyDirectStmt n`), the standard gate's
+    dispatcher transports its operand payload (`valToList_bisimβ`) and
+    re-dispatches on the `ValVisβ`-related `actualOp` (the IH). The full
+    gate-free invariant set rides through unchanged (the node allocates
+    nothing of its own — the result and its `HeapEvolutionβ` are the inner
+    dispatch's). β-port of `frame_tower`'s `.builtinBaseApply` subcase. -/
+theorem frameβ_applyDirect_builtinBaseApply_eval (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (op_b : Val) (args_a args_b : List Val) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState)
+    (ih_ad : FrameβApplyDirectStmt n)
+    (h_vv_op : ValVisβ .builtinBaseApply op_b T_a.heap T_b.heap)
+    (h_lvv : ListValVisβ args_a args_b T_a.heap T_b.heap)
+    (hh_a : HeapValid T_a.heap) (hh_b : HeapValid T_b.heap)
+    (hv_argsa : ListValValid args_a T_a.heap) (hv_argsb : ListValValid args_b T_b.heap)
+    (heval : applyDirect (n + 1) ptable level .builtinBaseApply args_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      applyDirect (n + 1) ptable level op_b args_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
+      HeapValid T_a'.heap ∧ HeapValid T_b'.heap ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧
+      ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  -- `op_b` is forced to `.builtinBaseApply` (ValVisβ pins the constructor)
+  have h_vv1 := h_vv_op 1
+  have h_opb : op_b = .builtinBaseApply := by
+    cases op_b with
+    | builtinBaseApply => rfl
+    | num _ => simp [ValVisβ_aux] at h_vv1
+    | bool _ => simp [ValVisβ_aux] at h_vv1
+    | nilV => simp [ValVisβ_aux] at h_vv1
+    | sym _ => simp [ValVisβ_aux] at h_vv1
+    | cons _ _ => simp [ValVisβ_aux] at h_vv1
+    | closure _ _ _ => simp [ValVisβ_aux] at h_vv1
+    | prim _ => simp [ValVisβ_aux] at h_vv1
+  subst h_opb
+  unfold applyDirect at heval
+  -- args must be exactly `[actualOp, operandsList]` on both sides
+  match args_a, args_b, h_lvv, hv_argsa, hv_argsb with
+  | [], _, _, _, _ => simp at heval
+  | _ :: [], _, _, _, _ => simp at heval
+  | _ :: _ :: _ :: _, _, _, _, _ => simp at heval
+  | [_actualOp_a, _operandsList_a], [], h_lvv', _, _ => exact h_lvv'.elim
+  | [_actualOp_a, _operandsList_a], [_], h_lvv', _, _ => exact h_lvv'.2.elim
+  | [_actualOp_a, _operandsList_a], _ :: _ :: _ :: _, h_lvv', _, _ => exact h_lvv'.2.2.elim
+  | [actualOp_a, operandsList_a], [actualOp_b, operandsList_b],
+      ⟨h_vv_actual, h_vv_olist, _⟩, ⟨hv_actual_a, hv_olist_a, _⟩,
+      ⟨hv_actual_b, hv_olist_b, _⟩ =>
+      simp only at heval
+      cases hl_a : valToList operandsList_a with
+      | none => rw [hl_a] at heval; simp at heval
+      | some operands_a =>
+          rw [hl_a] at heval
+          simp only at heval
+          -- transport the operands across `ValVisβ`
+          obtain ⟨operands_b, hl_b, h_lvv_ops, hv_ops_a, hv_ops_b⟩ :=
+            valToList_bisimβ operands_a operandsList_a operandsList_b
+              T_a.heap T_b.heap hl_a h_vv_olist hv_olist_a hv_olist_b
+          -- re-dispatch on `actualOp` via the applyDirect IH
+          obtain ⟨r_b, T_b', h_eval_b, h_vv_r, hh_a', hh_b', h_he', hv_ra, hv_rb⟩ :=
+            ih_ad ptable level actualOp_a actualOp_b operands_a operands_b
+              T_a T_b r_a T_a'
+              h_vv_actual h_lvv_ops hh_a hh_b hv_actual_a hv_actual_b
+              hv_ops_a hv_ops_b heval
+          refine ⟨r_b, T_b', ?_, h_vv_r, hh_a', hh_b', h_he', hv_ra, hv_rb⟩
+          simp only [applyDirect, hl_b, h_eval_b]
 
 end LeanBlack
