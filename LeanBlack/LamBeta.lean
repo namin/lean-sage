@@ -1,0 +1,165 @@
+/-
+  lean-sage: scaffolding the `.lam` case of contextual β as a
+  CakeML-style simulation — a *typed target*, not a proof.
+
+  `CtxEquiv.lean` shows the `.lam` gap reduces to a *conditional*
+  ground-contextual equivalence (the `EvalEquivAt` and unconditional
+  `CtxEquiv` targets are both proven impossible there). The route is the
+  CakeML method the artifact already instantiates: a value relation
+  parametrized over the *closure-body relation*. lean-sage's
+  `ValVis_aux_weak` (`Bisim.lean`) is the **equality instance** —
+  closures relate when `body_a = body_b` with captured envs
+  pointwise-bisimilar. Generalizing that one clause from `=` to a
+  β-transform relation is the standard CakeML move (known-call inlining
+  is β on known applications, proved exactly this way).
+
+  This file supplies, with **no `sorry` and no axiom**:
+
+  - `BetaRel` — the closure-body relation (the recon found lean-sage has
+    no expression-level "equal up to evaluation" relation). PROVEN a
+    reflexive–transitive **congruence**, reusing `Ctx.comp`.
+  - `ValVisβ_aux` / `ValVisβ`, `EnvVisβ_aux` / `EnvVisβ` — `ValVis_aux_weak`
+    / `EnvVis_aux_weak` with the closure-body clause relaxed to `BetaRel`.
+  - `FrameStmtβ_eval` — the `frame_tower`-shaped fundamental lemma the
+    `.lam` case needs, stated as a `Prop`-valued definition: a
+    *different-program* simulation (the two sides run `BetaRel`-related
+    code) under the **standard-gate** condition (`BuiltinReady`) that
+    distinguishes it from `frame_tower`. Proving `∀ n, FrameStmtβ_eval n`
+    is the open core (routes (a) closure-relation + (b) gate threading).
+
+  The weakening `ValVis_weak ⊆ ValVisβ` holds by the same structural
+  induction as `Bisim.ValVis_aux_to_weak` with `BetaRel.refl` discharging
+  the body clause; it is routine and omitted here.
+-/
+import LeanBlack.CtxEquiv
+import LeanBlack.Bisim
+import LeanBlack.ContextualBetaPure
+
+namespace LeanBlack
+
+/-! ## 1. The closure-body relation `BetaRel` (proven a congruence) -/
+
+/-- One contextual β-contraction: `(λx. body) v ↝ let x = v in body`
+    at some context position. -/
+def BetaStep (e_a e_b : Expr) : Prop :=
+  ∃ (C : Ctx) (x : String) (body v : Expr),
+    e_a = C.plug (.app [.lam [x] body, v]) ∧ e_b = C.plug (.letE x v body)
+
+/-- The closure-body relation: reflexive–transitive closure of
+    contextual β-contraction. Replaces `ValVis_weak`'s `body_a = body_b`. -/
+inductive BetaRel : Expr → Expr → Prop
+  | refl (e : Expr) : BetaRel e e
+  | tail {a b c : Expr} : BetaRel a b → BetaStep b c → BetaRel a c
+
+/-- Redex and contractum are `BetaRel` in any context. -/
+theorem BetaRel.beta (C : Ctx) (x : String) (body v : Expr) :
+    BetaRel (C.plug (.app [.lam [x] body, v])) (C.plug (.letE x v body)) :=
+  .tail (.refl _) ⟨C, x, body, v, rfl, rfl⟩
+
+theorem BetaRel.trans {a b c : Expr}
+    (hab : BetaRel a b) (hbc : BetaRel b c) : BetaRel a c := by
+  induction hbc with
+  | refl => exact hab
+  | tail _ step ih => exact .tail ih step
+
+/-- A single β step survives plugging into any context — reusing
+    `Ctx.comp` / `plug_comp`. -/
+theorem BetaStep.congr {a b : Expr} (h : BetaStep a b) (D : Ctx) :
+    BetaStep (D.plug a) (D.plug b) := by
+  obtain ⟨C, x, body, v, ha, hb⟩ := h
+  exact ⟨D.comp C, x, body, v, by rw [ha, Ctx.plug_comp], by rw [hb, Ctx.plug_comp]⟩
+
+/-- **`BetaRel` is a congruence** — closed under every context former,
+    binders included, for the same reason `CtxEquiv` is: composition. -/
+theorem BetaRel.congr {a b : Expr} (h : BetaRel a b) (D : Ctx) :
+    BetaRel (D.plug a) (D.plug b) := by
+  induction h with
+  | refl => exact .refl _
+  | tail _ step ih => exact .tail ih (step.congr D)
+
+/-! ## 2. The body-relaxed value/env relations -/
+
+/-- `ValVis_aux_weak` with its closure-body clause relaxed from
+    `body_a = body_b` to `BetaRel body_a body_b`. Every other case is
+    verbatim. -/
+def ValVisβ_aux : Nat → Val → Val → Heap → Heap → Prop
+  | 0, _, _, _, _ => True
+  | _ + 1, .num a,            .num b,            _,  _   => a = b
+  | _ + 1, .bool a,           .bool b,           _,  _   => a = b
+  | _ + 1, .nilV,             .nilV,             _,  _   => True
+  | _ + 1, .sym a,            .sym b,            _,  _   => a = b
+  | _ + 1, .prim a,           .prim b,           _,  _   => a = b
+  | _ + 1, .builtinBaseApply, .builtinBaseApply, _,  _   => True
+  | n + 1, .cons x_a y_a,     .cons x_b y_b,     h_a, h_b =>
+      ValVisβ_aux n x_a x_b h_a h_b ∧ ValVisβ_aux n y_a y_b h_a h_b
+  | n + 1, .closure ps_a body_a cenv_a,
+           .closure ps_b body_b cenv_b, h_a, h_b =>
+      ps_a = ps_b ∧ BetaRel body_a body_b ∧
+      (∀ x, match cenv_a.lookup x, cenv_b.lookup x with
+            | none, none => True
+            | some i_a, some i_b =>
+                match h_a[i_a]?, h_b[i_b]? with
+                | some v_a, some v_b => ValVisβ_aux n v_a v_b h_a h_b
+                | _, _ => False
+            | _, _ => False)
+  | _ + 1, _, _, _, _ => False
+
+def ValVisβ (v_a v_b : Val) (h_a h_b : Heap) : Prop :=
+  ∀ n, ValVisβ_aux n v_a v_b h_a h_b
+
+/-- Env relation whose cells are `ValVisβ_aux`-related (mirrors
+    `EnvVis_aux_weak`). -/
+def EnvVisβ_aux (n : Nat) (env_a env_b : Env) (h_a h_b : Heap) : Prop :=
+  ∀ x, match env_a.lookup x, env_b.lookup x with
+       | none, none => True
+       | some i_a, some i_b =>
+           match h_a[i_a]?, h_b[i_b]? with
+           | some v_a, some v_b => ValVisβ_aux n v_a v_b h_a h_b
+           | _, _ => False
+       | _, _ => False
+
+def EnvVisβ (env_a env_b : Env) (h_a h_b : Heap) : Prop :=
+  ∀ n, EnvVisβ_aux n env_a env_b h_a h_b
+
+/-- The closure clause, packaged (validates the def reduces as intended). -/
+theorem ValVisβ_aux_closure (n : Nat)
+    (ps_a ps_b : List String) (body_a body_b : Expr)
+    (cenv_a cenv_b : Env) (h_a h_b : Heap) :
+    ValVisβ_aux (n + 1)
+        (.closure ps_a body_a cenv_a) (.closure ps_b body_b cenv_b) h_a h_b
+    ↔ (ps_a = ps_b ∧ BetaRel body_a body_b ∧
+       EnvVisβ_aux n cenv_a cenv_b h_a h_b) := by
+  simp [ValVisβ_aux, EnvVisβ_aux]
+
+/-! ## 3. The fundamental lemma the `.lam` case needs (stated, not proved)
+
+`FrameStmtβ_eval n` is the β-analog of `Frame.FrameStmtT`'s `eval` clause.
+Two differences carry all the content:
+
+* the two sides run **`BetaRel`-related** expressions `exp_a` / `exp_b`
+  (not one shared `exp`) and the result is **`ValVisβ`**-related — this is
+  the closure-relation generalization (route (a)); and
+* a **`BuiltinReady`** premise on each side pins the `base-apply` gate to
+  the standard builtin — the gate threading (route (b)) that `frame_tower`
+  does not need (it is a same-program bisimulation) but β does, since the
+  redex applies through the gate and the contractum does not.
+
+A faithful full statement would also thread β-relaxed analogs of
+`WFCtxT` / `HeapEvolution` / `ValValid` (mechanical; omitted here for
+legibility). `∀ n, FrameStmtβ_eval n` — proved by fuel induction with the
+closure/apply case threading the relaxed relation, à la `frame_tower` — is
+the open core; `BetaRel.congr` above is the (free) congruence half. -/
+def FrameStmtβ_eval (n : Nat) : Prop :=
+  ∀ (ptable : PolicyTable) (level : Nat) (exp_a exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState),
+    BetaRel exp_a exp_b →
+    BuiltinReady ptable level env_a T_a →
+    BuiltinReady ptable level env_b T_b →
+    EnvVisβ env_a env_b T_a.heap T_b.heap →
+    eval n ptable level exp_a env_a T_a = some (r_a, T_a') →
+    ∃ r_b T_b',
+      eval n ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
+      EnvVisβ env_a env_b T_a'.heap T_b'.heap
+
+end LeanBlack

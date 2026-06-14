@@ -15,6 +15,7 @@ import LeanBlack.PureExt
 import LeanBlack.CtxPure
 import LeanBlack.ContextualBetaPure
 import LeanBlack.CtxEquiv
+import LeanBlack.LamBeta
 import LeanBlack.GovChain
 import LeanBlack.Public
 import LeanBlack.AxiomAudit
