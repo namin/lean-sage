@@ -866,6 +866,34 @@ theorem BetaRel.app_inv {args : List Expr} {b : Expr}
           obtain ⟨x, body, v, h1, h2⟩ := hr
           exact Or.inr ⟨x, body, v, h1, h2.tail step⟩
 
+/-- β never fires at a `.primApp` *root* (the redex needs an `.app [.lam, v]`
+    head, not a primitive head), so a `BetaRel`-reduct of `.primApp f args` stays
+    a `.primApp`, β-relating the function and (pointwise) the arguments.  Purely
+    structural — the analog of `ifte_inv`/`seq_inv` for the two `.primApp` hole
+    positions (`primAppFun`, `primAppArg`). -/
+theorem BetaRel.primApp_inv {f : Expr} {args : List Expr} {b : Expr}
+    (h : BetaRel (.primApp f args) b) :
+    ∃ f' args', b = .primApp f' args' ∧ BetaRel f f' ∧ BetaRelList args args' := by
+  induction h with
+  | refl => exact ⟨f, args, rfl, .refl _, .refl _⟩
+  | tail _ step ih =>
+      obtain ⟨f', args', rfl, hf, hargs⟩ := ih
+      obtain ⟨C, y, bb, v, hC, hbb⟩ := step
+      cases C with
+      | primAppFun cC cargs =>
+          simp only [Ctx.plug, Expr.primApp.injEq] at hC
+          obtain ⟨hf_eq, hargs_eq⟩ := hC
+          exact ⟨cC.plug (.letE y v bb), cargs, by rw [hbb]; simp only [Ctx.plug],
+                 (hf_eq ▸ hf).tail ⟨cC, y, bb, v, rfl, rfl⟩, hargs_eq ▸ hargs⟩
+      | primAppArg cf pre cC post =>
+          simp only [Ctx.plug, Expr.primApp.injEq] at hC
+          obtain ⟨hf_eq, hargs_eq⟩ := hC
+          exact ⟨cf, pre ++ cC.plug (.letE y v bb) :: post, by rw [hbb]; simp only [Ctx.plug],
+                 hf_eq ▸ hf,
+                 (hargs_eq ▸ hargs).trans (BetaRelList.append (BetaRelList.refl pre)
+                   (BetaRelList.cons (BetaRel.beta cC y bb v) (BetaRelList.refl post)))⟩
+      | _ => simp [Ctx.plug] at hC
+
 /-- **`app_inv` detects the Wand pair's root contraction** — the
     elimination-side analog of `ValVisβ_relates_beta_closures`. For the
     artifact's own redex `(λx. x) 0` reducing to `let x = 0 in x`, the

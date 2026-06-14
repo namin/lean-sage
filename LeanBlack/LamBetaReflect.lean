@@ -3085,6 +3085,166 @@ theorem frameβ_app_evalWP (n : Nat) (ptable : PolicyTable) (level : Nat)
   · exact frameβ_app_root_evalWP n ptable level args x body v exp_b env_a env_b T_a T_b r_a T_a'
       ih_eval ih_list ih_via hresp_pt h1 h2 hpure h_ctx hbr heval
 
+/-! ### 7q. eval's `.primApp` case, premised.
+
+`.primApp f args` is structurally identical to a *structural* `.app` — evaluate
+the head `f`, then the argument list, then apply — except the apply step is the
+plain `applyDirect` (no `base-apply` lookup, no level dispatch, no `materialize`),
+so there is **no** root-contraction branch (β never fires at a primitive head;
+`BetaRel.primApp_inv`).  Hence this is `frameβ_app_structural_evalWP` with the
+`applyVia` IH swapped for the `applyDirect` IH (`ih_ad`); the a-side value
+purities are recovered from the b-side exactly as there. -/
+theorem frameβ_primApp_evalWP (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (f : Expr) (args : List Expr) (exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState)
+    (ih_eval : FrameβEvalStmtWP n) (ih_list : FrameβEvalListStmtWP n)
+    (ih_ad : FrameβApplyDirectStmtWP n)
+    (hresp_pt : PolicyTableRespectsBisimT ptable)
+    (hβ : BetaRel (.primApp f args) exp_b)
+    (hpure : Pure (.primApp f args) = true)
+    (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (hbr : BReady T_b)
+    (heval : eval (n + 1) ptable level (.primApp f args) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  obtain ⟨f', args', rfl, hβ_f, hβ_args⟩ := hβ.primApp_inv
+  simp only [Pure, Bool.and_eq_true] at hpure
+  obtain ⟨hpf, hpargs⟩ := hpure
+  have hpf' : Pure f' = true := hβ_f.pure_preserve hpf
+  have hpargs' : PureList args' = true := hβ_args.pure_preserve hpargs
+  simp only [eval] at heval
+  cases hf : eval n ptable level f env_a T_a with
+  | none => rw [hf] at heval; simp at heval
+  | some pr =>
+      obtain ⟨fv_a, T_a_inner⟩ := pr
+      rw [hf] at heval; simp only at heval
+      obtain ⟨fv_b, T_b_inner, h_eval_f_b, h_vv_f, h_ctx1, h_he1, hv_fva, hv_fvb⟩ :=
+        ih_eval ptable level f f' env_a env_b T_a T_b fv_a T_a_inner hβ_f hpf hresp_pt h_ctx hbr hf
+      have hbr1 : BReady T_b_inner := hbr.closed hpf' h_eval_f_b
+      cases ha : evalList n ptable level args env_a T_a_inner with
+      | none => rw [ha] at heval; simp at heval
+      | some pr2 =>
+          obtain ⟨avs_a, T_a_inner2⟩ := pr2
+          rw [ha] at heval; simp only at heval
+          obtain ⟨avs_b, T_b_inner2, h_eval_args_b, h_lvv, h_ctx2, h_he2, hv_avsa, hv_avsb⟩ :=
+            ih_list ptable level args args' env_a env_b T_a_inner T_b_inner avs_a T_a_inner2
+              hβ_args hpargs hresp_pt h_ctx1 hbr1 ha
+          have hbr2 : BReady T_b_inner2 := hbr1.closedList hpargs' h_eval_args_b
+          have hpfv_a : PureVal fv_a = true :=
+            ValVisβ_pureVal_rev h_vv_f
+              (((allPureIndep n).1 level f' env_b T_b hpf' hbr.2).2 ptable fv_b T_b_inner h_eval_f_b).1
+          have hpavs_a : PureValList avs_a = true :=
+            ListValVisβ_pureValList_rev h_lvv
+              (((allPureIndep n).2.1 level args' env_b T_b_inner hpargs' hbr1.2).2
+                ptable avs_b T_b_inner2 h_eval_args_b).1
+          have h_vv_f' : ValVisβ fv_a fv_b T_a_inner2.heap T_b_inner2.heap :=
+            h_he2.valVisβ_preserve fv_a fv_b hv_fva hv_fvb h_vv_f
+          have hv_fva2 : ValValid fv_a T_a_inner2.heap :=
+            ValValid.length_mono fv_a hv_fva h_he2.len_a
+          have hv_fvb2 : ValValid fv_b T_b_inner2.heap :=
+            ValValid.length_mono fv_b hv_fvb h_he2.len_b
+          obtain ⟨r_b, T_b', h_eval_ad_b, h_vv, h_tower3, h_he3, hv_ra, hv_rb⟩ :=
+            ih_ad ptable level fv_a fv_b avs_a avs_b T_a_inner2 T_b_inner2 r_a T_a'
+              hresp_pt h_ctx2.toTower hbr2 hpfv_a hpavs_a h_vv_f' h_lvv hv_fva2 hv_fvb2
+              hv_avsa hv_avsb heval
+          have h_he_chain : HeapEvolutionβ T_a T_b T_a' T_b' :=
+            h_he1.trans (h_he2.trans h_he3)
+          refine ⟨r_b, T_b', ?_, h_vv, ?_, h_he_chain, hv_ra, hv_rb⟩
+          · simp only [eval, h_eval_f_b, h_eval_args_b]; exact h_eval_ad_b
+          · exact WFCtxTβ.ofTower h_tower3
+              (EnvValid.length_mono h_ctx.ev_a h_he_chain.len_a)
+              (EnvValid.length_mono h_ctx.ev_b h_he_chain.len_b)
+              (h_he_chain.envVisβ_preserve env_a env_b h_ctx.ev_a h_ctx.ev_b h_ctx.env_visβ)
+
+/-! ### 7r. Assembling eval's clause: `FrameβEvalStmtWP (n + 1)`.
+
+Dispatch on `exp_a`'s head constructor to the per-case lemmas: leaf cases
+(`num`/`bool`/`quote`/`var`/`lam`) forward to their `…_caseWP`; the two impure
+formers (`set`/`installPolicy`) are vacuous under `Pure`; the recursive cases
+(`ifte`/`seq`/`letE`/`em`/`app`/`primApp`) consume the appropriate sub-IHs. This
+is the eval clause of the mutual step. -/
+theorem frameβ_eval_stepWP (n : Nat)
+    (ih_eval : FrameβEvalStmtWP n) (ih_list : FrameβEvalListStmtWP n)
+    (ih_via : FrameβApplyViaStmtWP n) (ih_ad : FrameβApplyDirectStmtWP n) :
+    FrameβEvalStmtWP (n + 1) := by
+  intro ptable level exp_a exp_b env_a env_b T_a T_b r_a T_a'
+        hβ hpure hresp_pt h_ctx hbr heval
+  cases exp_a with
+  | num i =>
+      exact frameβ_num_caseWP n ptable level exp_b env_a env_b T_a T_b r_a T_a' h_ctx
+        i hβ hpure hbr heval
+  | bool c =>
+      exact frameβ_bool_caseWP n ptable level exp_b env_a env_b T_a T_b r_a T_a' h_ctx
+        c hβ hpure hbr heval
+  | quote val =>
+      exact frameβ_quote_caseWP n ptable level exp_b env_a env_b T_a T_b r_a T_a' h_ctx
+        val hβ hpure hbr heval
+  | var y =>
+      exact frameβ_var_caseWP n ptable level exp_b env_a env_b T_a T_b r_a T_a' h_ctx
+        y hβ hpure hbr heval
+  | ifte c t e =>
+      exact frameβ_ifte_evalWP n ptable level c t e exp_b env_a env_b T_a T_b r_a T_a'
+        ih_eval hresp_pt hβ hpure h_ctx hbr heval
+  | lam ps body =>
+      exact frameβ_lam_caseWP n ptable level exp_b env_a env_b T_a T_b r_a T_a' h_ctx
+        ps body hβ hpure hbr heval
+  | app argl =>
+      exact frameβ_app_evalWP n ptable level argl exp_b env_a env_b T_a T_b r_a T_a'
+        ih_eval ih_list ih_via hresp_pt hβ hpure h_ctx hbr heval
+  | set x e =>
+      exact frameβ_set_caseWP n ptable level exp_b env_a env_b T_a T_b r_a T_a'
+        x e hβ hpure hbr heval
+  | em body =>
+      exact frameβ_em_evalWP n ptable level body exp_b env_a env_b T_a T_b r_a T_a'
+        ih_eval hresp_pt hβ hpure h_ctx hbr heval
+  | primApp fn argl =>
+      exact frameβ_primApp_evalWP n ptable level fn argl exp_b env_a env_b T_a T_b r_a T_a'
+        ih_eval ih_list ih_ad hresp_pt hβ hpure h_ctx hbr heval
+  | letE x e1 body =>
+      exact frameβ_letE_evalWP n ptable level x e1 body exp_b env_a env_b T_a T_b r_a T_a'
+        ih_eval hresp_pt hβ hpure h_ctx hbr heval
+  | seq exps =>
+      exact frameβ_seq_evalWP n ptable level exps exp_b env_a env_b T_a T_b r_a T_a'
+        ih_eval hresp_pt hβ hpure h_ctx hbr heval
+  | installPolicy idx =>
+      exact frameβ_installPolicy_caseWP n ptable level exp_b env_a env_b T_a T_b r_a T_a'
+        idx hβ hpure hbr heval
+
+/-! ## 7s. The fundamental lemma, assembled.
+
+The four mutually-recursive `…WP` clauses, bundled and proved by a single fuel
+induction.  Base case: every function returns `none` at fuel `0`, contradicting
+the convergence premise.  Step case: destructure the fuel-`k` bundle into the
+four sub-IHs and feed each clause's step assembler (§7r for eval; §7o–7q for the
+rest).  This discharges the cross-side β-simulation for all pure programs under
+the all-levels gate `BReady` — the *fundamental lemma* the observation bridge
+(§7n) needs (modulo switching its `hFL` premise from `BuiltinReadyN d` to the
+assembled `FrameStmtβP`). -/
+def FrameStmtβP (n : Nat) : Prop :=
+  FrameβEvalStmtWP n ∧ FrameβEvalListStmtWP n ∧
+  FrameβApplyViaStmtWP n ∧ FrameβApplyDirectStmtWP n
+
+theorem frameβ_tower : ∀ n, FrameStmtβP n := by
+  intro n
+  induction n with
+  | zero =>
+      refine ⟨?_, ?_, ?_, ?_⟩
+      · intro _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ heval; simp [eval] at heval
+      · intro _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ heval; simp [evalList] at heval
+      · intro _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ heval; simp [applyVia] at heval
+      · intro _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ heval; simp [applyDirect] at heval
+  | succ k ih =>
+      obtain ⟨ih_eval, ih_list, ih_via, ih_ad⟩ := ih
+      exact ⟨frameβ_eval_stepWP k ih_eval ih_list ih_via ih_ad,
+             frameβ_evalList_evalWP k ih_eval ih_list,
+             frameβ_applyVia_evalWP k ih_ad,
+             frameβ_applyDirect_evalWP k ih_eval ih_ad⟩
+
+/-- The eval clause of the fundamental lemma, extracted for direct use. -/
+theorem frameβ_eval_FL (n : Nat) : FrameβEvalStmtWP n := (frameβ_tower n).1
+
 end LeanBlack
 
 
