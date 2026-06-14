@@ -3384,6 +3384,101 @@ theorem obsConv_iff_beta {M N : Expr} (hβ : BetaRel M N) (hrev : ReverseSimβ)
   ⟨obsConv_refine_forward hβ C ptable level env T g hg hresp hpure hbr hh hev_env hlv hpr,
    obsConv_refine_backward hβ hrev C ptable level env T g hg hresp hpure hbr hh hev_env hlv hpr⟩
 
+/-! ## 7v. Discharging `ReverseSimβ` — the reverse simulation tower.
+
+The reverse mirror of `frameβ_tower`: the **b-side drives** (its `eval` is given),
+and the a-side is reconstructed — at an **`∃ k`** fuel, since β-expansion adds the
+redex's head+apply steps (`gate_letE_to_redex`).  Conclusion is otherwise the same
+cross-side bundle (`ValVisβ` / `WFCtxTβ` / `HeapEvolutionβ` / `ValValid`).  The
+value relations come from the (forward) `frameβ_eval_FL` where convenient; the
+genuine reverse work is convergence + the apply/root cases.  This section builds it
+bottom-up: leaf cases first, then `evalList` / `applyDirect` / `applyVia`, the
+recursive eval cases, the assembler, and the mutual tower. -/
+
+/-- The reverse eval clause (b-side drives, `∃ k` a-side fuel). -/
+def FrameβEvalStmtRev (n : Nat) : Prop :=
+  ∀ (ptable : PolicyTable) (level : Nat) (exp_a exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_b : Val) (T_b' : TowerState),
+    BetaRel exp_a exp_b → Pure exp_a = true → PolicyTableRespectsBisimT ptable →
+    WFCtxTβ env_a env_b T_a T_b level → BReady T_b →
+    eval n ptable level exp_b env_b T_b = some (r_b, T_b') →
+    ∃ (k : Nat) (r_a : Val) (T_a' : TowerState),
+      eval k ptable level exp_a env_a T_a = some (r_a, T_a') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
+      WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧
+      ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap
+
+/-- `.num` (reverse): both sides converge to the literal, states unchanged. -/
+theorem frameβ_num_caseRev (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (i : Int) (exp_b : Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_b : Val) (T_b' : TowerState)
+    (hβ : BetaRel (.num i) exp_b) (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (heval : eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b')) :
+    ∃ (k : Nat) (r_a : Val) (T_a' : TowerState),
+      eval k ptable level (.num i) env_a T_a = some (r_a, T_a') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  have hb := hβ.num_eq; subst hb
+  simp only [eval, Option.some.injEq, Prod.mk.injEq] at heval
+  obtain ⟨hr, ht⟩ := heval; subst hr; subst ht
+  exact ⟨1, .num i, T_a, by simp [eval], (fun m => by cases m <;> simp [ValVisβ_aux]),
+         h_ctx, HeapEvolutionβ.refl _ _, trivial, trivial⟩
+
+/-- `.bool` (reverse). -/
+theorem frameβ_bool_caseRev (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (c : Bool) (exp_b : Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_b : Val) (T_b' : TowerState)
+    (hβ : BetaRel (.bool c) exp_b) (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (heval : eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b')) :
+    ∃ (k : Nat) (r_a : Val) (T_a' : TowerState),
+      eval k ptable level (.bool c) env_a T_a = some (r_a, T_a') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  have hb := hβ.bool_eq; subst hb
+  simp only [eval, Option.some.injEq, Prod.mk.injEq] at heval
+  obtain ⟨hr, ht⟩ := heval; subst hr; subst ht
+  exact ⟨1, .bool c, T_a, by simp [eval], (fun m => by cases m <;> simp [ValVisβ_aux]),
+         h_ctx, HeapEvolutionβ.refl _ _, trivial, trivial⟩
+
+/-- `.lam` (reverse): both sides return closures with `BetaRel`-related bodies. -/
+theorem frameβ_lam_caseRev (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (ps : List String) (body exp_b : Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_b : Val) (T_b' : TowerState)
+    (hβ : BetaRel (.lam ps body) exp_b) (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (heval : eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b')) :
+    ∃ (k : Nat) (r_a : Val) (T_a' : TowerState),
+      eval k ptable level (.lam ps body) env_a T_a = some (r_a, T_a') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  obtain ⟨body', rfl, hbody⟩ := hβ.lam_inv
+  rw [eval_lam_closure] at heval
+  injection heval with heval'; injection heval' with hr ht; subst hr; subst ht
+  exact ⟨1, .closure ps body env_a, T_a, eval_lam_closure 0 ptable level ps body env_a T_a,
+         ValVisβ_lam_closures ps body body' env_a env_b T_a.heap T_b.heap hbody h_ctx.env_visβ,
+         h_ctx, HeapEvolutionβ.refl _ _, h_ctx.ev_a, h_ctx.ev_b⟩
+
+/-- `.quote` (reverse): a *closed* quoted value self-bisims across any heaps. -/
+theorem frameβ_quote_caseRev (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (v : Val) (exp_b : Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_b : Val) (T_b' : TowerState)
+    (hβ : BetaRel (.quote v) exp_b) (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (heval : eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b')) :
+    ∃ (k : Nat) (r_a : Val) (T_a' : TowerState),
+      eval k ptable level (.quote v) env_a T_a = some (r_a, T_a') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  have hb := hβ.quote_eq; subst hb
+  simp only [eval] at heval
+  split at heval
+  · rename_i hclosed
+    simp only [Option.some.injEq, Prod.mk.injEq] at heval
+    obtain ⟨hr, hT⟩ := heval; subst hr; subst hT
+    exact ⟨1, v, T_a, by simp only [eval, hclosed, ↓reduceIte],
+           ValVisβ_refl_closed v hclosed _ _, h_ctx, HeapEvolutionβ.refl _ _,
+           closedVal_ValValid v hclosed _, closedVal_ValValid v hclosed _⟩
+  · simp at heval
+
 end LeanBlack
 
 
