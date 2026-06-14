@@ -42,12 +42,14 @@
     `EnvVisβ_alloc_cons` replacing the cons-env equality), `frameβ_ifte_eval`
     (`.ifte`, with `ValVisβ_bool_false_iff` forcing cross-side branch
     agreement), `frameβ_seq_eval` (`.seq`, list-structured via
-    `seq_cons_inv`), and `frameβ_evalList_eval` (the `evalList`
-    argument-list traversal, the two-IH list clause over `ListValVisβ` that
-    bridges into `.app`). Proof that the §4 substrate composes into real
-    fundamental-lemma cases. Only the `WFCtxTβ` statement-wrapper upgrade
-    and the gated/reflective application (`applyVia`/`applyDirect`,
-    `.em`/`.set`) remain (the open core).
+    `seq_cons_inv`), `frameβ_evalList_eval` (the `evalList` argument-list
+    traversal, the two-IH list clause over `ListValVisβ` that bridges into
+    `.app`), and `EnvVisβ_allocStep_chain` (§6g, the closure-apply argument
+    binding — the gate-free half of `applyDirect`'s closure case, a β-port of
+    `Bisim.alloc_chain_bisim`). Proof that the §4 substrate composes into real
+    fundamental-lemma cases. Only the `WFCtxTβ` statement-wrapper upgrade and
+    the reflective gate dispatch (`applyVia`'s `base-apply` lookup, the
+    closure-body eval, `.em`/`.set`) remain (the open core).
 
   The weakening `ValVis_weak ⊆ ValVisβ` holds by the same structural
   induction as `Bisim.ValVis_aux_to_weak` with `BetaRel.refl` discharging
@@ -841,20 +843,23 @@ gate-free fragment of the faithful eval/evalList clauses is now closed**.
    `applyDirect` clauses (with a trivial `ListValVisβ`). Deferred
    deliberately, *with* those cases below: a wrapper carrying half-formed
    reflective fields would misstate the boundary.
-2. *The elimination side* — `.app` / `applyVia` / `applyDirect`, the **gate
-   threading** (route (b)). The structural half is now in hand: `app_inv`
-   (§4d) supplies the `BetaRel` inversion (the disjunction whose root-
-   contraction branch is the genuine novelty), `BetaRelList` the argument
-   relation, and `frameβ_evalList_eval` (§6f) discharges the whole argument-
-   list traversal to `ListValVisβ`-related results. What remains is purely the
-   *application*: `applyVia` / `applyDirect`, where the closure is **run**
-   through the `base-apply` gate — its body evaluates and the two sides
-   (redex-applied vs. contractum-bound) must reach `ValVisβ`-related results.
-   This, with the reflective `.em` / `.set`, is where the real research risk
-   sits; `BuiltinReady` (standard gate) is the premise that is meant to tame
-   it. The de-risking first target is the concrete Wand pair `(λx. x) 0` /
-   `let x = 0 in x` under a binder, whose redex/contractum closures
-   `ValVisβ_relates_beta_closures` (§2) already relates.
+2. *The elimination side* — `applyVia` / `applyDirect`, the **gate
+   threading** (route (b)). The structural and allocation halves are now in
+   hand: `app_inv` (§4d) supplies the `BetaRel` inversion (the disjunction
+   whose root-contraction branch is the genuine novelty), `BetaRelList` the
+   argument relation, `frameβ_evalList_eval` (§6f) discharges the argument-
+   list traversal to `ListValVisβ`-related results, and `EnvVisβ_allocStep_chain`
+   (§6g) carries `EnvVisβ` through the closure-apply argument binding (the
+   gate-free half of `applyDirect`'s closure case). What remains is the
+   genuinely reflective core: `applyVia`'s **gate dispatch** — the level-(level+1)
+   `base-apply` lookup and cross-level closure call — and, in `applyDirect`'s
+   closure case, the body eval (eval IH at fuel `n` over `BetaRel body_a body_b`
+   and §6g's `EnvVisβ`). This, with the reflective `.em` / `.set` and the
+   policy/level fields of `WFCtxTβ`, is where the real research risk sits;
+   `BuiltinReady` (standard gate) is the premise that is meant to tame it. The
+   de-risking first target is the concrete Wand pair `(λx. x) 0` / `let x = 0 in x`
+   under a binder, whose redex/contractum closures `ValVisβ_relates_beta_closures`
+   (§2) already relates.
 
 With every structural case discharged, the remaining work is exactly
 (1) the statement wrapper and (2) the gate — no structural plumbing is
@@ -866,9 +871,10 @@ left between here and the full `.lam` congruence. -/
 the faithful obligation for the **eval** clause and discharges **every
 gate-free structural case** on it — the allocating binder (`.letE`, §6c),
 the branch (`.ifte`, §6d), the sequence (`.seq`, §6e), and the
-argument-list traversal (`evalList`, §6f) — the milestone showing the
-substrate composes into real fundamental-lemma cases, which the §3 sketch
-could not.
+argument-list traversal (`evalList`, §6f) — plus the closure-apply
+allocation chain (§6g, the gate-free half of `applyDirect`'s closure case).
+The milestone showing the substrate composes into real fundamental-lemma
+cases, which the §3 sketch could not.
 
 Pieces: `HeapEvolutionβ` (the cross-side heap-evolution carrier), `WFβ`
 (the gate-free fragment's context invariant), `frameβ_letE_eval` (the
@@ -1382,6 +1388,20 @@ def ListValVisβ : List Val → List Val → Heap → Heap → Prop
   | x :: xs, y :: ys, h_a, h_b => ValVisβ x y h_a h_b ∧ ListValVisβ xs ys h_a h_b
   | _,       _,       _,   _   => False
 
+/-- `ListValVisβ` preserved under heap extension (pointwise `ValVisβ_extends`).
+    Mirror of `Bisim.ListValVis_extends`. -/
+theorem ListValVisβ_extends : ∀ {xs ys : List Val} {h_a h_b ext_a ext_b : Heap},
+    HeapValid h_a → HeapValid h_b →
+    ListValValid xs h_a → ListValValid ys h_b →
+    ListValVisβ xs ys h_a h_b →
+    ListValVisβ xs ys (h_a ++ ext_a) (h_b ++ ext_b)
+  | [],      [],      _, _, _, _, _, _, _, _, _ => trivial
+  | [],      _ :: _,  _, _, _, _, _, _, _, _, h => h.elim
+  | _ :: _,  [],      _, _, _, _, _, _, _, _, h => h.elim
+  | _ :: _,  _ :: _,  _, _, _, _, hh_a, hh_b, hv_a, hv_b, ⟨h_head, h_tail⟩ =>
+      ⟨ValVisβ_extends _ _ _ _ _ _ hh_a hh_b hv_a.1 hv_b.1 h_head,
+       ListValVisβ_extends hh_a hh_b hv_a.2 hv_b.2 h_tail⟩
+
 /-- The `evalList` clause, β-analog of `FrameStmtT`'s second conjunct
     (`Frame.lean:912`): `ListValVis ↦ ListValVisβ`, the shared `exps`
     replaced by a `BetaRelList` pair, full output invariant set kept,
@@ -1457,5 +1477,188 @@ theorem frameβ_evalList_eval (n : Nat)
                       hwf_inner2, h_he_chain, h_env_inner2,
                       ⟨hv_va', hv_vsa⟩, ⟨hv_vb', hv_vsb⟩⟩
               simp [evalList, h_eval_e_b, h_eval_rest_b]
+
+/-! ### 6g. The closure-apply allocation chain — gate-free
+
+`applyDirect`'s closure case binds the arguments by folding `allocStep`
+over `args.zip ps`, *then* evaluates the body. The fold is the last piece
+of allocation plumbing before the (gated) body eval: it must carry
+`EnvVisβ` from the captured environments to the cons-extended call
+environments, across heaps whose contents — and lengths — diverge.
+
+`frame_tower` uses `allocStep_chain_aligned` (`Bisim.lean:2761`), which
+proves the two result envs **Lean-equal** (same captured `cenv`, equal
+heap lengths). β breaks both. The faithful relational analog is
+`Bisim.alloc_chain_bisim` (`Bisim.lean:2824`), which already relaxes the
+result to `EnvVis`-relatedness; this is its verbatim β-port (`EnvVis ↦
+EnvVisβ`, `ValVis ↦ ValVisβ`, `ListValVis ↦ ListValVisβ`, and the §4 /
+§6f extension lemmas in place of the `_weak` ones). Every `HeapValid` /
+`EnvValid` step is body-agnostic and identical. This is the multi-argument
+generalization of `EnvVisβ_alloc_cons` (§4b), and the last gate-free step
+the closure-apply needs. -/
+theorem EnvVisβ_allocStep_chain
+    (xs_a : List Val) :
+    ∀ (xs_b : List Val) (ps : List String) (cenv_a cenv_b : Env) (h_a h_b : Heap),
+    xs_a.length = ps.length → xs_b.length = ps.length →
+    ListValVisβ xs_a xs_b h_a h_b →
+    ListValValid xs_a h_a → ListValValid xs_b h_b →
+    HeapValid h_a → HeapValid h_b →
+    EnvValid cenv_a h_a → EnvValid cenv_b h_b →
+    EnvVisβ cenv_a cenv_b h_a h_b →
+    let result_a := xs_a.zip ps |>.foldl allocStep (h_a, cenv_a)
+    let result_b := xs_b.zip ps |>.foldl allocStep (h_b, cenv_b)
+    HeapValid result_a.1 ∧ HeapValid result_b.1 ∧
+    EnvValid result_a.2 result_a.1 ∧ EnvValid result_b.2 result_b.1 ∧
+    EnvVisβ result_a.2 result_b.2 result_a.1 result_b.1 ∧
+    (∃ ext, result_a.1 = h_a ++ ext) ∧
+    (∃ ext, result_b.1 = h_b ++ ext) := by
+  induction xs_a with
+  | nil =>
+      intro xs_b ps cenv_a cenv_b h_a h_b hlen_a hlen_b h_lvv hv_xs_a hv_xs_b
+            hh_a hh_b hev_a hev_b h_env
+      simp only [List.length_nil] at hlen_a
+      have hps_nil : ps = [] := List.length_eq_zero_iff.mp hlen_a.symm
+      subst hps_nil
+      simp only [List.length_nil] at hlen_b
+      have hxs_b_nil : xs_b = [] := List.length_eq_zero_iff.mp hlen_b
+      subst hxs_b_nil
+      refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+      · show HeapValid (([] : List (Val × String)).foldl allocStep (h_a, cenv_a)).1
+        simp [List.foldl]; exact hh_a
+      · show HeapValid (([] : List (Val × String)).foldl allocStep (h_b, cenv_b)).1
+        simp [List.foldl]; exact hh_b
+      · show EnvValid (([] : List (Val × String)).foldl allocStep (h_a, cenv_a)).2
+                     (([] : List (Val × String)).foldl allocStep (h_a, cenv_a)).1
+        simp [List.foldl]; exact hev_a
+      · show EnvValid (([] : List (Val × String)).foldl allocStep (h_b, cenv_b)).2
+                     (([] : List (Val × String)).foldl allocStep (h_b, cenv_b)).1
+        simp [List.foldl]; exact hev_b
+      · show EnvVisβ (([] : List (Val × String)).foldl allocStep (h_a, cenv_a)).2
+                     (([] : List (Val × String)).foldl allocStep (h_b, cenv_b)).2
+                     (([] : List (Val × String)).foldl allocStep (h_a, cenv_a)).1
+                     (([] : List (Val × String)).foldl allocStep (h_b, cenv_b)).1
+        simp [List.foldl]; exact h_env
+      · show ∃ ext, (([] : List (Val × String)).foldl allocStep (h_a, cenv_a)).1
+          = h_a ++ ext
+        simp [List.foldl]
+      · show ∃ ext, (([] : List (Val × String)).foldl allocStep (h_b, cenv_b)).1
+          = h_b ++ ext
+        simp [List.foldl]
+  | cons a_a rest_a ih =>
+      intro xs_b ps cenv_a cenv_b h_a h_b hlen_a hlen_b h_lvv hv_xs_a hv_xs_b
+            hh_a hh_b hev_a hev_b h_env
+      cases ps with
+      | nil =>
+          exfalso
+          simp only [List.length_cons, List.length_nil] at hlen_a
+          omega
+      | cons p rest_p =>
+          cases xs_b with
+          | nil =>
+              exfalso
+              simp only [List.length_nil, List.length_cons] at hlen_b
+              omega
+          | cons a_b rest_b =>
+              simp only [List.length_cons] at hlen_a hlen_b
+              have hlen_a' : rest_a.length = rest_p.length := by omega
+              have hlen_b' : rest_b.length = rest_p.length := by omega
+              obtain ⟨h_vv_a, h_lvv_rest⟩ := h_lvv
+              obtain ⟨hv_a_a, hv_rest_a⟩ := hv_xs_a
+              obtain ⟨hv_a_b, hv_rest_b⟩ := hv_xs_b
+              show
+                let result_a := rest_a.zip rest_p |>.foldl allocStep
+                  (h_a ++ [a_a], .cons p h_a.length cenv_a)
+                let result_b := rest_b.zip rest_p |>.foldl allocStep
+                  (h_b ++ [a_b], .cons p h_b.length cenv_b)
+                HeapValid result_a.1 ∧ HeapValid result_b.1 ∧
+                EnvValid result_a.2 result_a.1 ∧ EnvValid result_b.2 result_b.1 ∧
+                EnvVisβ result_a.2 result_b.2 result_a.1 result_b.1 ∧
+                (∃ ext, result_a.1 = h_a ++ ext) ∧
+                (∃ ext, result_b.1 = h_b ++ ext)
+              have hh_a' : HeapValid (h_a ++ [a_a]) := by
+                intro i v hp
+                by_cases h_lt : i < h_a.length
+                · have hp_old : h_a[i]? = some v := by
+                    rw [← getElem?_prefix h_a [a_a] i h_lt]; exact hp
+                  exact ValValid.heap_extends v (hh_a i v hp_old) ⟨[a_a], rfl⟩
+                · have h_eq : i = h_a.length := by
+                    have h_le : i < (h_a ++ [a_a]).length := by
+                      rw [List.getElem?_eq_some_iff] at hp
+                      obtain ⟨h, _⟩ := hp; exact h
+                    simp [List.length_append] at h_le; omega
+                  subst h_eq
+                  rw [List.getElem?_append_right (Nat.le_refl _)] at hp
+                  simp at hp
+                  subst hp
+                  exact ValValid.heap_extends a_a hv_a_a ⟨[a_a], rfl⟩
+              have hh_b' : HeapValid (h_b ++ [a_b]) := by
+                intro i v hp
+                by_cases h_lt : i < h_b.length
+                · have hp_old : h_b[i]? = some v := by
+                    rw [← getElem?_prefix h_b [a_b] i h_lt]; exact hp
+                  exact ValValid.heap_extends v (hh_b i v hp_old) ⟨[a_b], rfl⟩
+                · have h_eq : i = h_b.length := by
+                    have h_le : i < (h_b ++ [a_b]).length := by
+                      rw [List.getElem?_eq_some_iff] at hp
+                      obtain ⟨h, _⟩ := hp; exact h
+                    simp [List.length_append] at h_le; omega
+                  subst h_eq
+                  rw [List.getElem?_append_right (Nat.le_refl _)] at hp
+                  simp at hp
+                  subst hp
+                  exact ValValid.heap_extends a_b hv_a_b ⟨[a_b], rfl⟩
+              have hev_a' : EnvValid (.cons p h_a.length cenv_a) (h_a ++ [a_a]) := by
+                intro name i hl
+                simp only [List.length_append, List.length_singleton]
+                simp only [Env.lookup] at hl
+                by_cases h_eq : p = name
+                · subst h_eq
+                  simp only [beq_self_eq_true, ↓reduceIte, Option.some.injEq] at hl
+                  omega
+                · have h_neq : (p == name) = false := by
+                    rw [beq_eq_false_iff_ne]; exact h_eq
+                  simp only [h_neq, Bool.false_eq_true, ↓reduceIte] at hl
+                  have := hev_a name i hl
+                  omega
+              have hev_b' : EnvValid (.cons p h_b.length cenv_b) (h_b ++ [a_b]) := by
+                intro name i hl
+                simp only [List.length_append, List.length_singleton]
+                simp only [Env.lookup] at hl
+                by_cases h_eq : p = name
+                · subst h_eq
+                  simp only [beq_self_eq_true, ↓reduceIte, Option.some.injEq] at hl
+                  omega
+                · have h_neq : (p == name) = false := by
+                    rw [beq_eq_false_iff_ne]; exact h_eq
+                  simp only [h_neq, Bool.false_eq_true, ↓reduceIte] at hl
+                  have := hev_b name i hl
+                  omega
+              have hl_a : (h_a ++ [a_a])[h_a.length]? = some a_a := by
+                rw [List.getElem?_append_right (Nat.le_refl _)]; simp
+              have hl_b : (h_b ++ [a_b])[h_b.length]? = some a_b := by
+                rw [List.getElem?_append_right (Nat.le_refl _)]; simp
+              have h_vv_a' : ValVisβ a_a a_b (h_a ++ [a_a]) (h_b ++ [a_b]) :=
+                ValVisβ_extends a_a a_b h_a h_b [a_a] [a_b] hh_a hh_b hv_a_a hv_a_b h_vv_a
+              have h_env_lifted : EnvVisβ cenv_a cenv_b (h_a ++ [a_a]) (h_b ++ [a_b]) :=
+                EnvVisβ_extends cenv_a cenv_b h_a h_b [a_a] [a_b]
+                  hh_a hh_b hev_a hev_b h_env
+              have h_env' : EnvVisβ (.cons p h_a.length cenv_a) (.cons p h_b.length cenv_b)
+                  (h_a ++ [a_a]) (h_b ++ [a_b]) :=
+                EnvVisβ_cons p h_a.length h_b.length cenv_a cenv_b
+                  (h_a ++ [a_a]) (h_b ++ [a_b]) a_a a_b hl_a hl_b h_vv_a' h_env_lifted
+              have h_lvv_rest' : ListValVisβ rest_a rest_b (h_a ++ [a_a]) (h_b ++ [a_b]) :=
+                ListValVisβ_extends hh_a hh_b hv_rest_a hv_rest_b h_lvv_rest
+              have hv_rest_a' : ListValValid rest_a (h_a ++ [a_a]) :=
+                ListValValid.heap_extends hv_rest_a ⟨[a_a], rfl⟩
+              have hv_rest_b' : ListValValid rest_b (h_b ++ [a_b]) :=
+                ListValValid.heap_extends hv_rest_b ⟨[a_b], rfl⟩
+              obtain ⟨hh_ra, hh_rb, hev_ra, hev_rb, h_env_r, ⟨ext_a, hex_a⟩, ⟨ext_b, hex_b⟩⟩ :=
+                ih rest_b rest_p (.cons p h_a.length cenv_a) (.cons p h_b.length cenv_b)
+                  (h_a ++ [a_a]) (h_b ++ [a_b])
+                  hlen_a' hlen_b' h_lvv_rest' hv_rest_a' hv_rest_b'
+                  hh_a' hh_b' hev_a' hev_b' h_env'
+              refine ⟨hh_ra, hh_rb, hev_ra, hev_rb, h_env_r, ?_, ?_⟩
+              · exact ⟨[a_a] ++ ext_a, by rw [hex_a, List.append_assoc]⟩
+              · exact ⟨[a_b] ++ ext_b, by rw [hex_b, List.append_assoc]⟩
 
 end LeanBlack
