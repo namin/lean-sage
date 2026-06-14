@@ -2232,6 +2232,115 @@ theorem frameβ_seq_evalWP (d n : Nat) (ptable : PolicyTable) (level : Nat)
               rw [eval_seq_cons_step n ptable level e' f' rest2' env_b T_b T_e_b v_b h_eval_e_b]
               exact h_eval_rest_b
 
+/-- `.letE` on `FrameβEvalStmtWP` — re-cut of `frameβ_letE_evalW` (alloc-validity
+    plumbing verbatim, body-agnostic), threading the body call's premise across the
+    bound-expr eval **and** the allocation via `BuiltinReadyP_alloc`. -/
+theorem frameβ_letE_evalWP (d n : Nat) (ptable : PolicyTable) (level : Nat)
+    (x : String) (e1 body exp_b : Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_a : Val) (T_a' : TowerState)
+    (ih : FrameβEvalStmtWP d n) (hresp_pt : PolicyTableRespectsBisimT ptable)
+    (hβ : BetaRel (.letE x e1 body) exp_b) (hpure : Pure (.letE x e1 body) = true)
+    (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (hready : BuiltinReadyN d ptable level env_b T_b) (hheap : PureHeap T_b.heap)
+    (heval : eval (n + 1) ptable level (.letE x e1 body) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b', eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  obtain ⟨e1', body', rfl, hβ_e, hβ_body⟩ := hβ.letE_inv
+  simp only [Pure, Bool.and_eq_true] at hpure
+  obtain ⟨hpe1, hpbody⟩ := hpure
+  simp only [eval] at heval
+  cases he : eval n ptable level e1 env_a T_a with
+  | none => rw [he] at heval; simp at heval
+  | some pr =>
+    obtain ⟨v_a, T_a_inner⟩ := pr
+    rw [he] at heval
+    obtain ⟨v_b, T_b_inner, h_eval_e_b, h_vv_v, h_ctx_inner, h_he_inner, hv_va, hv_vb⟩ :=
+      ih ptable level e1 e1' env_a env_b T_a T_b v_a T_a_inner hβ_e hpe1 hresp_pt h_ctx hready hheap he
+    obtain ⟨hready_body, hheap_body⟩ :=
+      BuiltinReadyP_alloc d ptable level x e1' env_b T_b (hβ_e.pure_preserve hpe1)
+        ⟨hready, hheap⟩ n v_b T_b_inner h_eval_e_b
+    simp only [TowerState.alloc, Heap.alloc] at heval
+    -- alloc validity (body-agnostic; verbatim from `frameβ_letE_evalW`)
+    have h_lookup_a : (T_a_inner.heap ++ [v_a])[T_a_inner.heap.length]? = some v_a := getElem?_snoc _ _
+    have h_lookup_b : (T_b_inner.heap ++ [v_b])[T_b_inner.heap.length]? = some v_b := getElem?_snoc _ _
+    have hh_a_alloc : HeapValid (T_a_inner.heap ++ [v_a]) := by
+      intro i v hp
+      by_cases h_lt : i < T_a_inner.heap.length
+      · have hp_old : T_a_inner.heap[i]? = some v := by
+          rw [← getElem?_prefix T_a_inner.heap [v_a] i h_lt]; exact hp
+        exact ValValid.heap_extends v (h_ctx_inner.hv_a i v hp_old) ⟨[v_a], rfl⟩
+      · have h_eq : i = T_a_inner.heap.length := by
+          have h_le : i < (T_a_inner.heap ++ [v_a]).length := by
+            rw [List.getElem?_eq_some_iff] at hp; obtain ⟨h, _⟩ := hp; exact h
+          simp [List.length_append] at h_le; omega
+        subst h_eq; rw [h_lookup_a] at hp; simp only [Option.some.injEq] at hp; subst hp
+        exact ValValid.heap_extends v_a hv_va ⟨[v_a], rfl⟩
+    have hh_b_alloc : HeapValid (T_b_inner.heap ++ [v_b]) := by
+      intro i v hp
+      by_cases h_lt : i < T_b_inner.heap.length
+      · have hp_old : T_b_inner.heap[i]? = some v := by
+          rw [← getElem?_prefix T_b_inner.heap [v_b] i h_lt]; exact hp
+        exact ValValid.heap_extends v (h_ctx_inner.hv_b i v hp_old) ⟨[v_b], rfl⟩
+      · have h_eq : i = T_b_inner.heap.length := by
+          have h_le : i < (T_b_inner.heap ++ [v_b]).length := by
+            rw [List.getElem?_eq_some_iff] at hp; obtain ⟨h, _⟩ := hp; exact h
+          simp [List.length_append] at h_le; omega
+        subst h_eq; rw [h_lookup_b] at hp; simp only [Option.some.injEq] at hp; subst hp
+        exact ValValid.heap_extends v_b hv_vb ⟨[v_b], rfl⟩
+    have hev_a' : EnvValid (.cons x T_a_inner.heap.length env_a) (T_a_inner.heap ++ [v_a]) :=
+      envValid_cons_fresh x v_a env_a T_a_inner.heap h_ctx_inner.ev_a
+    have hev_b' : EnvValid (.cons x T_b_inner.heap.length env_b) (T_b_inner.heap ++ [v_b]) :=
+      envValid_cons_fresh x v_b env_b T_b_inner.heap h_ctx_inner.ev_b
+    have h_env' : EnvVisβ (.cons x T_a_inner.heap.length env_a) (.cons x T_b_inner.heap.length env_b)
+        (T_a_inner.heap ++ [v_a]) (T_b_inner.heap ++ [v_b]) :=
+      EnvVisβ_alloc_cons x env_a env_b v_a v_b T_a_inner.heap T_b_inner.heap
+        h_ctx_inner.hv_a h_ctx_inner.hv_b h_ctx_inner.ev_a h_ctx_inner.ev_b hv_va hv_vb h_vv_v
+        h_ctx_inner.env_visβ
+    obtain ⟨hlva', hlvb', hlvisβ'⟩ :=
+      level_fields_alloc v_a v_b h_ctx_inner.hv_a h_ctx_inner.hv_b
+        h_ctx_inner.level_envs_valid_a h_ctx_inner.level_envs_valid_b h_ctx_inner.level_envs_visβ
+    have h_ctx_alloc : WFCtxTβ (.cons x T_a_inner.heap.length env_a)
+        (.cons x T_b_inner.heap.length env_b)
+        { T_a_inner with heap := T_a_inner.heap ++ [v_a] }
+        { T_b_inner with heap := T_b_inner.heap ++ [v_b] } level :=
+      { policy_eq_at := h_ctx_inner.policy_eq_at
+        hv_a := hh_a_alloc, hv_b := hh_b_alloc, ev_a := hev_a', ev_b := hev_b'
+        policy_resp := h_ctx_inner.policy_resp
+        env_visβ := h_env'
+        level_envs_valid_a := hlva', level_envs_valid_b := hlvb'
+        level_count_eq := h_ctx_inner.level_count_eq
+        policies_eq := h_ctx_inner.policies_eq
+        policies_resp_all := h_ctx_inner.policies_resp_all
+        level_envs_visβ := hlvisβ' }
+    obtain ⟨r_b, T_b', h_eval_b_b, h_vv_r, h_ctx_body, h_he_body, hv_ra, hv_rb⟩ :=
+      ih ptable level body body'
+        (.cons x T_a_inner.heap.length env_a) (.cons x T_b_inner.heap.length env_b)
+        { T_a_inner with heap := T_a_inner.heap ++ [v_a] }
+        { T_b_inner with heap := T_b_inner.heap ++ [v_b] } r_a T_a'
+        hβ_body hpbody hresp_pt h_ctx_alloc hready_body hheap_body heval
+    have h_he_alloc : HeapEvolutionβ T_a_inner T_b_inner
+        { T_a_inner with heap := T_a_inner.heap ++ [v_a] }
+        { T_b_inner with heap := T_b_inner.heap ++ [v_b] } :=
+      HeapEvolutionβ.from_heapExt h_ctx_inner.hv_a h_ctx_inner.hv_b ⟨[v_a], rfl⟩ ⟨[v_b], rfl⟩
+    have h_he_chain : HeapEvolutionβ T_a T_b T_a' T_b' :=
+      h_he_inner.trans (h_he_alloc.trans h_he_body)
+    refine ⟨r_b, T_b', ?_, h_vv_r, ?_, h_he_chain, hv_ra, hv_rb⟩
+    · simp only [eval, h_eval_e_b, TowerState.alloc, Heap.alloc]; exact h_eval_b_b
+    · exact
+      { policy_eq_at := h_ctx_body.policy_eq_at
+        hv_a := h_ctx_body.hv_a, hv_b := h_ctx_body.hv_b
+        ev_a := h_ctx.ev_a.length_mono h_he_chain.len_a
+        ev_b := h_ctx.ev_b.length_mono h_he_chain.len_b
+        policy_resp := h_ctx_body.policy_resp
+        env_visβ := h_he_chain.envVisβ_preserve env_a env_b h_ctx.ev_a h_ctx.ev_b h_ctx.env_visβ
+        level_envs_valid_a := h_ctx_body.level_envs_valid_a
+        level_envs_valid_b := h_ctx_body.level_envs_valid_b
+        level_count_eq := h_ctx_body.level_count_eq
+        policies_eq := h_ctx_body.policies_eq
+        policies_resp_all := h_ctx_body.policies_resp_all
+        level_envs_visβ := h_ctx_body.level_envs_visβ }
+
 end LeanBlack
 
 
