@@ -2738,6 +2738,125 @@ theorem frameβ_applyDirect_evalWP (n : Nat)
       · have hne : (ps.length != args_a.length) = true := by simp [hlen]
         rw [hne] at heval; simp at heval
 
+/-- `applyVia` over `BReady` — re-cut of `frameβ_applyVia_eval`. Under `BReady` the
+    tower is full so `materialize (level+1)` is a no-op (`T_b_mat = T_b`), and the
+    **non-standard-gate branch is vacuous** (the b-side `base-apply` cell is
+    `builtinBaseApply`, contradicting it). Every live branch dispatches to the
+    `applyDirect` IH, forwarding the premise (`BReady T_b_mat`, `PureVal op_a`,
+    `PureValList args_a` — purity is heap-independent). -/
+def FrameβApplyViaStmtWP (n : Nat) : Prop :=
+  ∀ (ptable : PolicyTable) (level : Nat) (op_a op_b : Val)
+    (args_a args_b : List Val) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState),
+    PolicyTableRespectsBisimT ptable →
+    TowerInvβ T_a T_b →
+    BReady T_b →
+    PureVal op_a = true →
+    PureValList args_a = true →
+    ValVisβ op_a op_b T_a.heap T_b.heap →
+    ListValVisβ args_a args_b T_a.heap T_b.heap →
+    ValValid op_a T_a.heap → ValValid op_b T_b.heap →
+    ListValValid args_a T_a.heap → ListValValid args_b T_b.heap →
+    applyVia n ptable level op_a args_a T_a = some (r_a, T_a') →
+    ∃ r_b T_b',
+      applyVia n ptable level op_b args_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ TowerInvβ T_a' T_b' ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap
+
+theorem frameβ_applyVia_evalWP (n : Nat) (ih_ad : FrameβApplyDirectStmtWP n) :
+    FrameβApplyViaStmtWP (n + 1) := by
+  intro ptable level op_a op_b args_a args_b T_a T_b r_a T_a'
+        hresp_pt h_tower hbr hpop hpargs h_vv_op h_lvv hv_opa hv_opb hv_argsa hv_argsb heval
+  cases hm_a : T_a.materialize (level + 1) with
+  | none => rw [applyVia_materialize_none n ptable level op_a args_a T_a hm_a] at heval; simp at heval
+  | some T_a_mat =>
+      have hm_b_some : (T_b.materialize (level + 1)).isSome := by
+        cases h_some : T_b.materialize (level + 1) with
+        | none => rw [(T_a.materialize_cross_side_some_iff T_b _).mpr h_some] at hm_a; cases hm_a
+        | some _ => simp
+      obtain ⟨T_b_mat, hm_b⟩ := Option.isSome_iff_exists.mp hm_b_some
+      -- full tower ⟹ materialize is a no-op ⟹ `BReady T_b_mat`
+      have hd : level + 1 < Tower.maxDepth := by
+        unfold TowerState.materialize at hm_a
+        split at hm_a
+        · exact absurd hm_a (by simp)
+        · omega
+      have hTbmat : T_b_mat = T_b := by
+        have hnoop := materialize_noop (show T_b.levels.length > level + 1 by have := hbr.1.1; omega) hd
+        rw [hnoop] at hm_b; exact (Option.some.inj hm_b).symm
+      have hbr_mat : BReady T_b_mat := hTbmat ▸ hbr
+      obtain ⟨hhm_a, hhm_b, hcount_m, hvalid_a_m, hvalid_b_m, hvisβ_m⟩ :=
+        materialize_MatInvβ ⟨h_tower.hv_a, h_tower.hv_b, h_tower.count, h_tower.valid_a,
+          h_tower.valid_b, h_tower.visβ⟩ hm_a hm_b
+      have hpoleq_m := materialize_policiesEqβ h_tower.count h_tower.pol_eq hm_a hm_b
+      have hpolresp_m := materialize_policies_resp_preserves T_a T_a_mat (level + 1)
+        PolicyRespectsBisimT hm_a h_tower.pol_resp rejectAllPolicy_respects_bisimT
+      have h_tower_mat : TowerInvβ T_a_mat T_b_mat :=
+        ⟨hhm_a, hhm_b, hcount_m, hvalid_a_m, hvalid_b_m, hvisβ_m, hpoleq_m, hpolresp_m⟩
+      have h_he_mat : HeapEvolutionβ T_a T_b T_a_mat T_b_mat :=
+        HeapEvolutionβ.from_heapExt h_tower.hv_a h_tower.hv_b
+          (T_a.materialize_heap_extends T_a_mat (level + 1) hm_a)
+          (T_b.materialize_heap_extends T_b_mat (level + 1) hm_b)
+      have h_vv_op_m := h_he_mat.valVisβ_preserve op_a op_b hv_opa hv_opb h_vv_op
+      have h_lvv_m := h_he_mat.listValVisβ_preserve args_a args_b hv_argsa hv_argsb h_lvv
+      have hv_opa_m := ValValid.length_mono op_a hv_opa h_he_mat.len_a
+      have hv_opb_m := ValValid.length_mono op_b hv_opb h_he_mat.len_b
+      have hv_argsa_m := ListValValid.length_mono hv_argsa h_he_mat.len_a
+      have hv_argsb_m := ListValValid.length_mono hv_argsb h_he_mat.len_b
+      cases he_a : T_a_mat.envAt? (level + 1) with
+      | none =>
+          rw [applyVia_envAt_none n ptable level op_a args_a T_a T_a_mat hm_a he_a] at heval
+          have he_b : T_b_mat.envAt? (level + 1) = none :=
+            envAt?_none_cross T_a_mat T_b_mat (level + 1) hcount_m he_a
+          obtain ⟨r_b, T_b', h_ad_b, h_vv_r, h_tower', h_he_ad, hv_ra, hv_rb⟩ :=
+            ih_ad ptable level op_a op_b args_a args_b T_a_mat T_b_mat r_a T_a' hresp_pt
+              h_tower_mat hbr_mat hpop hpargs h_vv_op_m h_lvv_m hv_opa_m hv_opb_m hv_argsa_m hv_argsb_m heval
+          refine ⟨r_b, T_b', ?_, h_vv_r, h_tower', h_he_mat.trans h_he_ad, hv_ra, hv_rb⟩
+          rw [applyVia_envAt_none n ptable level op_b args_b T_b T_b_mat hm_b he_b]; exact h_ad_b
+      | some upEnv_a =>
+          obtain ⟨upEnv_b, he_b⟩ := envAt?_some_cross T_a_mat T_b_mat (level + 1) upEnv_a hcount_m he_a
+          have h_env_up : EnvVisβ upEnv_a upEnv_b T_a_mat.heap T_b_mat.heap :=
+            hvisβ_m (level + 1) upEnv_a upEnv_b he_a he_b
+          cases hba_a : upEnv_a.lookup "base-apply" with
+          | none =>
+              rw [applyVia_baseApply_none n ptable level op_a args_a T_a T_a_mat upEnv_a
+                hm_a he_a hba_a] at heval
+              have hba_b : upEnv_b.lookup "base-apply" = none := EnvVisβ_lookup_none h_env_up hba_a
+              obtain ⟨r_b, T_b', h_ad_b, h_vv_r, h_tower', h_he_ad, hv_ra, hv_rb⟩ :=
+                ih_ad ptable level op_a op_b args_a args_b T_a_mat T_b_mat r_a T_a' hresp_pt
+                  h_tower_mat hbr_mat hpop hpargs h_vv_op_m h_lvv_m hv_opa_m hv_opb_m hv_argsa_m hv_argsb_m heval
+              refine ⟨r_b, T_b', ?_, h_vv_r, h_tower', h_he_mat.trans h_he_ad, hv_ra, hv_rb⟩
+              rw [applyVia_baseApply_none n ptable level op_b args_b T_b T_b_mat upEnv_b hm_b he_b hba_b]
+              exact h_ad_b
+          | some idx_a =>
+              cases hcell_a : T_a_mat.heap[idx_a]? with
+              | none =>
+                  rw [applyVia_cell_none n ptable level op_a args_a T_a T_a_mat upEnv_a idx_a
+                    hm_a he_a hba_a hcell_a] at heval; simp at heval
+              | some baseApply_a =>
+                  obtain ⟨idx_b, baseApply_b, hba_b, hcell_b, h_vv_cell⟩ :=
+                    EnvVisβ_lookup_some h_env_up hba_a hcell_a
+                  by_cases hbuiltin : baseApply_a = .builtinBaseApply
+                  · subst hbuiltin
+                    rw [applyVia_builtin n ptable level op_a args_a T_a T_a_mat upEnv_a idx_a
+                      hm_a he_a hba_a hcell_a] at heval
+                    have hbb_b : baseApply_b = .builtinBaseApply :=
+                      (ValVisβ_builtinBaseApply_iff h_vv_cell).mp rfl
+                    rw [hbb_b] at hcell_b
+                    obtain ⟨r_b, T_b', h_ad_b, h_vv_r, h_tower', h_he_ad, hv_ra, hv_rb⟩ :=
+                      ih_ad ptable level op_a op_b args_a args_b T_a_mat T_b_mat r_a T_a' hresp_pt
+                        h_tower_mat hbr_mat hpop hpargs h_vv_op_m h_lvv_m hv_opa_m hv_opb_m hv_argsa_m hv_argsb_m heval
+                    refine ⟨r_b, T_b', ?_, h_vv_r, h_tower', h_he_mat.trans h_he_ad, hv_ra, hv_rb⟩
+                    rw [applyVia_builtin n ptable level op_b args_b T_b T_b_mat upEnv_b idx_b
+                      hm_b he_b hba_b hcell_b]
+                    exact h_ad_b
+                  · -- non-standard gate: vacuous under `BReady` (the b-side gate is `builtinBaseApply`)
+                    exfalso
+                    obtain ⟨upEnv', idx', henv', hlk', hcell'⟩ := hbr_mat.1.2 level hd
+                    rw [he_b, Option.some.injEq] at henv'; subst henv'
+                    rw [hba_b, Option.some.injEq] at hlk'; subst hlk'
+                    rw [hcell_b, Option.some.injEq] at hcell'
+                    exact hbuiltin ((ValVisβ_builtinBaseApply_iff h_vv_cell).mpr hcell')
+
 end LeanBlack
 
 
