@@ -27,9 +27,12 @@
   full **`materialize` cross-side β preservation** (`materialize_MatInvβ`, via
   `MatInvβ` + `materializeStep_MatInvβ`) proved — `materialize` carries the
   cross-side level relation, establishing it for each fresh level by the
-  linchpin and lifting old levels by `EnvVisβ_extends`. The reflective eval
-  cases (`.em`/`.set`/`applyVia`) consume `materialize_MatInvβ` +
-  `materialize_cross_side_some_iff` directly.
+  linchpin and lifting old levels by `EnvVisβ_extends`. Building on these, the
+  **first reflective eval case `.em` is proved** (`frameβ_em_eval`, §7f) on the
+  `WFCtxTβ`-based eval statement `FrameβEvalStmtW` — the metacircular level
+  shift, threading `materialize_MatInvβ` + `materialize_policiesEqβ` to build
+  `WFCtxTβ` at `level + 1` for the IH and rebuild it at `level` for the output.
+  Remaining reflective cases: `.set` and the gated `.app` (`applyVia`).
 -/
 import LeanBlack.LamBeta
 import LeanBlack.Frame
@@ -402,5 +405,217 @@ theorem materialize_MatInvβ {T_a T_b T_a' T_b' : TowerState} {n : Nat}
       have h_eq_k : n + 1 - T_a.levels.length = n + 1 - T_b.levels.length := by rw [h_count]
       rw [h_eq_k]
       exact materializeStep_iter_MatInvβ T_a T_b _ h
+
+/-! ## 7e. Cross-side policy preservation under β, and `BetaRel.em_inv`
+
+`materialize_cross_side_policies_eq` (`Tower.lean`) threads `heap_len_eq`; β
+breaks it. But policies are unaffected by β (new levels get `rejectAllPolicy`
+regardless of the heap), so the β version threads only `level_count_eq`. Plus
+the `.em` `BetaRel` inversion (β under `.em` stays an `.em`). -/
+
+/-- β under `.em` stays an `.em`, β-relating the body (the `lam_inv` family). -/
+theorem BetaRel.em_inv {body b : Expr} (h : BetaRel (.em body) b) :
+    ∃ body', b = .em body' ∧ BetaRel body body' := by
+  induction h with
+  | refl => exact ⟨body, rfl, .refl _⟩
+  | tail _ step ih =>
+      obtain ⟨body', rfl, hbody'⟩ := ih
+      obtain ⟨C, x, bb, v, hC, hbb⟩ := step
+      cases C with
+      | em C' =>
+          simp only [Ctx.plug, Expr.em.injEq] at hC
+          obtain rfl := hC
+          exact ⟨C'.plug (.letE x v bb), by rw [hbb]; simp [Ctx.plug],
+                 hbody'.tail ⟨C', x, bb, v, rfl, rfl⟩⟩
+      | _ => simp [Ctx.plug] at hC
+
+/-- One `materializeStep` preserves cross-side policy equality (β version:
+    `level_count_eq` instead of `level_envs_eq`). Mirror of the `private`
+    `materializeStep_cross_side_policies`. -/
+theorem materializeStep_policiesEqβ (T_a T_b : TowerState)
+    (h_count : T_a.levels.length = T_b.levels.length)
+    (h_pols : ∀ m, T_a.policyAt? m = T_b.policyAt? m) :
+    ∀ m, (materializeStep T_a).policyAt? m = (materializeStep T_b).policyAt? m := by
+  intro m
+  unfold materializeStep TowerState.policyAt? TowerState.levelAt?
+  by_cases h_in : m < T_a.levels.length
+  · rw [List.getElem?_append_left h_in, List.getElem?_append_left (h_count ▸ h_in)]
+    exact h_pols m
+  · by_cases h_eq : m = T_a.levels.length
+    · subst h_eq
+      rw [List.getElem?_append_right (Nat.le_refl _),
+          List.getElem?_append_right (h_count ▸ Nat.le_refl _)]
+      simp [h_count]
+    · rw [List.getElem?_eq_none (by simp [List.length_append]; omega),
+          List.getElem?_eq_none (by simp [List.length_append]; omega)]
+
+/-- Iterating `materializeStep` `k` times adds exactly `k` levels. -/
+theorem materializeStep_iter_levels_length (T : TowerState) (k : Nat) :
+    (Nat.fold k (fun _ _ T' => materializeStep T') T).levels.length = T.levels.length + k := by
+  induction k with
+  | zero => simp [Nat.fold]
+  | succ k ih => simp only [Nat.fold]; rw [materializeStep_levels_length, ih]; omega
+
+/-- Iterating `materializeStep` preserves cross-side policy equality. -/
+theorem materializeStep_iter_policiesEqβ (T_a T_b : TowerState) (k : Nat)
+    (h_count : T_a.levels.length = T_b.levels.length)
+    (h_pols : ∀ m, T_a.policyAt? m = T_b.policyAt? m) :
+    ∀ m, (Nat.fold k (fun _ _ T' => materializeStep T') T_a).policyAt? m =
+         (Nat.fold k (fun _ _ T' => materializeStep T') T_b).policyAt? m := by
+  induction k with
+  | zero => simpa [Nat.fold] using h_pols
+  | succ k ih =>
+      simp only [Nat.fold]
+      have h_count' : (Nat.fold k (fun _ _ T' => materializeStep T') T_a).levels.length =
+          (Nat.fold k (fun _ _ T' => materializeStep T') T_b).levels.length := by
+        rw [materializeStep_iter_levels_length, materializeStep_iter_levels_length, h_count]
+      exact materializeStep_policiesEqβ _ _ h_count' ih
+
+/-- Cross-side: parallel `materialize` results have equal `policyAt?` at all
+    indices (β version: needs `level_count_eq`, not `heap_len_eq`). -/
+theorem materialize_policiesEqβ {T_a T_b T_a' T_b' : TowerState} {n : Nat}
+    (h_count : T_a.levels.length = T_b.levels.length)
+    (h_pols : ∀ m, T_a.policyAt? m = T_b.policyAt? m)
+    (h_mat_a : T_a.materialize n = some T_a') (h_mat_b : T_b.materialize n = some T_b') :
+    ∀ m, T_a'.policyAt? m = T_b'.policyAt? m := by
+  unfold TowerState.materialize at h_mat_a h_mat_b
+  by_cases h1 : n ≥ Tower.maxDepth
+  · simp [h1] at h_mat_a
+  · simp [h1] at h_mat_a h_mat_b
+    by_cases h2 : T_a.levels.length > n
+    · have h2_b : T_b.levels.length > n := h_count ▸ h2
+      simp [h2] at h_mat_a; simp [h2_b] at h_mat_b
+      obtain rfl := h_mat_a.symm; obtain rfl := h_mat_b.symm; exact h_pols
+    · have h2_b : ¬ T_b.levels.length > n := h_count ▸ h2
+      simp [h2] at h_mat_a; simp [h2_b] at h_mat_b
+      obtain rfl := h_mat_a.symm; obtain rfl := h_mat_b.symm
+      have h_eq_k : n + 1 - T_a.levels.length = n + 1 - T_b.levels.length := by rw [h_count]
+      rw [h_eq_k]
+      exact materializeStep_iter_policiesEqβ T_a T_b _ h_count h_pols
+
+/-! ## 7f. The `.em` eval case under `WFCtxTβ` — the first reflective case
+
+`.em body` materializes `level + 1`, reads the up-env, and evaluates `body`
+there. The β simulation threads: both sides materialize (cross-side
+`some_iff`, reused), the up-envs are `EnvVisβ`-related and the level/policy
+structure is preserved (`materialize_MatInvβ` §7d + `materialize_policiesEqβ`
+§7e + `Frame`'s single-side preservation), giving `WFCtxTβ` at `level + 1` for
+the eval IH; the output `WFCtxTβ` at `level` is rebuilt from the body's output
+(level-structure fields are level-agnostic) plus lifting the ambient-env fields
+across the materialize+body `HeapEvolutionβ`. The β-port of `frame_tower`'s
+`.em` case (`Frame.lean:1669`), but far shorter — the heap-content level
+reconstruction is now packaged in `materialize_MatInvβ`. -/
+
+/-- A materialized level present on one side is present on the other (equal
+    level counts). -/
+theorem envAt?_some_cross (T_a T_b : TowerState) (n : Nat) (e : Env)
+    (h_count : T_a.levels.length = T_b.levels.length) (h : T_a.envAt? n = some e) :
+    ∃ e', T_b.envAt? n = some e' := by
+  unfold TowerState.envAt? TowerState.levelAt? at h ⊢
+  rw [Option.map_eq_some_iff] at h
+  obtain ⟨ls, hls, _⟩ := h
+  have hlt : n < T_b.levels.length := h_count ▸ (List.getElem?_eq_some_iff.mp hls).1
+  exact ⟨(T_b.levels[n]'hlt).env, by rw [List.getElem?_eq_getElem hlt]; rfl⟩
+
+/-- The eval clause over `WFCtxTβ` — the β-analog of `FrameStmtT`'s eval clause
+    with the full reflective context. The cases proved over `WFβ` in
+    `LamBeta.lean` (atoms / `.letE` / `.ifte` / `.seq`) re-thread over this
+    wrapper (`WFβ` is `WFCtxTβ` minus the level/policy fields, which those cases
+    preserve); this file proves the genuinely reflective `.em` case on it. -/
+def FrameβEvalStmtW (n : Nat) : Prop :=
+  ∀ (ptable : PolicyTable) (level : Nat) (exp_a exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState),
+    BetaRel exp_a exp_b →
+    PolicyTableRespectsBisimT ptable →
+    WFCtxTβ env_a env_b T_a T_b level →
+    eval n ptable level exp_a env_a T_a = some (r_a, T_a') →
+    ∃ r_b T_b',
+      eval n ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
+      WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧
+      ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap
+
+/-- **The `.em` case, on `FrameβEvalStmtW`.** Taking the eval IH, the reflective
+    level-shift is discharged: materialize cross-side, build `WFCtxTβ` at
+    `level + 1` (its level fields from §7d/§7e), run `body` by the IH, rebuild
+    the output `WFCtxTβ` at `level`. -/
+theorem frameβ_em_eval (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (body exp_b : Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_a : Val) (T_a' : TowerState)
+    (ih : FrameβEvalStmtW n)
+    (hresp_pt : PolicyTableRespectsBisimT ptable)
+    (hβ : BetaRel (.em body) exp_b)
+    (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (heval : eval (n + 1) ptable level (.em body) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
+      WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧
+      ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  obtain ⟨body', rfl, hβ_body⟩ := hβ.em_inv
+  simp only [eval] at heval
+  cases hm_a : T_a.materialize (level + 1) with
+  | none => simp [hm_a] at heval
+  | some T_a_mat =>
+      simp only [hm_a] at heval
+      cases he_a : T_a_mat.envAt? (level + 1) with
+      | none => simp [he_a] at heval
+      | some upEnv_a =>
+          simp only [he_a] at heval
+          -- b-side materializes (cross-side some-iff is heap/env-agnostic)
+          have hm_b_some : (T_b.materialize (level + 1)).isSome := by
+            cases h_some : T_b.materialize (level + 1) with
+            | none =>
+                rw [(T_a.materialize_cross_side_some_iff T_b _).mpr h_some] at hm_a; cases hm_a
+            | some _ => simp
+          obtain ⟨T_b_mat, hm_b⟩ := Option.isSome_iff_exists.mp hm_b_some
+          -- the materialized cross-side level invariant (§7d) + policies (§7e)
+          obtain ⟨hhm_a, hhm_b, hcount_m, hvalid_a_m, hvalid_b_m, hvisβ_m⟩ :=
+            materialize_MatInvβ ⟨h_ctx.hv_a, h_ctx.hv_b, h_ctx.level_count_eq,
+              h_ctx.level_envs_valid_a, h_ctx.level_envs_valid_b, h_ctx.level_envs_visβ⟩ hm_a hm_b
+          obtain ⟨upEnv_b, he_b⟩ := envAt?_some_cross T_a_mat T_b_mat (level + 1) upEnv_a hcount_m he_a
+          have hpolseq_m := materialize_policiesEqβ h_ctx.level_count_eq h_ctx.policies_eq hm_a hm_b
+          have hrespall_m := materialize_policies_resp_preserves T_a T_a_mat (level + 1)
+            PolicyRespectsBisimT hm_a h_ctx.policies_resp_all rejectAllPolicy_respects_bisimT
+          -- `WFCtxTβ` at level+1 for the body call
+          have h_ctx_up : WFCtxTβ upEnv_a upEnv_b T_a_mat T_b_mat (level + 1) :=
+            { policy_eq_at := hpolseq_m (level + 1)
+              hv_a := hhm_a, hv_b := hhm_b
+              ev_a := hvalid_a_m (level + 1) upEnv_a he_a
+              ev_b := hvalid_b_m (level + 1) upEnv_b he_b
+              policy_resp := fun p hp => hrespall_m (level + 1) p hp
+              env_visβ := hvisβ_m (level + 1) upEnv_a upEnv_b he_a he_b
+              level_envs_valid_a := hvalid_a_m, level_envs_valid_b := hvalid_b_m
+              level_count_eq := hcount_m
+              policies_eq := hpolseq_m
+              policies_resp_all := hrespall_m
+              level_envs_visβ := hvisβ_m }
+          -- run the body at level+1 by the eval IH
+          obtain ⟨r_b, T_b', h_eval_b, h_vv_r, h_ctx_out_up, h_he_body, hv_ra, hv_rb⟩ :=
+            ih ptable (level + 1) body body' upEnv_a upEnv_b T_a_mat T_b_mat r_a T_a'
+              hβ_body hresp_pt h_ctx_up heval
+          -- HeapEvolutionβ: materialize step, then the body
+          have h_he_chain : HeapEvolutionβ T_a T_b T_a' T_b' :=
+            (HeapEvolutionβ.from_heapExt h_ctx.hv_a h_ctx.hv_b
+              (T_a.materialize_heap_extends T_a_mat (level + 1) hm_a)
+              (T_b.materialize_heap_extends T_b_mat (level + 1) hm_b)).trans h_he_body
+          refine ⟨r_b, T_b', ?_, h_vv_r, ?_, h_he_chain, hv_ra, hv_rb⟩
+          · simp only [eval, hm_b, he_b]; exact h_eval_b
+          · -- rebuild `WFCtxTβ` at the caller's level
+            exact
+            { policy_eq_at := h_ctx_out_up.policies_eq level
+              hv_a := h_ctx_out_up.hv_a, hv_b := h_ctx_out_up.hv_b
+              ev_a := h_ctx.ev_a.length_mono h_he_chain.len_a
+              ev_b := h_ctx.ev_b.length_mono h_he_chain.len_b
+              policy_resp := fun p hp => h_ctx_out_up.policies_resp_all level p hp
+              env_visβ := h_he_chain.envVisβ_preserve env_a env_b h_ctx.ev_a h_ctx.ev_b h_ctx.env_visβ
+              level_envs_valid_a := h_ctx_out_up.level_envs_valid_a
+              level_envs_valid_b := h_ctx_out_up.level_envs_valid_b
+              level_count_eq := h_ctx_out_up.level_count_eq
+              policies_eq := h_ctx_out_up.policies_eq
+              policies_resp_all := h_ctx_out_up.policies_resp_all
+              level_envs_visβ := h_ctx_out_up.level_envs_visβ }
 
 end LeanBlack
