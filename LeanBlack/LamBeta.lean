@@ -203,6 +203,20 @@ theorem ValVisβ_relates_beta_closures :
   · have h1 := h 1
     simp [ValVis_aux_weak] at h1
 
+/-- **Closure formation respects the body relaxation.** Two closures with
+    the same params, `BetaRel`-related bodies, and `ValVisβ`-related
+    captured environments are `ValVisβ`-related. This is the relational
+    content of the `.lam` case — what lets β-related lambda bodies produce
+    related closures (the general lemma behind the concrete witness above). -/
+theorem ValVisβ_lam_closures (ps : List String) (body body' : Expr)
+    (env_a env_b : Env) (h_a h_b : Heap)
+    (hbody : BetaRel body body') (henv : EnvVisβ env_a env_b h_a h_b) :
+    ValVisβ (.closure ps body env_a) (.closure ps body' env_b) h_a h_b := by
+  intro n
+  cases n with
+  | zero => trivial
+  | succ n => rw [ValVisβ_aux_closure]; exact ⟨rfl, hbody, henv n⟩
+
 /-! ## 3. The fundamental lemma the `.lam` case needs (stated, not proved)
 
 `FrameStmtβ_eval n` is the β-analog of `Frame.FrameStmtT`'s `eval` clause.
@@ -233,5 +247,39 @@ def FrameStmtβ_eval (n : Nat) : Prop :=
       eval n ptable level exp_b env_b T_b = some (r_b, T_b') ∧
       ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
       EnvVisβ env_a env_b T_a'.heap T_b'.heap
+
+/-- **The scaffold discharges the `.lam` case of the fundamental lemma,
+    end-to-end and gate-free.** Evaluating `λps. body` against `env_a` and
+    its `BetaRel`-image against a `ValVisβ`-related `env_b` yields
+    `ValVisβ`-related closures, with the env relation preserved. No
+    `BuiltinReady` premise is needed — forming a closure applies nothing,
+    so the gate plays no role.
+
+    This is the function-*introduction* half of `FrameStmtβ_eval`, and it
+    is exactly the `.lam` carve-out the artifact left open, now closed at
+    the value-relation level. The residual open core is the *elimination*
+    side — `.app` / `applyVia`, where the closure is run and the gate
+    threading (route (b)) bites — together with the structural cases
+    (`.ifte` / `.letE` / `.seq` / `.set` / `.em` / `.primApp`), each a
+    `BetaRel`-inversion plus an IH thread. -/
+theorem frameβ_lam_case (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (ps : List String) (body exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState)
+    (hβ : BetaRel (.lam ps body) exp_b)
+    (henv : EnvVisβ env_a env_b T_a.heap T_b.heap)
+    (heval : eval (n + 1) ptable level (.lam ps body) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
+      EnvVisβ env_a env_b T_a'.heap T_b'.heap := by
+  rw [eval_lam_closure] at heval
+  injection heval with heval'
+  injection heval' with hr ht
+  subst hr; subst ht
+  obtain ⟨body', rfl, hbody⟩ := hβ.lam_inv
+  exact ⟨.closure ps body' env_b, T_b,
+         eval_lam_closure n ptable level ps body' env_b T_b,
+         ValVisβ_lam_closures ps body body' env_a env_b T_a.heap T_b.heap hbody henv,
+         henv⟩
 
 end LeanBlack
