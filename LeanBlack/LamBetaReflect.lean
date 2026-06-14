@@ -2524,6 +2524,59 @@ theorem frameβ_evalList_evalWP (n : Nat)
                       h_he_inner.trans h_he_inner2, ⟨hv_va', hv_vsa⟩, ⟨hv_vb', hv_vsb⟩⟩
               simp [evalList, h_eval_e_b, h_eval_rest_b]
 
+/-! ### 7p (cont.). Purity foundations for the `applyVia` / `applyDirect` clauses
+
+Those clauses run a closure's body via the eval IH, which needs `Pure body` + `BReady`
+at the *post-arg-binding* state. Two facts carry that: **`ValVisβ_pureVal`** transfers
+`PureVal` to the b-side (closure bodies via `BetaRel.pure_preserve`), and
+**`allocStep_foldl_pureHeap`** keeps `PureHeap` across the multi-arg `allocStep` binding
+(each step appends a pure arg value). -/
+
+/-- **`ValVisβ` transfers purity (forward).** A `ValVisβ`-related b-side value is pure
+    when the a-side is — ground values are equal, closure bodies are `BetaRel`-related
+    (`BetaRel.pure_preserve`). Carries `PureValList args_a` to the b-side args. -/
+theorem ValVisβ_pureVal : ∀ {a b : Val} {h_a h_b : Heap},
+    ValVisβ a b h_a h_b → PureVal a = true → PureVal b = true
+  | .num _, _, _, _, h, hpa => by rw [closedVal_ValVisβ_eq _ _ _ _ rfl h]; exact hpa
+  | .bool _, _, _, _, h, hpa => by rw [closedVal_ValVisβ_eq _ _ _ _ rfl h]; exact hpa
+  | .nilV, _, _, _, h, hpa => by rw [closedVal_ValVisβ_eq _ _ _ _ rfl h]; exact hpa
+  | .sym _, _, _, _, h, hpa => by rw [closedVal_ValVisβ_eq _ _ _ _ rfl h]; exact hpa
+  | .prim _, _, _, _, h, hpa => by rw [closedVal_ValVisβ_eq _ _ _ _ rfl h]; exact hpa
+  | .builtinBaseApply, _, _, _, h, hpa => by rw [closedVal_ValVisβ_eq _ _ _ _ rfl h]; exact hpa
+  | .cons x y, _, _, _, h, hpa => by
+      obtain ⟨xb, yb, rfl, hvx, hvy⟩ := ValVisβ_cons_inv h
+      simp only [PureVal, Bool.and_eq_true] at hpa ⊢
+      exact ⟨ValVisβ_pureVal hvx hpa.1, ValVisβ_pureVal hvy hpa.2⟩
+  | .closure ps body cenv, _, _, _, h, hpa => by
+      obtain ⟨body', cenv_b, rfl⟩ := ValVisβ_closure_inv h
+      obtain ⟨_, hβ_body, _⟩ := closure_ValVisβ_imp h
+      simp only [PureVal] at hpa ⊢
+      exact hβ_body.pure_preserve hpa
+
+/-- `PureValList` transfers across `ListValVisβ` (pointwise `ValVisβ_pureVal`). -/
+theorem ListValVisβ_pureValList : ∀ {as bs : List Val} {h_a h_b : Heap},
+    ListValVisβ as bs h_a h_b → PureValList as = true → PureValList bs = true
+  | [], [], _, _, _, _ => rfl
+  | _ :: _, _ :: _, _, _, ⟨hh, ht⟩, hpa => by
+      simp only [PureValList, Bool.and_eq_true] at hpa ⊢
+      exact ⟨ValVisβ_pureVal hh hpa.1, ListValVisβ_pureValList ht hpa.2⟩
+  | [], _ :: _, _, _, hv, _ => hv.elim
+  | _ :: _, [], _, _, hv, _ => hv.elim
+
+/-- `PureHeap` survives the multi-arg `allocStep` binding when every bound value is
+    pure (each step appends `vp.1` via `Heap.alloc`). -/
+theorem allocStep_foldl_pureHeap : ∀ (lst : List (Val × String)) (h : Heap) (cenv : Env),
+    PureHeap h → (∀ vp ∈ lst, PureVal vp.1 = true) →
+    PureHeap (lst.foldl allocStep (h, cenv)).1
+  | [], h, _, hh, _ => hh
+  | (v, p) :: tl, h, cenv, hh, hpure => by
+      have hv : PureVal v = true := hpure (v, p) (by simp)
+      have hh' : PureHeap (h ++ [v]) :=
+        PureHeap_append h [v] hh (fun w hw => by simp at hw; subst hw; exact hv)
+      have htl : ∀ vp ∈ tl, PureVal vp.1 = true := fun vp hvp => hpure vp (List.mem_cons_of_mem _ hvp)
+      have hrec := allocStep_foldl_pureHeap tl (h ++ [v]) (.cons p h.length cenv) hh' htl
+      simpa only [List.foldl_cons, allocStep, Heap.alloc] using hrec
+
 end LeanBlack
 
 
