@@ -2009,6 +2009,54 @@ theorem obsConv_refine_of_FL_rev {M N : Expr} (d : Nat) (hβ : BetaRel M N)
       (hβ.congr C) hpure hresp (WFCtxTβ.refl hh hev_env hlv hpr) hready hheap hev
   exact ⟨k, T_a', (ValVisβ_isGround_eq_right hg hvv) ▸ hev_a⟩
 
+/-! ## 7o₀. The all-levels standard-gate premise `BuiltinReadyAll` / `BReady`
+
+The d-window `BuiltinReadyN d` is the right premise for `contextual_beta_pure`
+(lam-free, no closures) but **not** for the fundamental lemma: a closure created at
+low em-depth can be *applied* arbitrarily deep — running its body below any syntactic
+`d`-bound (`applyDirect`'s closure case). So the FL carries the **all-levels** standard
+gate: a fully-materialized tower with builtin `base-apply` at every level. It is
+preserved with no depth bookkeeping — `≥ maxDepth` rides `StateExtends.levels_le`,
+gates ride `builtinBaseApplyAt_extends`, and `materialize` is a no-op (already full) so
+`.em` needs no decrement. `BReady` bundles it with `PureHeap` (the FL's b-side premise);
+`closed` / `alloc` mirror `BuiltinReadyP_closed` / `BuiltinReadyP_alloc`. -/
+
+/-- The standard gate at *every* level of a fully-materialized tower. -/
+def BuiltinReadyAll (T : TowerState) : Prop :=
+  Tower.maxDepth ≤ T.levels.length ∧ ∀ L, L + 1 < Tower.maxDepth → builtinBaseApplyAt L T
+
+/-- `BuiltinReadyAll` rides any state extension (`≥` via `levels_le`, gates via
+    `builtinBaseApplyAt_extends`). -/
+theorem BuiltinReadyAll.extends {T T' : TowerState}
+    (hAll : BuiltinReadyAll T) (h_ext : StateExtends T T') : BuiltinReadyAll T' :=
+  ⟨Nat.le_trans hAll.1 h_ext.levels_le,
+   fun L hL => builtinBaseApplyAt_extends h_ext (hAll.2 L hL)⟩
+
+/-- The FL's b-side premise: all-levels standard gate + pure heap. -/
+def BReady (T : TowerState) : Prop := BuiltinReadyAll T ∧ PureHeap T.heap
+
+/-- `BReady` is closed under evaluation of a pure expression (mirror of
+    `BuiltinReadyP_closed`). -/
+theorem BReady.closed {k : Nat} {ptable : PolicyTable} {level : Nat} {e : Expr}
+    {env : Env} {T : TowerState} {v : Val} {T' : TowerState}
+    (hBR : BReady T) (h_pe : Pure e = true)
+    (h_ev : eval k ptable level e env T = some (v, T')) : BReady T' := by
+  obtain ⟨hAll, h_heap⟩ := hBR
+  have h_ext := eval_pure_extends h_pe h_heap h_ev
+  exact ⟨hAll.extends h_ext, (((allPureIndep k).1 level e env T h_pe h_heap).2 ptable v T' h_ev).2⟩
+
+/-- `BReady` survives the `.letE` binding step (mirror of `BuiltinReadyP_alloc`). -/
+theorem BReady.alloc {k : Nat} {ptable : PolicyTable} {level : Nat} {e : Expr}
+    {env : Env} {T : TowerState} {v : Val} {T' : TowerState}
+    (hBR : BReady T) (h_pe : Pure e = true)
+    (h_ev : eval k ptable level e env T = some (v, T')) :
+    BReady { T' with heap := T'.heap ++ [v] } := by
+  obtain ⟨hAll, h_heap⟩ := hBR
+  have h_ext := eval_pure_extends h_pe h_heap h_ev
+  obtain ⟨h_pval, h_heap'⟩ := ((allPureIndep k).1 level e env T h_pe h_heap).2 ptable v T' h_ev
+  refine ⟨hAll.extends (h_ext.trans (StateExtends.of_heap_append T' [v])), ?_⟩
+  exact PureHeap_append _ _ h_heap' (fun w hw => by simp at hw; subst hw; exact h_pval)
+
 /-! ## 7o. The pure conditional eval statement (FL assembly — non-recursive cases)
 
 Assembling the forward fundamental lemma `hFL` (`obsConv_refine_of_FL`) means
