@@ -57,14 +57,15 @@
   purity) give `gate_redex_to_letE_anyfuel`, so the premise is exactly `DUMP_LAM` §0's
   standard-gate `BuiltinReady` + heap/operand purity — the same side conditions
   `contextual_beta_pure` carries. The **payoff bridge** is also built (§7n,
-  `obsConv_refine_of_FL`): the cross-side fundamental lemma ⟹ forward ground `ObsConv`
-  refinement in every context (`BetaRel.congr` lifts the relation into `C`,
-  `WFCtxTβ.refl` diagonalizes the cross-side FL onto the single-sided observation,
-  `ValVisβ_isGround_eq` collapses ground results to equality) — the forward half of the
-  conditional ground `CtxEquiv` that `CtxEquiv.under_lam` lifts through `.lam` for free.
-  **What remains**: the mechanical FL assembly (re-cut the mutual statement to carry the
-  `Pure` + `BuiltinReadyN` premise; `.set`/`.installPolicy` are vacuous under `Pure`), and
-  the backward observation direction (the operational `↔` companion to `gate_redex_to_letE`).
+  `obsConv_refine_of_FL` + `obsConv_refine_of_FL_rev`): the cross-side fundamental lemma
+  ⟹ ground `ObsConv` agreement (`↔`) in every context (`BetaRel.congr` lifts the relation
+  into `C`, `WFCtxTβ.refl` diagonalizes the cross-side FL onto the single-sided observation,
+  `ValVisβ_isGround_eq` / `_right` collapse ground results to equality) — **both directions**,
+  i.e. the full conditional ground `CtxEquiv` that `CtxEquiv.under_lam` lifts through `.lam`
+  for free. **What remains** is to discharge the two FL hypotheses: the mechanical FL assembly
+  (re-cut the mutual statement to carry the `Pure` + `BuiltinReadyN` premise — `.set` /
+  `.installPolicy` vacuous under `Pure`; `.app` root done) for the forward `hFL`, and the
+  reverse simulation for `hFL_rev` (its operational core is `gate_redex_to_letE`'s `↔`).
   (DUMP_LAM §4 has the plans.)
 -/
 import LeanBlack.LamBeta
@@ -1975,6 +1976,38 @@ theorem obsConv_refine_of_FL {M N : Expr} (d : Nat) (hβ : BetaRel M N)
     hFL k ptable level (C.plug M) (C.plug N) env env T T g T'
       (hβ.congr C) hpure hresp (WFCtxTβ.refl hh hev_env hlv hpr) hready hheap hev
   exact ⟨k, T_b', (ValVisβ_isGround_eq hg hvv) ▸ hev_b⟩
+
+/-- **FL_rev ⟹ backward ground-observational refinement (conditional).** The mirror
+    of `obsConv_refine_of_FL`: given the *reverse* eval fundamental lemma `hFL_rev`
+    (the reduced b-side's convergence ⟹ the a-side's), `N`'s ground convergences are
+    matched by `M`. Forward + backward give the conditional ground `CtxEquiv` `↔` — the
+    base relation `CtxEquiv.under_lam` lifts through `.lam` for free. The two FLs are
+    the remaining obligation; for the β redex/contractum they are the cross-side
+    simulation in each direction (`gate_redex_to_letE` gives the operational core). -/
+theorem obsConv_refine_of_FL_rev {M N : Expr} (d : Nat) (hβ : BetaRel M N)
+    (hFL_rev : ∀ (k : Nat) (pt : PolicyTable) (lvl : Nat) (ea eb : Expr)
+             (va vb : Env) (Sa Sb : TowerState) (rb : Val) (Sb' : TowerState),
+        BetaRel ea eb → Pure ea = true → PolicyTableRespectsBisimT pt →
+        WFCtxTβ va vb Sa Sb lvl →
+        BuiltinReadyN d pt lvl vb Sb → PureHeap Sb.heap →
+        eval k pt lvl eb vb Sb = some (rb, Sb') →
+        ∃ ra Sa', eval k pt lvl ea va Sa = some (ra, Sa') ∧
+          ValVisβ ra rb Sa'.heap Sb'.heap)
+    (C : Ctx) (ptable : PolicyTable) (level : Nat) (env : Env) (T : TowerState) (g : Val)
+    (hg : g.isGround = true)
+    (hresp : PolicyTableRespectsBisimT ptable)
+    (hpure : Pure (C.plug M) = true)
+    (hready : BuiltinReadyN d ptable level env T) (hheap : PureHeap T.heap)
+    (hh : HeapValid T.heap) (hev_env : EnvValid env T.heap)
+    (hlv : ∀ n e, T.envAt? n = some e → EnvValid e T.heap)
+    (hpr : ∀ n p, T.policyAt? n = some p → PolicyRespectsBisimT p)
+    (hobs : ObsConv (C.plug N) ptable level env T g) :
+    ObsConv (C.plug M) ptable level env T g := by
+  obtain ⟨k, T', hev⟩ := hobs
+  obtain ⟨r_a, T_a', hev_a, hvv⟩ :=
+    hFL_rev k ptable level (C.plug M) (C.plug N) env env T T g T'
+      (hβ.congr C) hpure hresp (WFCtxTβ.refl hh hev_env hlv hpr) hready hheap hev
+  exact ⟨k, T_a', (ValVisβ_isGround_eq_right hg hvv) ▸ hev_a⟩
 
 end LeanBlack
 

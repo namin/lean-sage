@@ -2231,6 +2231,21 @@ theorem ValVisβ_isGround_eq {v_a v_b : Val} {h_a h_b : Heap}
   | cons _ _ => simp [Val.isGround] at hg
   | closure _ _ _ => simp [Val.isGround] at hg
 
+/-- The right-hand companion: when the *second* (b-side) value is ground, the
+    `ValVisβ`-related a-side value equals it. Used by the *backward* observation
+    bridge (the contractum's ground convergence pins the redex's). -/
+theorem ValVisβ_isGround_eq_right {v_a v_b : Val} {h_a h_b : Heap}
+    (hg : v_b.isGround = true) (h : ValVisβ v_a v_b h_a h_b) : v_a = v_b := by
+  cases v_b with
+  | num b => have h1 := h 1; cases v_a <;> simp_all [ValVisβ_aux]
+  | bool c => have h1 := h 1; cases v_a <;> simp_all [ValVisβ_aux]
+  | nilV => simp [Val.isGround] at hg
+  | sym _ => simp [Val.isGround] at hg
+  | prim _ => simp [Val.isGround] at hg
+  | builtinBaseApply => simp [Val.isGround] at hg
+  | cons _ _ => simp [Val.isGround] at hg
+  | closure _ _ _ => simp [Val.isGround] at hg
+
 /-! ### `ValVisβ` / `EnvVisβ` reflexivity (on valid data)
 
 A value/env is `ValVisβ`/`EnvVisβ`-related *to itself* over a deeply-valid heap:
