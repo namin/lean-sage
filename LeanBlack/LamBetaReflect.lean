@@ -2383,6 +2383,81 @@ theorem frameβ_letE_evalWP (n : Nat) (ptable : PolicyTable) (level : Nat)
         policies_resp_all := h_ctx_body.policies_resp_all
         level_envs_visβ := h_ctx_body.level_envs_visβ }
 
+/-- `.em` on `FrameβEvalStmtWP` — **clean under `BReady`**: the full tower (both
+    sides, via `level_count_eq`) makes `materialize (level+1)` a *no-op*
+    (`T_mat = T`), so the body runs at `level+1` in the *same* towers, carrying
+    `BReady T_b` directly. No depth decrement and none of `frameβ_em_eval`'s
+    `materialize_MatInvβ` plumbing — the level-`(level+1)` `WFCtxTβ` is read straight
+    off the input's level fields, and rebuilt at `level` from the body output. -/
+theorem frameβ_em_evalWP (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (body exp_b : Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_a : Val) (T_a' : TowerState)
+    (ih : FrameβEvalStmtWP n) (hresp_pt : PolicyTableRespectsBisimT ptable)
+    (hβ : BetaRel (.em body) exp_b) (hpure : Pure (.em body) = true)
+    (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (hbr : BReady T_b)
+    (heval : eval (n + 1) ptable level (.em body) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b', eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  obtain ⟨body', rfl, hβ_body⟩ := hβ.em_inv
+  simp only [Pure] at hpure
+  simp only [eval] at heval
+  have hTb_full : Tower.maxDepth ≤ T_b.levels.length := hbr.1.1
+  have hTa_full : Tower.maxDepth ≤ T_a.levels.length := h_ctx.level_count_eq ▸ hTb_full
+  cases hm_a : T_a.materialize (level + 1) with
+  | none => simp [hm_a] at heval
+  | some T_a_mat =>
+      simp only [hm_a] at heval
+      have hd : level + 1 < Tower.maxDepth := by
+        unfold TowerState.materialize at hm_a
+        split at hm_a
+        · exact absurd hm_a (by simp)
+        · omega
+      have hTa_eq : T_a_mat = T_a := by
+        have hnoop := materialize_noop (show T_a.levels.length > level + 1 by omega) hd
+        rw [hnoop] at hm_a; exact (Option.some.inj hm_a).symm
+      subst T_a_mat
+      have hm_b : T_b.materialize (level + 1) = some T_b :=
+        materialize_noop (show T_b.levels.length > level + 1 by omega) hd
+      cases he_a : T_a.envAt? (level + 1) with
+      | none => simp [he_a] at heval
+      | some upEnv_a =>
+          simp only [he_a] at heval
+          obtain ⟨upEnv_b, he_b⟩ : ∃ e, T_b.envAt? (level + 1) = some e :=
+            envAt?_some_cross T_a T_b (level + 1) upEnv_a h_ctx.level_count_eq he_a
+          have h_ctx_up : WFCtxTβ upEnv_a upEnv_b T_a T_b (level + 1) :=
+            { policy_eq_at := h_ctx.policies_eq (level + 1)
+              hv_a := h_ctx.hv_a, hv_b := h_ctx.hv_b
+              ev_a := h_ctx.level_envs_valid_a (level + 1) upEnv_a he_a
+              ev_b := h_ctx.level_envs_valid_b (level + 1) upEnv_b he_b
+              policy_resp := fun p hp => h_ctx.policies_resp_all (level + 1) p hp
+              env_visβ := h_ctx.level_envs_visβ (level + 1) upEnv_a upEnv_b he_a he_b
+              level_envs_valid_a := h_ctx.level_envs_valid_a
+              level_envs_valid_b := h_ctx.level_envs_valid_b
+              level_count_eq := h_ctx.level_count_eq
+              policies_eq := h_ctx.policies_eq
+              policies_resp_all := h_ctx.policies_resp_all
+              level_envs_visβ := h_ctx.level_envs_visβ }
+          obtain ⟨r_b, T_b', h_eval_b, h_vv_r, h_ctx_out, h_he_body, hv_ra, hv_rb⟩ :=
+            ih ptable (level + 1) body body' upEnv_a upEnv_b T_a T_b r_a T_a'
+              hβ_body hpure hresp_pt h_ctx_up hbr heval
+          refine ⟨r_b, T_b', ?_, h_vv_r, ?_, h_he_body, hv_ra, hv_rb⟩
+          · simp only [eval, hm_b, he_b]; exact h_eval_b
+          · exact
+            { policy_eq_at := h_ctx_out.policies_eq level
+              hv_a := h_ctx_out.hv_a, hv_b := h_ctx_out.hv_b
+              ev_a := h_ctx.ev_a.length_mono h_he_body.len_a
+              ev_b := h_ctx.ev_b.length_mono h_he_body.len_b
+              policy_resp := fun p hp => h_ctx_out.policies_resp_all level p hp
+              env_visβ := h_he_body.envVisβ_preserve env_a env_b h_ctx.ev_a h_ctx.ev_b h_ctx.env_visβ
+              level_envs_valid_a := h_ctx_out.level_envs_valid_a
+              level_envs_valid_b := h_ctx_out.level_envs_valid_b
+              level_count_eq := h_ctx_out.level_count_eq
+              policies_eq := h_ctx_out.policies_eq
+              policies_resp_all := h_ctx_out.policies_resp_all
+              level_envs_visβ := h_ctx_out.level_envs_visβ }
+
 end LeanBlack
 
 
