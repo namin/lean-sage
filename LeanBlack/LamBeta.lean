@@ -33,6 +33,11 @@
     allocation, where `frame_tower` instead proves the two environments
     Lean-equal. Plus the `.ifte` / `.letE` `BetaRel` inversions.
     §5 records precisely what this closes and what stays open.
+  - §6: the faithful eval obligation (`HeapEvolutionβ`, `WFβ`,
+    `FrameβEvalStmt`) and the **first allocating case discharged** —
+    `frameβ_letE_eval`, a port of `frame_tower`'s `.letE` with
+    `EnvVisβ_alloc_cons` replacing the cons-env equality. The proof that
+    the §4 substrate composes into a real fundamental-lemma case.
 
   The weakening `ValVis_weak ⊆ ValVisβ` holds by the same structural
   induction as `Bisim.ValVis_aux_to_weak` with `BetaRel.refl` discharging
@@ -700,20 +705,26 @@ Quot.sound}).** The body-independent substrate the allocating cases need:
 * `BetaRel.ifte_inv` / `BetaRel.letE_inv` — two more structural inversions
   in the `lam_inv` family.
 
+§6 then assembles the eval obligation (`HeapEvolutionβ`, `WFβ`) and
+discharges the **first allocating case** (`.letE`, `frameβ_letE_eval`) on
+it — the proof that this substrate composes into a real fundamental-lemma
+case.
+
 **Still open (the genuine core, unchanged in shape).**
 
-1. *The statement wrapper.* A faithful `WFCtxTβ` (relax `WFCtxT.env_eq` to
-   `EnvVisβ`; drop `heap_len_eq`, which β breaks; relax the cross-side
-   level-env fields) and the full `FrameStmtβ` over it. §4's lemmas are the
-   reusable components; assembling the 13-field context invariant and
-   re-threading it through every case is mechanical but unbuilt here —
-   deliberately, since its level/policy fields entangle with the open
-   `.em` / `.app` cases below and a partial wrapper would misrepresent the
+1. *Upgrade `WFβ` to the full `WFCtxTβ`.* §6's `WFβ` carries the
+   load-bearing allocation invariants (`HeapValid` / `EnvValid`), enough
+   for the gate-free structural fragment. The full wrapper adds the
+   policy / materialized-level fields of `Frame.WFCtxT` — relax `env_eq`
+   to `EnvVisβ`, drop `heap_len_eq` (β breaks it), relax the cross-side
+   level-env fields — which only the reflective `.em` / `.set` and gated
+   `.app` read and preserve. Deferred deliberately, *with* those cases: a
+   wrapper carrying half-formed reflective fields would misstate the
    boundary.
-2. *The allocating eval cases* (`.letE` first). With §4 in hand these are
-   now "inversion + `EnvVisβ_alloc_cons` + `HeapEvolutionβ` chain"; the
-   missing piece is the `HeapEvolutionβ` carrier (a mechanical mirror) and
-   the wrapper of (1).
+2. *The remaining structural cases* `.ifte` / `.seq`. Same pattern as
+   `frameβ_letE_eval` (§6c): `BetaRel` inversion (`ifte_inv` exists;
+   `.seq` needs the list-shaped `seq_inv`) + IH thread; non-allocating at
+   the node, so lighter than `.letE`.
 3. *The elimination side* — `.app` / `applyVia`, the **gate threading**
    (route (b)). The `.app` `BetaRel` inversion is itself a disjunction
    (root contraction: the redex *is* an app), and the closure is *run*
@@ -723,5 +734,263 @@ Quot.sound}).** The body-independent substrate the allocating cases need:
    concrete Wand pair `(λx. x) 0` / `let x = 0 in x` under a binder, whose
    redex/contractum closures `ValVisβ_relates_beta_closures` (§2) already
    relates. -/
+
+/-! ## 6. The faithful eval obligation, and the first allocating case
+
+§4 supplies the statement-*independent* substrate. This section assembles
+the faithful obligation for the **eval** clause and discharges the first
+*allocating* case (`.letE`) on it — the milestone showing the substrate
+composes into a real fundamental-lemma case, which the §3 sketch could not.
+
+Three pieces: `HeapEvolutionβ` (the cross-side heap-evolution carrier),
+`WFβ` (the gate-free fragment's context invariant), and `frameβ_letE_eval`
+(the `.letE` inductive step, a faithful port of `frame_tower`'s `.letE`).
+
+`WFβ` carries the **load-bearing allocation invariants** the §3 sketch
+dropped — `HeapValid` / `EnvValid` on both sides — and nothing else. It is
+deliberately *not* the full `WFCtxTβ`: the policy / materialized-level
+fields of `Frame.WFCtxT` are read and preserved only by the reflective
+`.em` / `.set` and the gated `.app`, so they belong with those (open)
+cases; bundling half-formed versions now would misstate the boundary. For
+the gate-free structural fragment (`.letE` / `.ifte` / `.seq`), `WFβ` +
+`EnvVisβ` + `HeapEvolutionβ` + `ValValid` is exactly the faithful invariant
+set (`ValValid` / `HeapValid` / `EnvValid` are body-agnostic, reused
+verbatim). -/
+
+/-! ### 6a. `HeapEvolutionβ` — cross-side heap-evolution carrier
+
+Mirror of `Bisim.HeapEvolution` with `EnvVisβ_aux` / `ValVisβ_aux` in the
+preservation clauses and the `env_a = env_b` precondition **dropped** (β
+relates *different* envs). `from_heapExt` reduces to §4's extension
+lemmas. -/
+
+structure HeapEvolutionβ (s_a s_b s_a' s_b' : TowerState) : Prop where
+  len_a : s_a.heap.length ≤ s_a'.heap.length
+  len_b : s_b.heap.length ≤ s_b'.heap.length
+  env_preserve : ∀ (n : Nat) (env_a env_b : Env),
+    EnvValid env_a s_a.heap → EnvValid env_b s_b.heap →
+    EnvVisβ_aux n env_a env_b s_a.heap s_b.heap →
+    EnvVisβ_aux n env_a env_b s_a'.heap s_b'.heap
+  val_preserve : ∀ (n : Nat) (v_a v_b : Val),
+    ValValid v_a s_a.heap → ValValid v_b s_b.heap →
+    ValVisβ_aux n v_a v_b s_a.heap s_b.heap →
+    ValVisβ_aux n v_a v_b s_a'.heap s_b'.heap
+
+theorem HeapEvolutionβ.refl (s_a s_b : TowerState) :
+    HeapEvolutionβ s_a s_b s_a s_b :=
+  ⟨Nat.le_refl _, Nat.le_refl _,
+   fun _ _ _ _ _ h => h, fun _ _ _ _ _ h => h⟩
+
+theorem HeapEvolutionβ.trans {s_a s_b s_a' s_b' s_a'' s_b'' : TowerState}
+    (h1 : HeapEvolutionβ s_a s_b s_a' s_b')
+    (h2 : HeapEvolutionβ s_a' s_b' s_a'' s_b'') :
+    HeapEvolutionβ s_a s_b s_a'' s_b'' := by
+  refine ⟨Nat.le_trans h1.len_a h2.len_a, Nat.le_trans h1.len_b h2.len_b, ?_, ?_⟩
+  · intro n env_a env_b hv_a hv_b h_vis
+    have h_vis' := h1.env_preserve n env_a env_b hv_a hv_b h_vis
+    exact h2.env_preserve n env_a env_b
+      (hv_a.length_mono h1.len_a) (hv_b.length_mono h1.len_b) h_vis'
+  · intro n v_a v_b hv_a hv_b h_vis
+    have h_vis' := h1.val_preserve n v_a v_b hv_a hv_b h_vis
+    exact h2.val_preserve n v_a v_b
+      (ValValid.length_mono v_a hv_a h1.len_a) (ValValid.length_mono v_b hv_b h1.len_b) h_vis'
+
+theorem HeapEvolutionβ.from_heapExt {s_a s_b s_a' s_b' : TowerState}
+    (hh_a : HeapValid s_a.heap) (hh_b : HeapValid s_b.heap)
+    (he_a : HeapExt s_a s_a') (he_b : HeapExt s_b s_b') :
+    HeapEvolutionβ s_a s_b s_a' s_b' := by
+  obtain ⟨ext_a, hex_a⟩ := he_a
+  obtain ⟨ext_b, hex_b⟩ := he_b
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · rw [hex_a, List.length_append]; exact Nat.le_add_right _ _
+  · rw [hex_b, List.length_append]; exact Nat.le_add_right _ _
+  · intro n env_a env_b hv_a hv_b h_vis
+    rw [hex_a, hex_b]
+    exact EnvVisβ_aux_extends n env_a env_b s_a.heap s_b.heap ext_a ext_b
+      hh_a hh_b hv_a hv_b h_vis
+  · intro n v_a v_b hv_a hv_b h_vis
+    rw [hex_a, hex_b]
+    exact ValVisβ_aux_extends n v_a v_b s_a.heap s_b.heap ext_a ext_b
+      hh_a hh_b hv_a hv_b h_vis
+
+/-- Lift a universal-depth `ValVisβ` across `HeapEvolutionβ`. -/
+theorem HeapEvolutionβ.valVisβ_preserve {s_a s_b s_a' s_b' : TowerState}
+    (h : HeapEvolutionβ s_a s_b s_a' s_b') (v_a v_b : Val)
+    (hv_a : ValValid v_a s_a.heap) (hv_b : ValValid v_b s_b.heap)
+    (h_vis : ValVisβ v_a v_b s_a.heap s_b.heap) :
+    ValVisβ v_a v_b s_a'.heap s_b'.heap :=
+  fun n => h.val_preserve n v_a v_b hv_a hv_b (h_vis n)
+
+/-- Lift a universal-depth `EnvVisβ` across `HeapEvolutionβ`. -/
+theorem HeapEvolutionβ.envVisβ_preserve {s_a s_b s_a' s_b' : TowerState}
+    (h : HeapEvolutionβ s_a s_b s_a' s_b') (env_a env_b : Env)
+    (hv_a : EnvValid env_a s_a.heap) (hv_b : EnvValid env_b s_b.heap)
+    (h_vis : EnvVisβ env_a env_b s_a.heap s_b.heap) :
+    EnvVisβ env_a env_b s_a'.heap s_b'.heap :=
+  fun n => h.env_preserve n env_a env_b hv_a hv_b (h_vis n)
+
+/-! ### 6b. `WFβ` and the faithful eval obligation
+
+`WFβ` is the gate-free fragment's context invariant: the four **body-
+agnostic** single-side validity facts (`HeapValid` / `EnvValid` on each
+side) that allocation threading consumes, taken verbatim from `WFCtxT`.
+`FrameβEvalStmt n` is the β-analog of `Frame.FrameStmtT`'s eval clause
+(`Frame.lean:899`) — `ValVis ↦ ValVisβ`, `EnvVis ↦ EnvVisβ`,
+`WFCtxT ↦ WFβ`, `HeapEvolution ↦ HeapEvolutionβ`, the shared `exp`
+replaced by a `BetaRel` pair, and the *full* output invariant set kept
+(unlike the §3 sketch). The gate premises (`PolicyTableRespectsBisimT`,
+`BuiltinReady`) that the full statement needs for `.app` are absent here:
+the structural fragment never applies, so the gate plays no role. -/
+
+structure WFβ (env_a env_b : Env) (T_a T_b : TowerState) : Prop where
+  hv_a : HeapValid T_a.heap
+  hv_b : HeapValid T_b.heap
+  ev_a : EnvValid env_a T_a.heap
+  ev_b : EnvValid env_b T_b.heap
+
+def FrameβEvalStmt (n : Nat) : Prop :=
+  ∀ (ptable : PolicyTable) (level : Nat) (exp_a exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState),
+    BetaRel exp_a exp_b →
+    WFβ env_a env_b T_a T_b →
+    EnvVisβ env_a env_b T_a.heap T_b.heap →
+    eval n ptable level exp_a env_a T_a = some (r_a, T_a') →
+    ∃ r_b T_b',
+      eval n ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
+      WFβ env_a env_b T_a' T_b' ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧
+      EnvVisβ env_a env_b T_a'.heap T_b'.heap ∧
+      ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap
+
+/-! ### 6c. The `.letE` case — first allocating case, faithfully
+
+The inductive step for `.letE`, taking the eval-clause IH as hypothesis
+(`ih : FrameβEvalStmt n`), exactly as the `frame_tower` mutual induction
+consumes its own `ih_eval`. The port mirrors `Frame.lean:1895`, with two
+substitutions carrying all the β-content:
+
+* where `frame_tower` proves the two cons-extended environments **equal**
+  (`h_cons_eq`, from `env_eq` + `heap_len_eq`), this uses
+  `EnvVisβ_alloc_cons` to prove them **`EnvVisβ`-related** — and never
+  needs `heap_len_eq` (the fresh indices `T_a_inner.heap.length` /
+  `T_b_inner.heap.length` are free to differ);
+* `HeapEvolution` ↦ `HeapEvolutionβ`, `ValVis_extends` ↦ `ValVisβ` via
+  `EnvVisβ_alloc_cons`.
+
+The `HeapValid` / `EnvValid` plumbing for the allocated heaps is
+body-agnostic and identical to `frame_tower`'s. -/
+theorem frameβ_letE_eval (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (x : String) (e1 body exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState)
+    (ih : FrameβEvalStmt n)
+    (hβ : BetaRel (.letE x e1 body) exp_b)
+    (hwf : WFβ env_a env_b T_a T_b)
+    (henv : EnvVisβ env_a env_b T_a.heap T_b.heap)
+    (heval : eval (n + 1) ptable level (.letE x e1 body) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
+      WFβ env_a env_b T_a' T_b' ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧
+      EnvVisβ env_a env_b T_a'.heap T_b'.heap ∧
+      ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  obtain ⟨e1', body', rfl, hβ_e, hβ_body⟩ := hβ.letE_inv
+  simp only [eval] at heval
+  cases he : eval n ptable level e1 env_a T_a with
+  | none => rw [he] at heval; simp at heval
+  | some pr =>
+    obtain ⟨v_a, T_a_inner⟩ := pr
+    rw [he] at heval
+    obtain ⟨v_b, T_b_inner, h_eval_e_b, h_vv_v, hwf_inner, h_he_inner,
+            h_env_inner, hv_va, hv_vb⟩ :=
+      ih ptable level e1 e1' env_a env_b T_a T_b v_a T_a_inner hβ_e hwf henv he
+    simp only [TowerState.alloc, Heap.alloc] at heval
+    have h_lookup_a : (T_a_inner.heap ++ [v_a])[T_a_inner.heap.length]? = some v_a := by
+      rw [List.getElem?_append_right (Nat.le_refl _)]; simp
+    have h_lookup_b : (T_b_inner.heap ++ [v_b])[T_b_inner.heap.length]? = some v_b := by
+      rw [List.getElem?_append_right (Nat.le_refl _)]; simp
+    -- alloc heaps stay `HeapValid` (body-agnostic; verbatim from frame_tower)
+    have hh_a_alloc : HeapValid (T_a_inner.heap ++ [v_a]) := by
+      intro i v hp
+      by_cases h_lt : i < T_a_inner.heap.length
+      · have hp_old : T_a_inner.heap[i]? = some v := by
+          have heq := getElem?_prefix T_a_inner.heap [v_a] i h_lt
+          rw [← heq]; exact hp
+        exact ValValid.heap_extends v (hwf_inner.hv_a i v hp_old) ⟨[v_a], rfl⟩
+      · have h_eq : i = T_a_inner.heap.length := by
+          have h_le : i < (T_a_inner.heap ++ [v_a]).length := by
+            rw [List.getElem?_eq_some_iff] at hp; obtain ⟨h, _⟩ := hp; exact h
+          simp [List.length_append] at h_le; omega
+        subst h_eq
+        rw [h_lookup_a] at hp; simp only [Option.some.injEq] at hp; subst hp
+        exact ValValid.heap_extends v_a hv_va ⟨[v_a], rfl⟩
+    have hh_b_alloc : HeapValid (T_b_inner.heap ++ [v_b]) := by
+      intro i v hp
+      by_cases h_lt : i < T_b_inner.heap.length
+      · have hp_old : T_b_inner.heap[i]? = some v := by
+          have heq := getElem?_prefix T_b_inner.heap [v_b] i h_lt
+          rw [← heq]; exact hp
+        exact ValValid.heap_extends v (hwf_inner.hv_b i v hp_old) ⟨[v_b], rfl⟩
+      · have h_eq : i = T_b_inner.heap.length := by
+          have h_le : i < (T_b_inner.heap ++ [v_b]).length := by
+            rw [List.getElem?_eq_some_iff] at hp; obtain ⟨h, _⟩ := hp; exact h
+          simp [List.length_append] at h_le; omega
+        subst h_eq
+        rw [h_lookup_b] at hp; simp only [Option.some.injEq] at hp; subst hp
+        exact ValValid.heap_extends v_b hv_vb ⟨[v_b], rfl⟩
+    -- cons-extended envs stay `EnvValid` (body-agnostic; verbatim)
+    have hev_a' : EnvValid (.cons x T_a_inner.heap.length env_a) (T_a_inner.heap ++ [v_a]) := by
+      intro name i hl
+      simp only [List.length_append, List.length_singleton]
+      simp only [Env.lookup] at hl
+      by_cases h_eq : x = name
+      · subst h_eq; simp only [beq_self_eq_true, ↓reduceIte, Option.some.injEq] at hl; omega
+      · have h_neq : (x == name) = false := by rw [beq_eq_false_iff_ne]; exact h_eq
+        simp only [h_neq, Bool.false_eq_true, ↓reduceIte] at hl
+        have := hwf_inner.ev_a name i hl; omega
+    have hev_b' : EnvValid (.cons x T_b_inner.heap.length env_b) (T_b_inner.heap ++ [v_b]) := by
+      intro name i hl
+      simp only [List.length_append, List.length_singleton]
+      simp only [Env.lookup] at hl
+      by_cases h_eq : x = name
+      · subst h_eq; simp only [beq_self_eq_true, ↓reduceIte, Option.some.injEq] at hl; omega
+      · have h_neq : (x == name) = false := by rw [beq_eq_false_iff_ne]; exact h_eq
+        simp only [h_neq, Bool.false_eq_true, ↓reduceIte] at hl
+        have := hwf_inner.ev_b name i hl; omega
+    -- WFβ for the body call, and the key §4b env-threading step
+    have hwf_alloc : WFβ (.cons x T_a_inner.heap.length env_a)
+        (.cons x T_b_inner.heap.length env_b)
+        { T_a_inner with heap := T_a_inner.heap ++ [v_a] }
+        { T_b_inner with heap := T_b_inner.heap ++ [v_b] } :=
+      ⟨hh_a_alloc, hh_b_alloc, hev_a', hev_b'⟩
+    have h_env' : EnvVisβ (.cons x T_a_inner.heap.length env_a)
+        (.cons x T_b_inner.heap.length env_b)
+        (T_a_inner.heap ++ [v_a]) (T_b_inner.heap ++ [v_b]) :=
+      EnvVisβ_alloc_cons x env_a env_b v_a v_b T_a_inner.heap T_b_inner.heap
+        hwf_inner.hv_a hwf_inner.hv_b hwf_inner.ev_a hwf_inner.ev_b
+        hv_va hv_vb h_vv_v h_env_inner
+    -- IH on body
+    obtain ⟨r_b, T_b', h_eval_b_b, h_vv_r, hwf_body, h_he_body, _h_env_body, hv_ra, hv_rb⟩ :=
+      ih ptable level body body'
+        (.cons x T_a_inner.heap.length env_a) (.cons x T_b_inner.heap.length env_b)
+        { T_a_inner with heap := T_a_inner.heap ++ [v_a] }
+        { T_b_inner with heap := T_b_inner.heap ++ [v_b] } r_a T_a'
+        hβ_body hwf_alloc h_env' heval
+    -- chain the heap evolutions and assemble the outputs
+    have h_he_alloc : HeapEvolutionβ T_a_inner T_b_inner
+        { T_a_inner with heap := T_a_inner.heap ++ [v_a] }
+        { T_b_inner with heap := T_b_inner.heap ++ [v_b] } :=
+      HeapEvolutionβ.from_heapExt hwf_inner.hv_a hwf_inner.hv_b ⟨[v_a], rfl⟩ ⟨[v_b], rfl⟩
+    have h_he_chain : HeapEvolutionβ T_a T_b T_a' T_b' :=
+      h_he_inner.trans (h_he_alloc.trans h_he_body)
+    have hwf_out : WFβ env_a env_b T_a' T_b' :=
+      ⟨hwf_body.hv_a, hwf_body.hv_b,
+       hwf.ev_a.length_mono h_he_chain.len_a, hwf.ev_b.length_mono h_he_chain.len_b⟩
+    have h_env_out : EnvVisβ env_a env_b T_a'.heap T_b'.heap :=
+      h_he_chain.envVisβ_preserve env_a env_b hwf.ev_a hwf.ev_b henv
+    refine ⟨r_b, T_b', ?_, h_vv_r, hwf_out, h_he_chain, h_env_out, hv_ra, hv_rb⟩
+    simp only [eval, h_eval_e_b, TowerState.alloc, Heap.alloc]
+    exact h_eval_b_b
 
 end LeanBlack
