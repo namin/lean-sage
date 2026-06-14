@@ -2009,6 +2009,118 @@ theorem obsConv_refine_of_FL_rev {M N : Expr} (d : Nat) (hβ : BetaRel M N)
       (hβ.congr C) hpure hresp (WFCtxTβ.refl hh hev_env hlv hpr) hready hheap hev
   exact ⟨k, T_a', (ValVisβ_isGround_eq_right hg hvv) ▸ hev_a⟩
 
+/-! ## 7o. The pure conditional eval statement (FL assembly — non-recursive cases)
+
+Assembling the forward fundamental lemma `hFL` (`obsConv_refine_of_FL`) means
+re-cutting the mutual statement to carry the premise the `.app` root case needs:
+`Pure exp_a` + the b-side standard gate (`BuiltinReadyN d`) + `PureHeap`. Under
+`Pure exp_a` the hard `.set` / `.installPolicy` cases are **vacuous**
+(`Pure (.set _ _) = Pure (.installPolicy _) = false`), and the non-recursive cases
+forward verbatim to the premise-free `frameβ_*_caseW` lemmas (the added premises are
+unused — same conclusion). This is the first slice; the recursive cases
+(`.ifte`/`.seq`/`.letE`/`.em`) and `.app` re-cut (threading the premise to the IH via
+`BuiltinReadyN_extends` / `BetaRel.pure_preserve`) follow. -/
+
+/-- The eval clause carrying the conditional premise (`Pure exp_a` + b-side
+    `BuiltinReadyN d` + `PureHeap`). Conclusion identical to `FrameβEvalStmtW`. -/
+def FrameβEvalStmtWP (d : Nat) (n : Nat) : Prop :=
+  ∀ (ptable : PolicyTable) (level : Nat) (exp_a exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState),
+    BetaRel exp_a exp_b →
+    Pure exp_a = true →
+    PolicyTableRespectsBisimT ptable →
+    WFCtxTβ env_a env_b T_a T_b level →
+    BuiltinReadyN d ptable level env_b T_b →
+    PureHeap T_b.heap →
+    eval n ptable level exp_a env_a T_a = some (r_a, T_a') →
+    ∃ r_b T_b',
+      eval n ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
+      WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧
+      ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap
+
+section
+variable (d n : Nat) (ptable : PolicyTable) (level : Nat) (exp_b : Expr)
+  (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState)
+  (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+include h_ctx
+
+/-- `.num` on `FrameβEvalStmtWP` — forwards to `frameβ_num_caseW` (premise unused). -/
+theorem frameβ_num_caseWP (i : Int)
+    (hβ : BetaRel (.num i) exp_b) (_hpure : Pure (.num i) = true)
+    (_hready : BuiltinReadyN d ptable level env_b T_b) (_hheap : PureHeap T_b.heap)
+    (heval : eval (n + 1) ptable level (.num i) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b', eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap :=
+  frameβ_num_caseW n ptable level i exp_b env_a env_b T_a T_b r_a T_a' hβ h_ctx heval
+
+/-- `.bool` on `FrameβEvalStmtWP` — forwards to `frameβ_bool_caseW`. -/
+theorem frameβ_bool_caseWP (c : Bool)
+    (hβ : BetaRel (.bool c) exp_b) (_hpure : Pure (.bool c) = true)
+    (_hready : BuiltinReadyN d ptable level env_b T_b) (_hheap : PureHeap T_b.heap)
+    (heval : eval (n + 1) ptable level (.bool c) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b', eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap :=
+  frameβ_bool_caseW n ptable level c exp_b env_a env_b T_a T_b r_a T_a' hβ h_ctx heval
+
+/-- `.var` on `FrameβEvalStmtWP` — forwards to `frameβ_var_caseW`. -/
+theorem frameβ_var_caseWP (y : String)
+    (hβ : BetaRel (.var y) exp_b) (_hpure : Pure (.var y) = true)
+    (_hready : BuiltinReadyN d ptable level env_b T_b) (_hheap : PureHeap T_b.heap)
+    (heval : eval (n + 1) ptable level (.var y) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b', eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap :=
+  frameβ_var_caseW n ptable level y exp_b env_a env_b T_a T_b r_a T_a' hβ h_ctx heval
+
+/-- `.lam` on `FrameβEvalStmtWP` — forwards to `frameβ_lam_caseW`. -/
+theorem frameβ_lam_caseWP (ps : List String) (body : Expr)
+    (hβ : BetaRel (.lam ps body) exp_b) (_hpure : Pure (.lam ps body) = true)
+    (_hready : BuiltinReadyN d ptable level env_b T_b) (_hheap : PureHeap T_b.heap)
+    (heval : eval (n + 1) ptable level (.lam ps body) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b', eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap :=
+  frameβ_lam_caseW n ptable level ps body exp_b env_a env_b T_a T_b r_a T_a' hβ h_ctx heval
+
+/-- `.quote` on `FrameβEvalStmtWP` — forwards to `frameβ_quote_caseW`. -/
+theorem frameβ_quote_caseWP (v : Val)
+    (hβ : BetaRel (.quote v) exp_b) (_hpure : Pure (.quote v) = true)
+    (_hready : BuiltinReadyN d ptable level env_b T_b) (_hheap : PureHeap T_b.heap)
+    (heval : eval (n + 1) ptable level (.quote v) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b', eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap :=
+  frameβ_quote_caseW n ptable level v exp_b env_a env_b T_a T_b r_a T_a' hβ h_ctx heval
+
+omit h_ctx in
+/-- **`.set` is vacuous under `Pure`** — `Pure (.set _ _) = false`. The pure
+    restriction dissolves the hard cross-side meta-mutation case. -/
+theorem frameβ_set_caseWP (x : String) (e : Expr)
+    (_hβ : BetaRel (.set x e) exp_b) (hpure : Pure (.set x e) = true)
+    (_hready : BuiltinReadyN d ptable level env_b T_b) (_hheap : PureHeap T_b.heap)
+    (_heval : eval (n + 1) ptable level (.set x e) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b', eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  simp [Pure] at hpure
+
+omit h_ctx in
+/-- **`.installPolicy` is vacuous under `Pure`** — `Pure (.installPolicy _) = false`. -/
+theorem frameβ_installPolicy_caseWP (idx : Nat)
+    (_hβ : BetaRel (.installPolicy idx) exp_b) (hpure : Pure (.installPolicy idx) = true)
+    (_hready : BuiltinReadyN d ptable level env_b T_b) (_hheap : PureHeap T_b.heap)
+    (_heval : eval (n + 1) ptable level (.installPolicy idx) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b', eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  simp [Pure] at hpure
+
+end
+
 end LeanBlack
 
 
