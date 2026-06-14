@@ -26,6 +26,13 @@
     code) under the **standard-gate** condition (`BuiltinReady`) that
     distinguishes it from `frame_tower`. Proving `∀ n, FrameStmtβ_eval n`
     is the open core (routes (a) closure-relation + (b) gate threading).
+  - §4: the heap-extension substrate for the allocating cases —
+    `ValVisβ_extends` / `EnvVisβ_extends` (faithful ports of `Bisim`'s
+    `_weak` extension lemmas) and, the genuine new relational content,
+    `EnvVisβ_alloc_cons`: threading `EnvVisβ` across a *cross-side*
+    allocation, where `frame_tower` instead proves the two environments
+    Lean-equal. Plus the `.ifte` / `.letE` `BetaRel` inversions.
+    §5 records precisely what this closes and what stays open.
 
   The weakening `ValVis_weak ⊆ ValVisβ` holds by the same structural
   induction as `Bisim.ValVis_aux_to_weak` with `BetaRel.refl` discharging
@@ -354,6 +361,367 @@ through `applyVia` (the gate — route (b)). So the faithful obligation is
 `Frame.FrameStmtT` with `ValVis ↦ ValVisβ` and the shared expression
 replaced by a `BetaRel` pair, the *full* invariant set intact; proving it
 (by the same fuel induction, now with `BetaRel` inversions at each case)
-is the open core. -/
+is the open core.
+
+§4 below builds the part of that substrate that is *independent of the
+statement wrapper*: the β heap-extension lemmas and — the genuine new
+content — the cross-side allocation lemma `EnvVisβ_alloc_cons` that the
+binder needs once the heaps diverge. §4c adds the structural `BetaRel`
+inversions the fuel induction consumes case-by-case. -/
+
+/-! ## 4. Faithful β-infrastructure for the *allocating* cases
+
+The §3 scaffold discharges the non-allocating cases against a *sketch*
+of `FrameStmtβ_eval` that drops `HeapEvolution` / `ValValid`. The
+allocating cases (`.letE`, `.app`) cannot be threaded on that sketch:
+binding a value extends the heap, and lifting `ValVisβ` / `EnvVisβ`
+across that extension needs the heap-validity invariants. This section
+builds the heap-extension substrate for the β-relation and the one
+genuinely *new* relational lemma the binder needs.
+
+`ValValid` / `HeapValid` / `EnvValid` (`Bisim.lean`) are **body-agnostic**
+— a closure's validity is `EnvValid` of its captured env, never a
+predicate on the body — so they transfer to the β-setting *verbatim*.
+No β-analog is needed; they are reused unchanged below. Only the
+*cross-side* relations (`ValVis`/`EnvVis`, which embed the closure-body
+relation) need the `BetaRel` relaxation, already supplied by `ValVisβ`
+/ `EnvVisβ` in §2.
+
+**The point of divergence from `frame_tower`.** Its `.letE` case
+(`Frame.lean`) proves the two cons-extended environments **Lean-equal**,
+from `WFCtxT.env_eq` (same env both sides) and `heap_len_eq` (same fresh
+index). For β *both premises fail*: the two sides run different code, and
+the redex `(λx.e) v` allocates through the closure-apply while the
+contractum `let x = v in e` allocates one cell — *different cell counts*,
+so the fresh indices differ. `EnvVisβ_alloc_cons` (§4b) replaces that
+equality with `EnvVisβ`-relatedness — the relational content the
+different-program (CakeML-style) simulation needs at the binder, and the
+step the §3 sketch could not perform. -/
+
+/-! ### 4a. `ValVisβ` / `EnvVisβ` preserved under heap extension
+
+Verbatim ports of `Bisim.ValVis_aux_weak_extends` /
+`EnvVis_aux_weak_extends`: the closure-body clause (there `=`, here
+`BetaRel`) is heap-independent, so it rides through every case
+untouched — the proofs differ from the `_weak` originals only in the
+two relation names. -/
+
+mutual
+
+theorem ValVisβ_aux_extends : ∀ (n : Nat) (v_a v_b : Val)
+    (h_a h_b ext_a ext_b : Heap),
+    HeapValid h_a → HeapValid h_b →
+    ValValid v_a h_a → ValValid v_b h_b →
+    ValVisβ_aux n v_a v_b h_a h_b →
+    ValVisβ_aux n v_a v_b (h_a ++ ext_a) (h_b ++ ext_b)
+  | 0, _, _, _, _, _, _, _, _, _, _, _ => trivial
+  | _ + 1, .num _,            .num _,            _, _, _, _, _, _, _, _, h => h
+  | _ + 1, .bool _,           .bool _,           _, _, _, _, _, _, _, _, h => h
+  | _ + 1, .nilV,             .nilV,             _, _, _, _, _, _, _, _, _ => trivial
+  | _ + 1, .sym _,            .sym _,            _, _, _, _, _, _, _, _, h => h
+  | _ + 1, .prim _,           .prim _,           _, _, _, _, _, _, _, _, h => h
+  | _ + 1, .builtinBaseApply, .builtinBaseApply, _, _, _, _, _, _, _, _, _ => trivial
+  | n + 1, .cons x_a y_a, .cons x_b y_b, h_a, h_b, ext_a, ext_b,
+      hh_a, hh_b, hv_a, hv_b, h_vis =>
+      ⟨ValVisβ_aux_extends n x_a x_b h_a h_b ext_a ext_b
+          hh_a hh_b hv_a.1 hv_b.1 h_vis.1,
+       ValVisβ_aux_extends n y_a y_b h_a h_b ext_a ext_b
+          hh_a hh_b hv_a.2 hv_b.2 h_vis.2⟩
+  | n + 1, .closure ps_a body_a cenv_a, .closure ps_b body_b cenv_b,
+      h_a, h_b, ext_a, ext_b, hh_a, hh_b, hv_a, hv_b, h_vis =>
+      ⟨h_vis.1, h_vis.2.1,
+       EnvVisβ_aux_extends n cenv_a cenv_b h_a h_b ext_a ext_b
+          hh_a hh_b hv_a hv_b h_vis.2.2⟩
+  -- Mismatched constructor pairs at depth ≥ 1: h_vis is `False`.
+  | _ + 1, .num _,            .bool _,           _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .num _,            .nilV,             _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .num _,            .cons _ _,         _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .num _,            .sym _,            _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .num _,            .closure _ _ _,    _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .num _,            .prim _,           _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .num _,            .builtinBaseApply, _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .bool _,           .num _,            _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .bool _,           .nilV,             _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .bool _,           .cons _ _,         _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .bool _,           .sym _,            _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .bool _,           .closure _ _ _,    _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .bool _,           .prim _,           _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .bool _,           .builtinBaseApply, _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .nilV,             .num _,            _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .nilV,             .bool _,           _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .nilV,             .cons _ _,         _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .nilV,             .sym _,            _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .nilV,             .closure _ _ _,    _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .nilV,             .prim _,           _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .nilV,             .builtinBaseApply, _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .cons _ _,         .num _,            _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .cons _ _,         .bool _,           _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .cons _ _,         .nilV,             _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .cons _ _,         .sym _,            _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .cons _ _,         .closure _ _ _,    _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .cons _ _,         .prim _,           _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .cons _ _,         .builtinBaseApply, _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .sym _,            .num _,            _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .sym _,            .bool _,           _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .sym _,            .nilV,             _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .sym _,            .cons _ _,         _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .sym _,            .closure _ _ _,    _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .sym _,            .prim _,           _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .sym _,            .builtinBaseApply, _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .closure _ _ _,    .num _,            _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .closure _ _ _,    .bool _,           _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .closure _ _ _,    .nilV,             _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .closure _ _ _,    .cons _ _,         _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .closure _ _ _,    .sym _,            _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .closure _ _ _,    .prim _,           _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .closure _ _ _,    .builtinBaseApply, _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .prim _,           .num _,            _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .prim _,           .bool _,           _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .prim _,           .nilV,             _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .prim _,           .cons _ _,         _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .prim _,           .sym _,            _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .prim _,           .closure _ _ _,    _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .prim _,           .builtinBaseApply, _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .builtinBaseApply, .num _,            _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .builtinBaseApply, .bool _,           _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .builtinBaseApply, .nilV,             _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .builtinBaseApply, .cons _ _,         _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .builtinBaseApply, .sym _,            _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .builtinBaseApply, .closure _ _ _,    _, _, _, _, _, _, _, _, h => h.elim
+  | _ + 1, .builtinBaseApply, .prim _,           _, _, _, _, _, _, _, _, h => h.elim
+
+theorem EnvVisβ_aux_extends (n : Nat) :
+    ∀ (env_a env_b : Env) (h_a h_b ext_a ext_b : Heap),
+      HeapValid h_a → HeapValid h_b →
+      EnvValid env_a h_a → EnvValid env_b h_b →
+      EnvVisβ_aux n env_a env_b h_a h_b →
+      EnvVisβ_aux n env_a env_b (h_a ++ ext_a) (h_b ++ ext_b) := by
+  intro env_a env_b h_a h_b ext_a ext_b hh_a hh_b hv_a hv_b h_vis x
+  have h_x := h_vis x
+  cases hl_a : env_a.lookup x with
+  | none =>
+      rw [hl_a] at h_x
+      cases hl_b : env_b.lookup x with
+      | none => simp [hl_a, hl_b, EnvVisβ_aux]
+      | some _ => rw [hl_b] at h_x; simp at h_x
+  | some i_a =>
+      rw [hl_a] at h_x
+      cases hl_b : env_b.lookup x with
+      | none => rw [hl_b] at h_x; simp at h_x
+      | some i_b =>
+          rw [hl_b] at h_x
+          simp only at h_x
+          have h_lt_a : i_a < h_a.length := hv_a x i_a hl_a
+          have h_lt_b : i_b < h_b.length := hv_b x i_b hl_b
+          have h_eq_a : (h_a ++ ext_a)[i_a]? = h_a[i_a]? :=
+            getElem?_prefix h_a ext_a i_a h_lt_a
+          have h_eq_b : (h_b ++ ext_b)[i_b]? = h_b[i_b]? :=
+            getElem?_prefix h_b ext_b i_b h_lt_b
+          simp only [hl_a, hl_b]
+          rw [h_eq_a, h_eq_b]
+          cases hp_a : h_a[i_a]? with
+          | none => rw [hp_a] at h_x; simp at h_x
+          | some v_a =>
+              cases hp_b : h_b[i_b]? with
+              | none => rw [hp_a, hp_b] at h_x; simp at h_x
+              | some v_b =>
+                  rw [hp_a, hp_b] at h_x
+                  have hv_va : ValValid v_a h_a := hh_a i_a v_a hp_a
+                  have hv_vb : ValValid v_b h_b := hh_b i_b v_b hp_b
+                  exact ValVisβ_aux_extends n v_a v_b h_a h_b ext_a ext_b
+                    hh_a hh_b hv_va hv_vb h_x
+
+end
+
+/-- Universal-depth heap extension for `ValVisβ`. -/
+theorem ValVisβ_extends (v_a v_b : Val) (h_a h_b ext_a ext_b : Heap)
+    (hh_a : HeapValid h_a) (hh_b : HeapValid h_b)
+    (hv_a : ValValid v_a h_a) (hv_b : ValValid v_b h_b)
+    (h_vis : ValVisβ v_a v_b h_a h_b) :
+    ValVisβ v_a v_b (h_a ++ ext_a) (h_b ++ ext_b) := by
+  intro n
+  exact ValVisβ_aux_extends n v_a v_b h_a h_b ext_a ext_b hh_a hh_b hv_a hv_b (h_vis n)
+
+/-- Universal-depth heap extension for `EnvVisβ`. -/
+theorem EnvVisβ_extends (env_a env_b : Env) (h_a h_b ext_a ext_b : Heap)
+    (hh_a : HeapValid h_a) (hh_b : HeapValid h_b)
+    (hv_a : EnvValid env_a h_a) (hv_b : EnvValid env_b h_b)
+    (h_vis : EnvVisβ env_a env_b h_a h_b) :
+    EnvVisβ env_a env_b (h_a ++ ext_a) (h_b ++ ext_b) := by
+  intro n
+  exact EnvVisβ_aux_extends n env_a env_b h_a h_b ext_a ext_b hh_a hh_b hv_a hv_b (h_vis n)
+
+/-! ### 4b. Threading `EnvVisβ` across a cross-side allocation
+
+`EnvVisβ_cons` mirrors `Bisim.EnvVis_cons`; `EnvVisβ_alloc_cons`
+specializes it to the allocation site (`Heap.alloc h v = (h ++ [v],
+h.length)`), where each side appends one cell holding `ValVisβ`-related
+values at the fresh index `heap.length`. -/
+
+/-- Per-depth cons: a name bound to `ValVisβ`-related fresh cells, over
+    `EnvVisβ`-related tails, stays `EnvVisβ`. Mirror of
+    `Bisim.EnvVis_aux_cons`. -/
+theorem EnvVisβ_aux_cons (d : Nat) (x : String) (idx_a idx_b : Nat)
+    (env_a env_b : Env) (h_a h_b : Heap) (v_a v_b : Val)
+    (h_lookup_a : h_a[idx_a]? = some v_a)
+    (h_lookup_b : h_b[idx_b]? = some v_b)
+    (h_vv : ValVisβ_aux d v_a v_b h_a h_b)
+    (h_env : EnvVisβ_aux d env_a env_b h_a h_b) :
+    EnvVisβ_aux d (.cons x idx_a env_a) (.cons x idx_b env_b) h_a h_b := by
+  intro name
+  simp only [Env.lookup]
+  by_cases h_eq : x = name
+  · subst h_eq
+    simp only [beq_self_eq_true, ↓reduceIte, h_lookup_a, h_lookup_b]
+    exact h_vv
+  · have h_neq : (x == name) = false := by rw [beq_eq_false_iff_ne]; exact h_eq
+    simp only [h_neq, Bool.false_eq_true, ↓reduceIte]
+    exact h_env name
+
+/-- Universal-depth cons. Mirror of `Bisim.EnvVis_cons`. -/
+theorem EnvVisβ_cons (x : String) (idx_a idx_b : Nat)
+    (env_a env_b : Env) (h_a h_b : Heap) (v_a v_b : Val)
+    (h_lookup_a : h_a[idx_a]? = some v_a)
+    (h_lookup_b : h_b[idx_b]? = some v_b)
+    (h_vv : ValVisβ v_a v_b h_a h_b)
+    (h_env : EnvVisβ env_a env_b h_a h_b) :
+    EnvVisβ (.cons x idx_a env_a) (.cons x idx_b env_b) h_a h_b := by
+  intro d
+  exact EnvVisβ_aux_cons d x idx_a idx_b env_a env_b h_a h_b v_a v_b
+    h_lookup_a h_lookup_b (h_vv d) (h_env d)
+
+/-- **The cross-side allocation lemma — the binder's relational core.**
+    Given `EnvVisβ`-related environments and `ValVisβ`-related values to
+    bind, allocating each value (fresh cell at `heap.length`) and
+    extending each environment with `x ↦ fresh` yields `EnvVisβ`-related
+    environments at the extended heaps. Where `frame_tower`'s `.letE`
+    proves the two cons-envs *equal*, this proves them *related* — the
+    move from a same-program bisimulation to the different-program (β)
+    simulation, with the fresh indices `h_a.length` / `h_b.length`
+    free to differ. -/
+theorem EnvVisβ_alloc_cons (x : String) (env_a env_b : Env) (v_a v_b : Val)
+    (h_a h_b : Heap)
+    (hh_a : HeapValid h_a) (hh_b : HeapValid h_b)
+    (hev_a : EnvValid env_a h_a) (hev_b : EnvValid env_b h_b)
+    (hvv_a : ValValid v_a h_a) (hvv_b : ValValid v_b h_b)
+    (h_vis_v : ValVisβ v_a v_b h_a h_b)
+    (h_env : EnvVisβ env_a env_b h_a h_b) :
+    EnvVisβ (.cons x h_a.length env_a) (.cons x h_b.length env_b)
+            (h_a ++ [v_a]) (h_b ++ [v_b]) := by
+  have h_lookup_a : (h_a ++ [v_a])[h_a.length]? = some v_a := by
+    rw [List.getElem?_append_right (Nat.le_refl _)]; simp
+  have h_lookup_b : (h_b ++ [v_b])[h_b.length]? = some v_b := by
+    rw [List.getElem?_append_right (Nat.le_refl _)]; simp
+  have h_vis_v' : ValVisβ v_a v_b (h_a ++ [v_a]) (h_b ++ [v_b]) :=
+    ValVisβ_extends v_a v_b h_a h_b [v_a] [v_b] hh_a hh_b hvv_a hvv_b h_vis_v
+  have h_env' : EnvVisβ env_a env_b (h_a ++ [v_a]) (h_b ++ [v_b]) :=
+    EnvVisβ_extends env_a env_b h_a h_b [v_a] [v_b] hh_a hh_b hev_a hev_b h_env
+  exact EnvVisβ_cons x h_a.length h_b.length env_a env_b
+    (h_a ++ [v_a]) (h_b ++ [v_b]) v_a v_b h_lookup_a h_lookup_b h_vis_v' h_env'
+
+/-! ### 4c. The remaining `BetaRel` structural inversions
+
+`lam_inv` (§1) handles the binder; each *structural* case of the
+fundamental lemma needs the analogous inversion — "β under `F` stays an
+`F` with `BetaRel`-related children" — to expose the other side's shape.
+Here are the two control-flow formers; `.seq` / `.set` / `.primApp`
+follow the same template. The omitted `.app` case is the genuinely hard
+one: it additionally admits a *root* contraction (the redex *is* an
+app), so its inversion is a disjunction, not a congruence — that is the
+elimination side of the open core. -/
+
+/-- β under `.ifte` stays an `.ifte`, β-relating the three children. -/
+theorem BetaRel.ifte_inv {c t e b : Expr}
+    (h : BetaRel (.ifte c t e) b) :
+    ∃ c' t' e', b = .ifte c' t' e' ∧ BetaRel c c' ∧ BetaRel t t' ∧ BetaRel e e' := by
+  induction h with
+  | refl => exact ⟨c, t, e, rfl, .refl _, .refl _, .refl _⟩
+  | tail _ step ih =>
+      obtain ⟨c', t', e', rfl, hc, ht, he⟩ := ih
+      obtain ⟨C, y, bb, v, hC, hbb⟩ := step
+      cases C with
+      | ifteCond cC tt ee =>
+          simp only [Ctx.plug, Expr.ifte.injEq] at hC
+          obtain ⟨hc_eq, ht_eq, he_eq⟩ := hC
+          exact ⟨cC.plug (.letE y v bb), tt, ee, by rw [hbb]; simp [Ctx.plug],
+                 (hc_eq ▸ hc).tail ⟨cC, y, bb, v, rfl, rfl⟩, ht_eq ▸ ht, he_eq ▸ he⟩
+      | ifteThen ec cC ee =>
+          simp only [Ctx.plug, Expr.ifte.injEq] at hC
+          obtain ⟨hc_eq, ht_eq, he_eq⟩ := hC
+          exact ⟨ec, cC.plug (.letE y v bb), ee, by rw [hbb]; simp [Ctx.plug],
+                 hc_eq ▸ hc, (ht_eq ▸ ht).tail ⟨cC, y, bb, v, rfl, rfl⟩, he_eq ▸ he⟩
+      | ifteElse ec et cC =>
+          simp only [Ctx.plug, Expr.ifte.injEq] at hC
+          obtain ⟨hc_eq, ht_eq, he_eq⟩ := hC
+          exact ⟨ec, et, cC.plug (.letE y v bb), by rw [hbb]; simp [Ctx.plug],
+                 hc_eq ▸ hc, ht_eq ▸ ht, (he_eq ▸ he).tail ⟨cC, y, bb, v, rfl, rfl⟩⟩
+      | _ => simp [Ctx.plug] at hC
+
+/-- β under `.letE` stays a `.letE` (same binder), β-relating bound term
+    and body. -/
+theorem BetaRel.letE_inv {x : String} {e1 body b : Expr}
+    (h : BetaRel (.letE x e1 body) b) :
+    ∃ e1' body', b = .letE x e1' body' ∧ BetaRel e1 e1' ∧ BetaRel body body' := by
+  induction h with
+  | refl => exact ⟨e1, body, rfl, .refl _, .refl _⟩
+  | tail _ step ih =>
+      obtain ⟨e1', body', rfl, h1, h2⟩ := ih
+      obtain ⟨C, y, bb, v, hC, hbb⟩ := step
+      cases C with
+      | letEVal z cC bd =>
+          simp only [Ctx.plug, Expr.letE.injEq] at hC
+          obtain ⟨hx_eq, he1_eq, hb_eq⟩ := hC
+          refine ⟨cC.plug (.letE y v bb), bd, ?_,
+                  (he1_eq ▸ h1).tail ⟨cC, y, bb, v, rfl, rfl⟩, hb_eq ▸ h2⟩
+          rw [hbb]; simp only [Ctx.plug]; rw [hx_eq]
+      | letEBody z ev cC =>
+          simp only [Ctx.plug, Expr.letE.injEq] at hC
+          obtain ⟨hx_eq, he1_eq, hb_eq⟩ := hC
+          refine ⟨ev, cC.plug (.letE y v bb), ?_,
+                  he1_eq ▸ h1, (hb_eq ▸ h2).tail ⟨cC, y, bb, v, rfl, rfl⟩⟩
+          rw [hbb]; simp only [Ctx.plug]; rw [hx_eq]
+      | _ => simp [Ctx.plug] at hC
+
+/-! ## 5. What §4 closes, and what is still open
+
+**In hand (this section, sorry-free, axioms ⊆ {propext, Classical.choice,
+Quot.sound}).** The body-independent substrate the allocating cases need:
+
+* `ValVisβ_aux_extends` / `EnvVisβ_aux_extends` (and the universal
+  `ValVisβ_extends` / `EnvVisβ_extends`) — the β value/env relations are
+  preserved under heap extension, the faithful ports of `Bisim`'s `_weak`
+  versions.
+* `EnvVisβ_cons` and **`EnvVisβ_alloc_cons`** — the binder's relational
+  core: an `EnvVisβ`-related environment pair, extended with `x ↦ fresh`
+  over `ValVisβ`-related freshly-allocated cells, stays `EnvVisβ`-related.
+  This is the exact step `frame_tower`'s `.letE` performs by proving the
+  two envs *Lean-equal*; under β they are merely *related* (different code,
+  different fresh indices), and this lemma supplies that.
+* `BetaRel.ifte_inv` / `BetaRel.letE_inv` — two more structural inversions
+  in the `lam_inv` family.
+
+**Still open (the genuine core, unchanged in shape).**
+
+1. *The statement wrapper.* A faithful `WFCtxTβ` (relax `WFCtxT.env_eq` to
+   `EnvVisβ`; drop `heap_len_eq`, which β breaks; relax the cross-side
+   level-env fields) and the full `FrameStmtβ` over it. §4's lemmas are the
+   reusable components; assembling the 13-field context invariant and
+   re-threading it through every case is mechanical but unbuilt here —
+   deliberately, since its level/policy fields entangle with the open
+   `.em` / `.app` cases below and a partial wrapper would misrepresent the
+   boundary.
+2. *The allocating eval cases* (`.letE` first). With §4 in hand these are
+   now "inversion + `EnvVisβ_alloc_cons` + `HeapEvolutionβ` chain"; the
+   missing piece is the `HeapEvolutionβ` carrier (a mechanical mirror) and
+   the wrapper of (1).
+3. *The elimination side* — `.app` / `applyVia`, the **gate threading**
+   (route (b)). The `.app` `BetaRel` inversion is itself a disjunction
+   (root contraction: the redex *is* an app), and the closure is *run*
+   through the `base-apply` gate. This, with the reflective `.em` / `.set`,
+   is where the real research risk sits; `BuiltinReady` (standard gate) is
+   the premise that is meant to tame it. The de-risking first target is the
+   concrete Wand pair `(λx. x) 0` / `let x = 0 in x` under a binder, whose
+   redex/contractum closures `ValVisβ_relates_beta_closures` (§2) already
+   relates. -/
 
 end LeanBlack
