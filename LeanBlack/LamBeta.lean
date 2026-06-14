@@ -34,10 +34,13 @@
     Lean-equal. Plus the `.ifte` / `.letE` `BetaRel` inversions.
     §5 records precisely what this closes and what stays open.
   - §6: the faithful eval obligation (`HeapEvolutionβ`, `WFβ`,
-    `FrameβEvalStmt`) and the **first allocating case discharged** —
-    `frameβ_letE_eval`, a port of `frame_tower`'s `.letE` with
-    `EnvVisβ_alloc_cons` replacing the cons-env equality. The proof that
-    the §4 substrate composes into a real fundamental-lemma case.
+    `FrameβEvalStmt`) and the **gate-free structural cases discharged** —
+    `frameβ_letE_eval` (`.letE`, a port of `frame_tower`'s `.letE` with
+    `EnvVisβ_alloc_cons` replacing the cons-env equality) and
+    `frameβ_ifte_eval` (`.ifte`, with `ValVisβ_bool_false_iff` forcing
+    cross-side branch agreement). The proof that the §4 substrate composes
+    into real fundamental-lemma cases. `.seq` is the only structural case
+    left; `.app`/`.em`/`.set` are the gated/reflective open core.
 
   The weakening `ValVis_weak ⊆ ValVisβ` holds by the same structural
   induction as `Bisim.ValVis_aux_to_weak` with `BetaRel.refl` discharging
@@ -706,9 +709,9 @@ Quot.sound}).** The body-independent substrate the allocating cases need:
   in the `lam_inv` family.
 
 §6 then assembles the eval obligation (`HeapEvolutionβ`, `WFβ`) and
-discharges the **first allocating case** (`.letE`, `frameβ_letE_eval`) on
-it — the proof that this substrate composes into a real fundamental-lemma
-case.
+discharges the **first allocating case** (`.letE`, `frameβ_letE_eval`) and
+the **branching case** (`.ifte`, `frameβ_ifte_eval`) on it — the proof
+that this substrate composes into real fundamental-lemma cases.
 
 **Still open (the genuine core, unchanged in shape).**
 
@@ -721,10 +724,11 @@ case.
    `.app` read and preserve. Deferred deliberately, *with* those cases: a
    wrapper carrying half-formed reflective fields would misstate the
    boundary.
-2. *The remaining structural cases* `.ifte` / `.seq`. Same pattern as
-   `frameβ_letE_eval` (§6c): `BetaRel` inversion (`ifte_inv` exists;
-   `.seq` needs the list-shaped `seq_inv`) + IH thread; non-allocating at
-   the node, so lighter than `.letE`.
+2. *The last structural case* `.seq` (`.ifte` is now done — §6d). Same
+   pattern as `frameβ_letE_eval` / `frameβ_ifte_eval`: a `BetaRel`
+   inversion + IH thread. `.seq` needs the list-shaped `seq_inv` (its
+   `Ctx` former carries `pre`/`post` lists) and a fold over the element
+   evals; like `.ifte` it allocates nothing at the node.
 3. *The elimination side* — `.app` / `applyVia`, the **gate threading**
    (route (b)). The `.app` `BetaRel` inversion is itself a disjunction
    (root contraction: the redex *is* an app), and the closure is *run*
@@ -735,16 +739,20 @@ case.
    redex/contractum closures `ValVisβ_relates_beta_closures` (§2) already
    relates. -/
 
-/-! ## 6. The faithful eval obligation, and the first allocating case
+/-! ## 6. The faithful eval obligation, and the structural cases
 
 §4 supplies the statement-*independent* substrate. This section assembles
-the faithful obligation for the **eval** clause and discharges the first
-*allocating* case (`.letE`) on it — the milestone showing the substrate
-composes into a real fundamental-lemma case, which the §3 sketch could not.
+the faithful obligation for the **eval** clause and discharges the
+gate-free structural cases on it — the first *allocating* case (`.letE`,
+§6c) and the *branching* case (`.ifte`, §6d) — the milestone showing the
+substrate composes into real fundamental-lemma cases, which the §3 sketch
+could not.
 
-Three pieces: `HeapEvolutionβ` (the cross-side heap-evolution carrier),
-`WFβ` (the gate-free fragment's context invariant), and `frameβ_letE_eval`
-(the `.letE` inductive step, a faithful port of `frame_tower`'s `.letE`).
+Pieces: `HeapEvolutionβ` (the cross-side heap-evolution carrier), `WFβ`
+(the gate-free fragment's context invariant), `frameβ_letE_eval` (the
+`.letE` step, a port of `frame_tower`'s `.letE`), and `frameβ_ifte_eval`
+(the `.ifte` step, where `ValVisβ_bool_false_iff` forces both sides to the
+same branch).
 
 `WFβ` carries the **load-bearing allocation invariants** the §3 sketch
 dropped — `HeapValid` / `EnvValid` on both sides — and nothing else. It is
@@ -992,5 +1000,108 @@ theorem frameβ_letE_eval (n : Nat) (ptable : PolicyTable) (level : Nat)
     refine ⟨r_b, T_b', ?_, h_vv_r, hwf_out, h_he_chain, h_env_out, hv_ra, hv_rb⟩
     simp only [eval, h_eval_e_b, TowerState.alloc, Heap.alloc]
     exact h_eval_b_b
+
+/-! ### 6d. The `.ifte` case — branching, non-allocating at the node
+
+The new content here is *cross-side branch agreement*: the condition
+values `cv_a` / `cv_b` are `ValVisβ`-related, and `.ifte` branches on
+whether the value is `.bool false`; `ValVisβ_bool_false_iff` (the
+deferred ground inversion) forces both sides to take the *same* branch.
+The value case-bash is localized into `ifteBranch` / `eval_ifte_step`,
+keeping the IH-threading proof clean (and shorter than `.letE`: `.ifte`
+allocates nothing at its own node). -/
+
+/-- The branch `.ifte` selects on a condition value: `.bool false → e`,
+    everything else → `t`. -/
+def ifteBranch (cv : Val) (t e : Expr) : Expr :=
+  match cv with | .bool false => e | _ => t
+
+theorem ifteBranch_ne {cv : Val} (t e : Expr) (h : cv ≠ .bool false) :
+    ifteBranch cv t e = t := by
+  cases cv with
+  | bool b => cases b with
+              | false => exact absurd rfl h
+              | true => rfl
+  | num _ => rfl
+  | nilV => rfl
+  | sym _ => rfl
+  | prim _ => rfl
+  | builtinBaseApply => rfl
+  | cons _ _ => rfl
+  | closure _ _ _ => rfl
+
+/-- One evaluation step of `.ifte`: once the condition converges to `cv`,
+    the whole `.ifte` reduces to evaluating the selected branch. -/
+theorem eval_ifte_step (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (c t e : Expr) (env : Env) (T T' : TowerState) (cv : Val)
+    (hc : eval n ptable level c env T = some (cv, T')) :
+    eval (n + 1) ptable level (.ifte c t e) env T
+      = eval n ptable level (ifteBranch cv t e) env T' := by
+  simp only [eval, hc]
+  cases cv with
+  | bool b => cases b <;> rfl
+  | num _ => rfl
+  | nilV => rfl
+  | sym _ => rfl
+  | prim _ => rfl
+  | builtinBaseApply => rfl
+  | cons _ _ => rfl
+  | closure _ _ _ => rfl
+
+theorem eval_ifte_none (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (c t e : Expr) (env : Env) (T : TowerState)
+    (hc : eval n ptable level c env T = none) :
+    eval (n + 1) ptable level (.ifte c t e) env T = none := by
+  simp only [eval, hc]
+
+/-- **Cross-side branch agreement.** `ValVisβ`-related values agree on
+    being `.bool false` — so `.ifte` takes the same branch on both sides.
+    The ground inversion the branching case needs. -/
+theorem ValVisβ_bool_false_iff {a b : Val} {h_a h_b : Heap}
+    (h : ValVisβ a b h_a h_b) : a = .bool false ↔ b = .bool false := by
+  have h1 := h 1
+  cases a <;> cases b <;> simp_all [ValVisβ_aux]
+
+/-- The `.ifte` inductive step on the faithful `FrameβEvalStmt`. -/
+theorem frameβ_ifte_eval (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (c t e exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState)
+    (ih : FrameβEvalStmt n)
+    (hβ : BetaRel (.ifte c t e) exp_b)
+    (hwf : WFβ env_a env_b T_a T_b)
+    (henv : EnvVisβ env_a env_b T_a.heap T_b.heap)
+    (heval : eval (n + 1) ptable level (.ifte c t e) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
+      WFβ env_a env_b T_a' T_b' ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧
+      EnvVisβ env_a env_b T_a'.heap T_b'.heap ∧
+      ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  obtain ⟨c', t', e', rfl, hβ_c, hβ_t, hβ_e⟩ := hβ.ifte_inv
+  cases hc : eval n ptable level c env_a T_a with
+  | none =>
+      rw [eval_ifte_none n ptable level c t e env_a T_a hc] at heval
+      simp at heval
+  | some pr =>
+    obtain ⟨cv_a, T_c_a⟩ := pr
+    rw [eval_ifte_step n ptable level c t e env_a T_a T_c_a cv_a hc] at heval
+    obtain ⟨cv_b, T_c_b, h_eval_c_b, h_vv_c, hwf_c, h_he_c, h_env_c, _hv_ca, _hv_cb⟩ :=
+      ih ptable level c c' env_a env_b T_a T_b cv_a T_c_a hβ_c hwf henv hc
+    -- the two sides take the same branch (ValVisβ forces bool-false agreement)
+    have hβ_branch : BetaRel (ifteBranch cv_a t e) (ifteBranch cv_b t' e') := by
+      by_cases hbf : cv_a = .bool false
+      · have hbf_b : cv_b = .bool false := (ValVisβ_bool_false_iff h_vv_c).mp hbf
+        subst hbf; subst hbf_b; exact hβ_e
+      · have hbf_b : cv_b ≠ .bool false :=
+          fun hc' => hbf ((ValVisβ_bool_false_iff h_vv_c).mpr hc')
+        rw [ifteBranch_ne t e hbf, ifteBranch_ne t' e' hbf_b]; exact hβ_t
+    obtain ⟨r_b, T_b', h_eval_branch_b, h_vv_r, hwf_out, h_he_branch, h_env_out, hv_ra, hv_rb⟩ :=
+      ih ptable level (ifteBranch cv_a t e) (ifteBranch cv_b t' e')
+        env_a env_b T_c_a T_c_b r_a T_a' hβ_branch hwf_c h_env_c heval
+    refine ⟨r_b, T_b', ?_, h_vv_r, hwf_out, h_he_c.trans h_he_branch,
+            h_env_out, hv_ra, hv_rb⟩
+    rw [eval_ifte_step n ptable level c' t' e' env_b T_b T_c_b cv_b h_eval_c_b]
+    exact h_eval_branch_b
 
 end LeanBlack
