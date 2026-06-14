@@ -167,6 +167,15 @@ theorem BetaRel.pure_preserve {a b : Expr} (h : BetaRel a b) (hpa : Pure a = tru
   | refl => exact hpa
   | tail _ step ih => rw [← step.pure_eq]; exact ih
 
+/-- Purity is an *invariant* of β (each step preserves it both ways), so a
+    `BetaRel`-related pair has equal `Pure` flags.  This is the two-sided
+    strengthening of `BetaRel.pure_preserve`, needed to recover a-side value
+    purity from the b-side under the cross-side fundamental lemma. -/
+theorem BetaRel.pure_eq {a b : Expr} (h : BetaRel a b) : Pure a = Pure b := by
+  induction h with
+  | refl => rfl
+  | tail _ step ih => rw [ih]; exact step.pure_eq
+
 /-! ### `BetaRel` inversions — building blocks for the fundamental
     lemma's base and closure cases. -/
 
@@ -801,6 +810,18 @@ theorem BetaRelList.trans {as bs cs : List Expr}
   | cons hab _ ih =>
       cases h2 with
       | cons hbc hbcs => exact .cons (hab.trans hbc) (ih hbcs)
+
+/-- List lift of `BetaRel.pure_preserve`: a β-related expression list keeps the
+    pure-list flag.  Used to feed the b-side `evalList` of a structural `.app`
+    through `allPureIndep`. -/
+theorem BetaRelList.pure_preserve {as bs : List Expr} (h : BetaRelList as bs) :
+    PureList as = true → PureList bs = true := by
+  induction h with
+  | nil => exact id
+  | cons hab _ ih =>
+      intro hpa
+      simp only [PureList, Bool.and_eq_true] at hpa ⊢
+      exact ⟨hab.pure_preserve hpa.1, ih hpa.2⟩
 
 theorem BetaRelList.append {as as' bs bs' : List Expr}
     (h1 : BetaRelList as as') (h2 : BetaRelList bs bs') :

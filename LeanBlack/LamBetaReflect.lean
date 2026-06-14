@@ -2045,6 +2045,16 @@ theorem BReady.closed {k : Nat} {ptable : PolicyTable} {level : Nat} {e : Expr}
   have h_ext := eval_pure_extends h_pe h_heap h_ev
   exact ⟨hAll.extends h_ext, (((allPureIndep k).1 level e env T h_pe h_heap).2 ptable v T' h_ev).2⟩
 
+/-- List version of `BReady.closed`: `BReady` is closed under `evalList` of a
+    pure expression list. -/
+theorem BReady.closedList {k : Nat} {ptable : PolicyTable} {level : Nat}
+    {exps : List Expr} {env : Env} {T : TowerState} {vs : List Val} {T' : TowerState}
+    (hBR : BReady T) (h_pl : PureList exps = true)
+    (h_ev : evalList k ptable level exps env T = some (vs, T')) : BReady T' := by
+  obtain ⟨hAll, h_heap⟩ := hBR
+  have h_ext := evalList_pure_extends h_pl h_heap h_ev
+  exact ⟨hAll.extends h_ext, (((allPureIndep k).2.1 level exps env T h_pl h_heap).2 ptable vs T' h_ev).2⟩
+
 /-- `BReady` survives the `.letE` binding step (mirror of `BuiltinReadyP_alloc`). -/
 theorem BReady.alloc {k : Nat} {ptable : PolicyTable} {level : Nat} {e : Expr}
     {env : Env} {T : TowerState} {v : Val} {T' : TowerState}
@@ -2563,6 +2573,38 @@ theorem ListValVisβ_pureValList : ∀ {as bs : List Val} {h_a h_b : Heap},
   | [], _ :: _, _, _, hv, _ => hv.elim
   | _ :: _, [], _, _, hv, _ => hv.elim
 
+/-- Reverse direction of `ValVisβ_pureVal`: a-side value purity is recoverable
+    from the b-side, because β closures keep purity *both ways*
+    (`BetaRel.pure_eq`).  This is what lets the cross-side fundamental lemma run
+    with only the b-side `BReady` premise — no a-side heap-purity hypothesis. -/
+theorem ValVisβ_pureVal_rev : ∀ {a b : Val} {h_a h_b : Heap},
+    ValVisβ a b h_a h_b → PureVal b = true → PureVal a = true
+  | .num _, _, _, _, h, hpb => by rw [← closedVal_ValVisβ_eq _ _ _ _ rfl h]; exact hpb
+  | .bool _, _, _, _, h, hpb => by rw [← closedVal_ValVisβ_eq _ _ _ _ rfl h]; exact hpb
+  | .nilV, _, _, _, h, hpb => by rw [← closedVal_ValVisβ_eq _ _ _ _ rfl h]; exact hpb
+  | .sym _, _, _, _, h, hpb => by rw [← closedVal_ValVisβ_eq _ _ _ _ rfl h]; exact hpb
+  | .prim _, _, _, _, h, hpb => by rw [← closedVal_ValVisβ_eq _ _ _ _ rfl h]; exact hpb
+  | .builtinBaseApply, _, _, _, h, hpb => by rw [← closedVal_ValVisβ_eq _ _ _ _ rfl h]; exact hpb
+  | .cons x y, _, _, _, h, hpb => by
+      obtain ⟨xb, yb, rfl, hvx, hvy⟩ := ValVisβ_cons_inv h
+      simp only [PureVal, Bool.and_eq_true] at hpb ⊢
+      exact ⟨ValVisβ_pureVal_rev hvx hpb.1, ValVisβ_pureVal_rev hvy hpb.2⟩
+  | .closure ps body cenv, _, _, _, h, hpb => by
+      obtain ⟨body', cenv_b, rfl⟩ := ValVisβ_closure_inv h
+      obtain ⟨_, hβ_body, _⟩ := closure_ValVisβ_imp h
+      simp only [PureVal] at hpb ⊢
+      rw [hβ_body.pure_eq]; exact hpb
+
+/-- List lift of `ValVisβ_pureVal_rev`. -/
+theorem ListValVisβ_pureValList_rev : ∀ {as bs : List Val} {h_a h_b : Heap},
+    ListValVisβ as bs h_a h_b → PureValList bs = true → PureValList as = true
+  | [], [], _, _, _, _ => rfl
+  | _ :: _, _ :: _, _, _, ⟨hh, ht⟩, hpb => by
+      simp only [PureValList, Bool.and_eq_true] at hpb ⊢
+      exact ⟨ValVisβ_pureVal_rev hh hpb.1, ListValVisβ_pureValList_rev ht hpb.2⟩
+  | [], _ :: _, _, _, hv, _ => hv.elim
+  | _ :: _, [], _, _, hv, _ => hv.elim
+
 /-- `PureHeap` survives the multi-arg `allocStep` binding when every bound value is
     pure (each step appends `vp.1` via `Heap.alloc`). -/
 theorem allocStep_foldl_pureHeap : ∀ (lst : List (Val × String)) (h : Heap) (cenv : Env),
@@ -2856,6 +2898,86 @@ theorem frameβ_applyVia_evalWP (n : Nat) (ih_ad : FrameβApplyDirectStmtWP n) :
                     rw [hba_b, Option.some.injEq] at hlk'; subst hlk'
                     rw [hcell_b, Option.some.injEq] at hcell'
                     exact hbuiltin ((ValVisβ_builtinBaseApply_iff h_vv_cell).mpr hcell')
+
+/-! ### 7p (cont.). eval's `.app` — the structural branch, premised.
+
+The premised re-cut of `frameβ_app_structural_evalW` (§7m) onto the `…WP`
+statements (`BReady`- and purity-threaded).  Where the W-version's `applyVia`
+clause was unconditional, the WP `applyVia` now additionally demands the a-side
+value purities `PureVal fv_a` / `PureValList avs_a`.  We recover them from the
+b-side: under `BReady T_b`, `allPureIndep` gives `PureVal fv_b` / `PureValList
+avs_b`, and the reverse transfers `ValVisβ_pureVal_rev` /
+`ListValVisβ_pureValList_rev` (β keeps purity *both ways*) push them back to the
+a-side — so the structural case carries **no** a-side heap-purity hypothesis. -/
+theorem frameβ_app_structural_evalWP (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (args args' : List Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_a : Val) (T_a' : TowerState)
+    (ih_eval : FrameβEvalStmtWP n) (ih_list : FrameβEvalListStmtWP n)
+    (ih_via : FrameβApplyViaStmtWP n)
+    (hresp_pt : PolicyTableRespectsBisimT ptable)
+    (hβ_args : BetaRelList args args')
+    (hpure : Pure (.app args) = true)
+    (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (hbr : BReady T_b)
+    (heval : eval (n + 1) ptable level (.app args) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level (.app args') env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  cases hβ_args with
+  | nil => simp only [eval] at heval; exact absurd heval (by simp)
+  | cons hβ_f hβ_rest =>
+      rename_i f f' rest rest'
+      simp only [Pure, PureList, Bool.and_eq_true] at hpure
+      obtain ⟨hpf, hprest⟩ := hpure
+      have hpf' : Pure f' = true := hβ_f.pure_preserve hpf
+      have hprest' : PureList rest' = true := hβ_rest.pure_preserve hprest
+      simp only [eval] at heval
+      cases hf : eval n ptable level f env_a T_a with
+      | none => rw [hf] at heval; simp at heval
+      | some pr =>
+          obtain ⟨fv_a, T_a_inner⟩ := pr
+          rw [hf] at heval; simp only at heval
+          obtain ⟨fv_b, T_b_inner, h_eval_f_b, h_vv_f, h_ctx1, h_he1, hv_fva, hv_fvb⟩ :=
+            ih_eval ptable level f f' env_a env_b T_a T_b fv_a T_a_inner hβ_f hpf hresp_pt h_ctx hbr hf
+          have hbr1 : BReady T_b_inner := hbr.closed hpf' h_eval_f_b
+          cases ha : evalList n ptable level rest env_a T_a_inner with
+          | none => rw [ha] at heval; simp at heval
+          | some pr2 =>
+              obtain ⟨avs_a, T_a_inner2⟩ := pr2
+              rw [ha] at heval; simp only at heval
+              obtain ⟨avs_b, T_b_inner2, h_eval_args_b, h_lvv, h_ctx2, h_he2, hv_avsa, hv_avsb⟩ :=
+                ih_list ptable level rest rest' env_a env_b T_a_inner T_b_inner avs_a T_a_inner2
+                  hβ_rest hprest hresp_pt h_ctx1 hbr1 ha
+              have hbr2 : BReady T_b_inner2 := hbr1.closedList hprest' h_eval_args_b
+              -- recover the a-side value purities from the b-side (no a-side heap premise)
+              have hpfv_a : PureVal fv_a = true :=
+                ValVisβ_pureVal_rev h_vv_f
+                  (((allPureIndep n).1 level f' env_b T_b hpf' hbr.2).2 ptable fv_b T_b_inner h_eval_f_b).1
+              have hpavs_a : PureValList avs_a = true :=
+                ListValVisβ_pureValList_rev h_lvv
+                  (((allPureIndep n).2.1 level rest' env_b T_b_inner hprest' hbr1.2).2
+                    ptable avs_b T_b_inner2 h_eval_args_b).1
+              -- lift the head value (ValVisβ + ValValid) across the args evolution
+              have h_vv_f' : ValVisβ fv_a fv_b T_a_inner2.heap T_b_inner2.heap :=
+                h_he2.valVisβ_preserve fv_a fv_b hv_fva hv_fvb h_vv_f
+              have hv_fva2 : ValValid fv_a T_a_inner2.heap :=
+                ValValid.length_mono fv_a hv_fva h_he2.len_a
+              have hv_fvb2 : ValValid fv_b T_b_inner2.heap :=
+                ValValid.length_mono fv_b hv_fvb h_he2.len_b
+              -- apply via the gated `applyVia` clause (§7p, now `BReady`-premised)
+              obtain ⟨r_b, T_b', h_eval_av_b, h_vv, h_tower3, h_he3, hv_ra, hv_rb⟩ :=
+                ih_via ptable level fv_a fv_b avs_a avs_b T_a_inner2 T_b_inner2 r_a T_a'
+                  hresp_pt h_ctx2.toTower hbr2 hpfv_a hpavs_a h_vv_f' h_lvv hv_fva2 hv_fvb2
+                  hv_avsa hv_avsb heval
+              have h_he_chain : HeapEvolutionβ T_a T_b T_a' T_b' :=
+                h_he1.trans (h_he2.trans h_he3)
+              refine ⟨r_b, T_b', ?_, h_vv, ?_, h_he_chain, hv_ra, hv_rb⟩
+              · simp only [eval, h_eval_f_b, h_eval_args_b]; exact h_eval_av_b
+              · exact WFCtxTβ.ofTower h_tower3
+                  (EnvValid.length_mono h_ctx.ev_a h_he_chain.len_a)
+                  (EnvValid.length_mono h_ctx.ev_b h_he_chain.len_b)
+                  (h_he_chain.envVisβ_preserve env_a env_b h_ctx.ev_a h_ctx.ev_b h_ctx.env_visβ)
 
 end LeanBlack
 
