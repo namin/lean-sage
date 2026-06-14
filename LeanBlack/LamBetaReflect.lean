@@ -2121,6 +2121,117 @@ theorem frameβ_installPolicy_caseWP (idx : Nat)
 
 end
 
+/-! ### 7o (cont.). The recursive eval cases over `FrameβEvalStmtWP`
+
+These take the premised IH `FrameβEvalStmtWP d n` (the leaf-forward trick fails — a
+recursive case must call the IH on sub-expressions, and the IH carries the premise).
+So they re-cut the corresponding `frameβ_*_evalW` proof, threading the premise to each
+sub-call: `Pure` decomposes structurally (and `BetaRel.pure_preserve` carries it to the
+b-side sub-expression); the b-side gate + heap purity ride across the (pure) b-side
+sub-evaluations by `BuiltinReadyP_closed` (`⟨hready, hheap⟩ : BuiltinReadyP d`). -/
+
+/-- `.ifte` on `FrameβEvalStmtWP` — re-cut of `frameβ_ifte_evalW`, threading the premise
+    across the (pure) condition evaluation to the branch sub-call. -/
+theorem frameβ_ifte_evalWP (d n : Nat) (ptable : PolicyTable) (level : Nat)
+    (c t e exp_b : Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_a : Val) (T_a' : TowerState)
+    (ih : FrameβEvalStmtWP d n) (hresp_pt : PolicyTableRespectsBisimT ptable)
+    (hβ : BetaRel (.ifte c t e) exp_b) (hpure : Pure (.ifte c t e) = true)
+    (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (hready : BuiltinReadyN d ptable level env_b T_b) (hheap : PureHeap T_b.heap)
+    (heval : eval (n + 1) ptable level (.ifte c t e) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b', eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  obtain ⟨c', t', e', rfl, hβ_c, hβ_t, hβ_e⟩ := hβ.ifte_inv
+  simp only [Pure, Bool.and_eq_true] at hpure
+  obtain ⟨⟨hpc, hpt⟩, hpe⟩ := hpure
+  cases hc : eval n ptable level c env_a T_a with
+  | none => rw [eval_ifte_none n ptable level c t e env_a T_a hc] at heval; simp at heval
+  | some pr =>
+    obtain ⟨cv_a, T_c_a⟩ := pr
+    rw [eval_ifte_step n ptable level c t e env_a T_a T_c_a cv_a hc] at heval
+    obtain ⟨cv_b, T_c_b, h_eval_c_b, h_vv_c, h_ctx_c, h_he_c, _hv_ca, _hv_cb⟩ :=
+      ih ptable level c c' env_a env_b T_a T_b cv_a T_c_a hβ_c hpc hresp_pt h_ctx hready hheap hc
+    obtain ⟨hready_c, hheap_c⟩ :=
+      BuiltinReadyP_closed d ptable level c' env_b T_b (hβ_c.pure_preserve hpc)
+        ⟨hready, hheap⟩ n cv_b T_c_b h_eval_c_b
+    have hβ_branch : BetaRel (ifteBranch cv_a t e) (ifteBranch cv_b t' e') := by
+      by_cases hbf : cv_a = .bool false
+      · have hbf_b : cv_b = .bool false := (ValVisβ_bool_false_iff h_vv_c).mp hbf
+        subst hbf; subst hbf_b; exact hβ_e
+      · have hbf_b : cv_b ≠ .bool false :=
+          fun hc' => hbf ((ValVisβ_bool_false_iff h_vv_c).mpr hc')
+        rw [ifteBranch_ne t e hbf, ifteBranch_ne t' e' hbf_b]; exact hβ_t
+    have hp_branch : Pure (ifteBranch cv_a t e) = true := by
+      by_cases hbf : cv_a = .bool false
+      · subst hbf; exact hpe
+      · rw [ifteBranch_ne t e hbf]; exact hpt
+    obtain ⟨r_b, T_b', h_eval_branch_b, h_vv_r, h_ctx_out, h_he_branch, hv_ra, hv_rb⟩ :=
+      ih ptable level (ifteBranch cv_a t e) (ifteBranch cv_b t' e')
+        env_a env_b T_c_a T_c_b r_a T_a' hβ_branch hp_branch hresp_pt h_ctx_c hready_c hheap_c heval
+    refine ⟨r_b, T_b', ?_, h_vv_r, h_ctx_out, h_he_c.trans h_he_branch, hv_ra, hv_rb⟩
+    rw [eval_ifte_step n ptable level c' t' e' env_b T_b T_c_b cv_b h_eval_c_b]
+    exact h_eval_branch_b
+
+/-- `.seq` on `FrameβEvalStmtWP` — re-cut of `frameβ_seq_evalW`; only the
+    multi-element case recurses twice (premise threaded across the head eval). -/
+theorem frameβ_seq_evalWP (d n : Nat) (ptable : PolicyTable) (level : Nat)
+    (exps : List Expr) (exp_b : Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_a : Val) (T_a' : TowerState)
+    (ih : FrameβEvalStmtWP d n) (hresp_pt : PolicyTableRespectsBisimT ptable)
+    (hβ : BetaRel (.seq exps) exp_b) (hpure : Pure (.seq exps) = true)
+    (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (hready : BuiltinReadyN d ptable level env_b T_b) (hheap : PureHeap T_b.heap)
+    (heval : eval (n + 1) ptable level (.seq exps) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b', eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  cases exps with
+  | nil =>
+      have hb := hβ.seq_nil_inv; subst hb
+      simp only [eval, Option.some.injEq, Prod.mk.injEq] at heval
+      obtain ⟨hr, ht⟩ := heval; subst hr; subst ht
+      exact ⟨.nilV, T_b, by simp only [eval], fun m => by cases m <;> simp [ValVisβ_aux],
+             h_ctx, HeapEvolutionβ.refl _ _, trivial, trivial⟩
+  | cons e rest =>
+      simp only [Pure, PureList, Bool.and_eq_true] at hpure
+      obtain ⟨hpe, hprest⟩ := hpure
+      cases rest with
+      | nil =>
+          obtain ⟨e', rest', rfl, hβ_e, hβ_rest⟩ := hβ.seq_cons_inv
+          have hr : rest' = [] := Expr.seq.inj hβ_rest.seq_nil_inv
+          subst hr
+          simp only [eval] at heval
+          obtain ⟨r_b, T_b', h_eval_e_b, h_vv_r, h_ctx_out, h_he, hv_ra, hv_rb⟩ :=
+            ih ptable level e e' env_a env_b T_a T_b r_a T_a' hβ_e hpe hresp_pt h_ctx hready hheap heval
+          refine ⟨r_b, T_b', ?_, h_vv_r, h_ctx_out, h_he, hv_ra, hv_rb⟩
+          simp only [eval]; exact h_eval_e_b
+      | cons f rest2 =>
+          obtain ⟨e', rest', rfl, hβ_e, hβ_rest⟩ := hβ.seq_cons_inv
+          obtain ⟨f', rest2', hr'⟩ : ∃ f' rest2', rest' = f' :: rest2' := by
+            obtain ⟨f', rest2', hb_eq, _, _⟩ := hβ_rest.seq_cons_inv
+            exact ⟨f', rest2', Expr.seq.inj hb_eq⟩
+          subst hr'
+          cases hee : eval n ptable level e env_a T_a with
+          | none =>
+              rw [eval_seq_cons_none n ptable level e f rest2 env_a T_a hee] at heval
+              simp at heval
+          | some pr =>
+              obtain ⟨v_a, T_e_a⟩ := pr
+              rw [eval_seq_cons_step n ptable level e f rest2 env_a T_a T_e_a v_a hee] at heval
+              obtain ⟨v_b, T_e_b, h_eval_e_b, _h_vv_v, h_ctx_e, h_he_e, _, _⟩ :=
+                ih ptable level e e' env_a env_b T_a T_b v_a T_e_a hβ_e hpe hresp_pt h_ctx hready hheap hee
+              obtain ⟨hready_e, hheap_e⟩ :=
+                BuiltinReadyP_closed d ptable level e' env_b T_b (hβ_e.pure_preserve hpe)
+                  ⟨hready, hheap⟩ n v_b T_e_b h_eval_e_b
+              obtain ⟨r_b, T_b', h_eval_rest_b, h_vv_r, h_ctx_out, h_he_rest, hv_ra, hv_rb⟩ :=
+                ih ptable level (.seq (f :: rest2)) (.seq (f' :: rest2'))
+                  env_a env_b T_e_a T_e_b r_a T_a' hβ_rest hprest hresp_pt h_ctx_e hready_e hheap_e heval
+              refine ⟨r_b, T_b', ?_, h_vv_r, h_ctx_out, h_he_e.trans h_he_rest, hv_ra, hv_rb⟩
+              rw [eval_seq_cons_step n ptable level e' f' rest2' env_b T_b T_e_b v_b h_eval_e_b]
+              exact h_eval_rest_b
+
 end LeanBlack
 
 
