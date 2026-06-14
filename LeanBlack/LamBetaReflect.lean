@@ -46,17 +46,21 @@
   structural and a root-contraction branch, **both now proved over `WFCtxTβ`** (§7m):
   the **structural branch** (`frameβ_app_structural_evalW`) unconditionally — both
   sides run an `.app`, so the gated `applyVia` clause §7j handles the gate (composes
-  the eval IH + §7k + §7j); and the **root-contraction branch**
-  (`frameβ_app_root_evalW_cond`) **modulo one explicit operational hypothesis**
-  `h_gate_b`. The route avoids any diagonal: `app_to_redex_inv` + `letE_inv` expose
-  the *reduced* redex `(λx.body') v'`, the structural branch maps the a-side onto the
-  b-side redex, and `h_gate_b` (the b-side redex≡contractum equality, = the standard-
-  gate `BuiltinReady` content of `DUMP_LAM` §0 Obstruction B) finishes it. The
-  remaining work is thus narrowed to: discharging `h_gate_b` from a `BuiltinReady`
-  premise threaded into the statement (via `beta_letE_pure_EvalEquivAt`), and the
-  hard `.set` (cross-side meta-mutation — `isMetaMutation` compares indices `EnvVisβ`
-  does not pin; needs a β-`PolicyRespectsBisim` + different-index update machinery).
-  Then the mutual `FrameStmtβ` assembly. (DUMP_LAM §4 step 3 has the plans.)
+  the eval IH + §7k + §7j); and the **root-contraction branch** under the **recognized
+  conditional premise** (`frameβ_app_root_evalW`). The route avoids any diagonal:
+  `app_to_redex_inv` + `letE_inv` expose the *reduced* redex `(λx.body') v'`, the
+  structural branch maps the a-side onto the b-side redex, and the gate bridge finishes.
+  That bridge — first isolated as the abstract hypothesis `h_gate_b`
+  (`frameβ_app_root_evalW_cond`) — is now **discharged**: `redex_to_letE_fixed` (the
+  fixed-fuel companion to `beta_letE_conv_equiv`) + `gate_redex_to_letE` (operand
+  convergence extracted from the redex, the standard gate carried through the operand by
+  purity) give `gate_redex_to_letE_anyfuel`, so the premise is exactly `DUMP_LAM` §0's
+  standard-gate `BuiltinReady` + heap/operand purity — the same side conditions
+  `contextual_beta_pure` carries. **What remains**: thread that recognized premise through
+  the mutual statement (so each case carries it), and the hard `.set` (cross-side
+  meta-mutation — `isMetaMutation` compares indices `EnvVisβ` does not pin; needs a
+  β-`PolicyRespectsBisim` + different-index update machinery). Then the mutual
+  `FrameStmtβ` assembly. (DUMP_LAM §4 step 3 has the plans.)
 -/
 import LeanBlack.LamBeta
 import LeanBlack.Frame
@@ -1759,6 +1763,147 @@ theorem frameβ_app_root_evalW_cond (n : Nat) (ptable : PolicyTable) (level : Na
       env_a env_b T_a T_b r_a T_a' ih_eval ih_list ih_via hresp_pt hbrl h_ctx heval
   -- the b-side gate bridge turns the redex outcome into the contractum (= exp_b) outcome
   exact ⟨r_b, T_b', h_gate_b x body' v' r_b T_b' h_redex_b, h_vv, h_ctx', h_he, hv_ra, hv_rb⟩
+
+/-! ### 7m (cont.). Discharging the b-side gate bridge from the standard gate
+
+`h_gate_b` is the operational content of the standard-gate `BuiltinReady` condition
+(`DUMP_LAM.md` §0 Obstruction B). Its **fixed-fuel** core is `redex_to_letE_fixed`:
+the ∃-fuel `beta_letE_conv_equiv` (`ContextualBeta.lean`) does not suffice — the
+reflective fundamental lemma's conclusion fixes the b-side output fuel — so the
+redex→contractum bridge is re-derived at a *fixed* fuel. Both sides reduce to body
+evaluation in the **same** extended env/heap (`eval_beta_builtin` for the redex,
+`eval_letE` for the contractum), differing only in fuel, reconciled by
+`eval_fuel_mono`. The conditions are exactly the gate facts at the *post-operand*
+state (depth margin, level+1 materialized, builtin `base-apply`) — which the
+eventual conditional fundamental lemma supplies from a `BuiltinReady` premise +
+operand purity. -/
+
+/-- **Fixed-fuel redex→contractum bridge.** At fuel `n+3`, given the operand `V`
+    evaluates (at `n+1`) to `(v_val, T')` with the standard gate live at `T'`, the
+    β-redex `(λx.B) V` and its contractum `let x=V in B` reach the same outcome.
+    The fixed-fuel companion to `beta_letE_conv_equiv` (which is ∃-fuel). This is
+    the operational core that discharges `frameβ_app_root_evalW_cond`'s `h_gate_b`. -/
+theorem redex_to_letE_fixed (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (x : String) (B V : Expr) (env : Env) (T : TowerState)
+    (h_depth : level + 1 < Tower.maxDepth)
+    (v_val : Val) (T' : TowerState)
+    (h_eval_v : eval (n + 1) ptable level V env T = some (v_val, T'))
+    (h_mat' : T'.levels.length > level + 1)
+    (h_builtin' : builtinBaseApplyAt level T')
+    (r : Val) (Tf : TowerState)
+    (h_redex : eval (n + 3) ptable level (.app [.lam [x] B, V]) env T = some (r, Tf)) :
+    eval (n + 3) ptable level (.letE x V B) env T = some (r, Tf) := by
+  have h_eq := eval_beta_builtin n ptable level x B V env T h_depth v_val T' h_eval_v h_mat' h_builtin'
+  rw [h_eq] at h_redex
+  rw [eval_letE (n + 2) ptable level x V B env T v_val T' (eval_fuel_mono (by omega) h_eval_v)]
+  exact eval_fuel_mono (by omega) h_redex
+
+/-- A converging β-redex `(λx.B) V` needs at least fuel 3 (head step, operand step,
+    apply step), so its fuel has the `m + 3` shape `redex_to_letE_fixed` expects. -/
+theorem app_lam_redex_min_fuel {k : Nat} {ptable : PolicyTable} {level : Nat}
+    {x : String} {B V : Expr} {env : Env} {T : TowerState} {p : Val × TowerState}
+    (h : eval k ptable level (.app [.lam [x] B, V]) env T = some p) : 3 ≤ k := by
+  match k with
+  | 0 => simp [eval] at h
+  | 1 => simp [eval] at h
+  | 2 => simp [eval, evalList] at h
+  | _ + 3 => omega
+
+/-- **The standard-gate discharge of the redex→contractum bridge.** Under the
+    standard gate live at the *input* state (depth margin, level+1 materialized,
+    builtin `base-apply`) and a **pure** operand (so the gate survives the operand's
+    evaluation, `eval_pure_extends` + `builtinBaseApplyAt_extends`), the β-redex and
+    its `.letE` contractum reach the same outcome — at fixed fuel. The operand's
+    convergence is *extracted* from the converging redex (`eval_app_lam_v_step` /
+    `evalList_single`), so this needs no separate operand hypothesis. This is the
+    operational content of `frameβ_app_root_evalW_cond`'s `h_gate_b` under the
+    recognized `BuiltinReady` + pure-operand conditions (`DUMP_LAM` §0 Obstruction B,
+    matching `contextual_beta_pure`'s side conditions). -/
+theorem gate_redex_to_letE (m : Nat) (ptable : PolicyTable) (level : Nat)
+    (x : String) (B V : Expr) (env : Env) (T : TowerState)
+    (h_depth : level + 1 < Tower.maxDepth)
+    (h_mat0 : T.levels.length > level + 1)
+    (h_builtin0 : builtinBaseApplyAt level T)
+    (h_pure : Pure V = true) (h_heap : PureHeap T.heap)
+    (r : Val) (Tf : TowerState)
+    (h_redex : eval (m + 3) ptable level (.app [.lam [x] B, V]) env T = some (r, Tf)) :
+    eval (m + 3) ptable level (.letE x V B) env T = some (r, Tf) := by
+  -- extract the operand's convergence (at fuel m+1) from the converging redex
+  have h2 := h_redex
+  rw [eval_app_lam_v_step (m + 2) ptable level x B V env T,
+      eval_lam (m + 1) ptable level [x] B env T] at h2
+  simp only at h2
+  rw [evalList_single m ptable level V env T] at h2
+  cases h_ev : eval (m + 1) ptable level V env T with
+  | none => rw [h_ev] at h2; simp at h2
+  | some pr =>
+      obtain ⟨v_val, T'⟩ := pr
+      -- purity carries the standard gate through the operand to the post-operand state
+      have h_ext : StateExtends T T' := eval_pure_extends h_pure h_heap h_ev
+      have h_mat' : T'.levels.length > level + 1 := by have := h_ext.levels_le; omega
+      have h_builtin' : builtinBaseApplyAt level T' := builtinBaseApplyAt_extends h_ext h_builtin0
+      exact redex_to_letE_fixed m ptable level x B V env T h_depth v_val T' h_ev
+        h_mat' h_builtin' r Tf h_redex
+
+/-- `gate_redex_to_letE` at arbitrary fuel: the redex's convergence forces `3 ≤ k`
+    (`app_lam_redex_min_fuel`), giving the `m + 3` shape. This is exactly the shape
+    `frameβ_app_root_evalW_cond`'s `h_gate_b` requires (`eval k redex = some → eval k
+    letE = some` on the b-side), so it discharges that hypothesis once the conditional
+    statement carries the standard-gate + pure-operand premise. -/
+theorem gate_redex_to_letE_anyfuel (k : Nat) (ptable : PolicyTable) (level : Nat)
+    (x : String) (B V : Expr) (env : Env) (T : TowerState)
+    (h_depth : level + 1 < Tower.maxDepth)
+    (h_mat0 : T.levels.length > level + 1)
+    (h_builtin0 : builtinBaseApplyAt level T)
+    (h_pure : Pure V = true) (h_heap : PureHeap T.heap)
+    (r : Val) (Tf : TowerState)
+    (h_redex : eval k ptable level (.app [.lam [x] B, V]) env T = some (r, Tf)) :
+    eval k ptable level (.letE x V B) env T = some (r, Tf) := by
+  obtain ⟨m, rfl⟩ : ∃ m, k = m + 3 :=
+    ⟨k - 3, by have := app_lam_redex_min_fuel h_redex; omega⟩
+  exact gate_redex_to_letE m ptable level x B V env T h_depth h_mat0 h_builtin0
+    h_pure h_heap r Tf h_redex
+
+/-- **eval's `.app` root-contraction branch, under the recognized conditional
+    premise** — `frameβ_app_root_evalW_cond` with its abstract `h_gate_b` discharged.
+    The premise is now exactly `DUMP_LAM.md` §0's standard-gate `BuiltinReady` (depth
+    margin, level+1 materialized, builtin `base-apply` on the b-side) plus heap/operand
+    purity — the same side conditions `contextual_beta_pure` carries for the lam-free
+    cases. The cross-side relational work is the structural branch
+    (`frameβ_app_structural_evalW`); the gate bridge is `gate_redex_to_letE_anyfuel`. So
+    this is the *conditional* fundamental-lemma `.app` case — the only thing keeping it
+    from the mutual `FrameStmtβ` is that those premises must be carried by the threaded
+    statement (and the hard `.set`). -/
+theorem frameβ_app_root_evalW (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (args : List Expr) (x : String) (body v exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState)
+    (ih_eval : FrameβEvalStmtW n) (ih_list : FrameβEvalListStmtW n)
+    (ih_via : FrameβApplyViaStmtW n)
+    (hresp_pt : PolicyTableRespectsBisimT ptable)
+    (h1 : BetaRel (.app args) (.app [.lam [x] body, v]))
+    (h2 : BetaRel (.letE x v body) exp_b)
+    (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    -- the recognized standard-gate + purity premise on the b-side (§0 Obstruction B):
+    (h_depth : level + 1 < Tower.maxDepth)
+    (h_mat0 : T_b.levels.length > level + 1)
+    (h_builtin0 : builtinBaseApplyAt level T_b)
+    (h_heap : PureHeap T_b.heap)
+    (h_pure_op : ∀ y W C, exp_b = .letE y W C → Pure W = true)
+    (heval : eval (n + 1) ptable level (.app args) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  obtain ⟨f, a, rfl, hf, ha⟩ := h1.app_to_redex_inv
+  obtain ⟨v', body', rfl, hv', hbody'⟩ := h2.letE_inv
+  have hbrl : BetaRelList [f, a] [.lam [x] body', v'] :=
+    .cons (hf.trans (BetaRel.congr hbody' (.lam [x] .hole))) (.cons (ha.trans hv') .nil)
+  obtain ⟨r_b, T_b', h_redex_b, h_vv, h_ctx', h_he, hv_ra, hv_rb⟩ :=
+    frameβ_app_structural_evalW n ptable level [f, a] [.lam [x] body', v']
+      env_a env_b T_a T_b r_a T_a' ih_eval ih_list ih_via hresp_pt hbrl h_ctx heval
+  refine ⟨r_b, T_b', ?_, h_vv, h_ctx', h_he, hv_ra, hv_rb⟩
+  exact gate_redex_to_letE_anyfuel (n + 1) ptable level x body' v' env_b T_b
+    h_depth h_mat0 h_builtin0 (h_pure_op x v' body' rfl) h_heap r_b T_b' h_redex_b
 
 end LeanBlack
 
