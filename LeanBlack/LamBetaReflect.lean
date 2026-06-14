@@ -40,13 +40,15 @@
   and the **gated `.app` (`applyVia`'s gate dispatch) is proved** (`frameβ_applyVia_eval`,
   §7j — both sides materialize, the `base-apply` cells are `ValVisβ`-related forcing
   the same dispatch branch, then the `applyDirect` IH; route (b)'s gate threading).
-  and the **`evalList` clause is re-threaded onto `WFCtxTβ`** (`frameβ_evalList_evalW`,
-  §7k). Remaining for the eval clause: wire `evalList`/`applyVia` into eval's `.app`
-  — whose `app_inv` *root-contraction* branch is the conditional-β crux (where β
-  fires: redex vs. contractum, needing the standard-gate condition) — the easy
-  `.installPolicy`/`.quote`, and the hard `.set` (cross-side meta-mutation —
-  `isMetaMutation` compares indices `EnvVisβ` does not pin; needs a β-`PolicyRespectsBisim`
-  + different-index update machinery); then the mutual `FrameStmtβ` assembly.
+  the **`evalList` clause is re-threaded onto `WFCtxTβ`** (`frameβ_evalList_evalW`,
+  §7k), and the **minor eval cases `.quote` / `.installPolicy` are done** (§7l, via
+  the `setPolicyAt` lemmas). The only eval constructors left are the **two deep
+  cruxes**: eval's `.app` — whose `app_inv` *root-contraction* branch is the
+  conditional-β crux (where β fires: redex `(λx.body) v` vs. contractum
+  `let x=v in body`, needing the standard-gate `BuiltinReady` condition) — and
+  `.set` (cross-side meta-mutation — `isMetaMutation` compares indices `EnvVisβ`
+  does not pin; needs a β-`PolicyRespectsBisim` + different-index update machinery).
+  Then the mutual `FrameStmtβ` assembly. (DUMP_LAM §4 step 3 has the plans.)
 -/
 import LeanBlack.LamBeta
 import LeanBlack.Frame
@@ -1482,7 +1484,129 @@ theorem frameβ_evalList_evalW (n : Nat)
                       h_he_inner.trans h_he_inner2, ⟨hv_va', hv_vsa⟩, ⟨hv_vb', hv_vsb⟩⟩
               simp [evalList, h_eval_e_b, h_eval_rest_b]
 
+/-! ## 7l. The minor reflective-adjacent eval cases: `.quote`, `.installPolicy`
+
+`.quote` returns a `closedValB` literal (state unchanged); `.installPolicy idx`
+swaps the level-`level` policy for `ptable[idx]?` (`setPolicyAt`, heap/envs
+unchanged). Both β-invert trivially (no `Ctx` slot, so β never fires from or
+under them). With these the only eval constructors left are the two deep cruxes
+— eval's `.app` (root-contraction / β-firing) and `.set`. -/
+
+/-- β never fires from a quote. -/
+theorem BetaRel.quote_eq {v : Val} {b : Expr} (h : BetaRel (.quote v) b) : b = .quote v := by
+  induction h with
+  | refl => rfl
+  | tail _ step ih => subst ih; obtain ⟨C, _, _, _, hC, _⟩ := step; cases C <;> simp [Ctx.plug] at hC
+
+/-- β never fires from an `installPolicy`. -/
+theorem BetaRel.installPolicy_eq {idx : Nat} {b : Expr} (h : BetaRel (.installPolicy idx) b) :
+    b = .installPolicy idx := by
+  induction h with
+  | refl => rfl
+  | tail _ step ih => subst ih; obtain ⟨C, _, _, _, hC, _⟩ := step; cases C <;> simp [Ctx.plug] at hC
+
+/-- `.quote` on `FrameβEvalStmtW` (state unchanged; closed literal self-relates). -/
+theorem frameβ_quote_caseW (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (v : Val) (exp_b : Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_a : Val) (T_a' : TowerState)
+    (hβ : BetaRel (.quote v) exp_b) (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (heval : eval (n + 1) ptable level (.quote v) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  have hb := hβ.quote_eq; subst hb
+  simp only [eval] at heval
+  split at heval
+  · rename_i hclosed
+    simp only [Option.some.injEq, Prod.mk.injEq] at heval
+    obtain ⟨hr, hT⟩ := heval; subst hr; subst hT
+    refine ⟨v, T_b, ?_, ValVisβ_refl_closed v hclosed _ _, h_ctx, HeapEvolutionβ.refl _ _,
+            closedVal_ValValid v hclosed _, closedVal_ValValid v hclosed _⟩
+    simp only [eval, hclosed, ↓reduceIte]
+  · simp at heval
+
+/-- `.installPolicy` on `FrameβEvalStmtW`: swaps the level-`level` policy for
+    `ptable[idx]?` (heap/envs unchanged). The new policy respects bisim
+    (`PolicyTableRespectsBisimT`), and the `setPolicyAt` lemmas carry every
+    `WFCtxTβ` field through (`setPolicyAt` touches only the policy at `level`). -/
+theorem frameβ_installPolicy_caseW (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (idx : Nat) (exp_b : Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_a : Val) (T_a' : TowerState)
+    (hresp_pt : PolicyTableRespectsBisimT ptable)
+    (hβ : BetaRel (.installPolicy idx) exp_b) (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (heval : eval (n + 1) ptable level (.installPolicy idx) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  have hb := hβ.installPolicy_eq; subst hb
+  simp only [eval] at heval
+  cases hpt : ptable[idx]? with
+  | none =>
+      rw [hpt] at heval
+      simp only [Option.some.injEq, Prod.mk.injEq] at heval
+      obtain ⟨hr, hT⟩ := heval; subst hr; subst hT
+      exact ⟨.bool false, T_b, by simp only [eval, hpt], (fun d => by cases d <;> simp [ValVisβ_aux]),
+             h_ctx, HeapEvolutionβ.refl _ _, trivial, trivial⟩
+  | some np =>
+      rw [hpt] at heval
+      simp only [Option.some.injEq, Prod.mk.injEq] at heval
+      obtain ⟨hr, hT⟩ := heval; subst hr; subst hT
+      have hresp_np : PolicyRespectsBisimT np := hresp_pt idx np hpt
+      refine ⟨.bool true, T_b.setPolicyAt level np, by simp only [eval, hpt],
+              (fun d => by cases d <;> simp [ValVisβ_aux]), ?_, ?_, trivial, trivial⟩
+      · exact
+        { policy_eq_at := by
+            rw [TowerState.setPolicyAt_policyAt?_self, TowerState.setPolicyAt_policyAt?_self,
+                h_ctx.policy_eq_at]
+          hv_a := by rw [TowerState.setPolicyAt_heap]; exact h_ctx.hv_a
+          hv_b := by rw [TowerState.setPolicyAt_heap]; exact h_ctx.hv_b
+          ev_a := by rw [TowerState.setPolicyAt_heap]; exact h_ctx.ev_a
+          ev_b := by rw [TowerState.setPolicyAt_heap]; exact h_ctx.ev_b
+          policy_resp := by
+            intro p hp
+            rw [TowerState.setPolicyAt_policyAt?_self, Option.map_eq_some_iff] at hp
+            obtain ⟨_, _, hpq⟩ := hp; rw [← hpq]; exact hresp_np
+          env_visβ := by
+            rw [TowerState.setPolicyAt_heap, TowerState.setPolicyAt_heap]; exact h_ctx.env_visβ
+          level_envs_valid_a := by
+            intro m env hen
+            rw [TowerState.setPolicyAt_envAt?] at hen; rw [TowerState.setPolicyAt_heap]
+            exact h_ctx.level_envs_valid_a m env hen
+          level_envs_valid_b := by
+            intro m env hen
+            rw [TowerState.setPolicyAt_envAt?] at hen; rw [TowerState.setPolicyAt_heap]
+            exact h_ctx.level_envs_valid_b m env hen
+          level_count_eq := by
+            rw [TowerState.setPolicyAt_levels_length, TowerState.setPolicyAt_levels_length]
+            exact h_ctx.level_count_eq
+          policies_eq := by
+            intro m; by_cases hm : level = m
+            · subst hm
+              rw [TowerState.setPolicyAt_policyAt?_self, TowerState.setPolicyAt_policyAt?_self,
+                  h_ctx.policy_eq_at]
+            · rw [TowerState.setPolicyAt_policyAt?_other _ _ _ _ hm,
+                  TowerState.setPolicyAt_policyAt?_other _ _ _ _ hm]
+              exact h_ctx.policies_eq m
+          policies_resp_all := by
+            intro m p hp; by_cases hm : level = m
+            · subst hm
+              rw [TowerState.setPolicyAt_policyAt?_self, Option.map_eq_some_iff] at hp
+              obtain ⟨_, _, hpq⟩ := hp; rw [← hpq]; exact hresp_np
+            · rw [TowerState.setPolicyAt_policyAt?_other _ _ _ _ hm] at hp
+              exact h_ctx.policies_resp_all m p hp
+          level_envs_visβ := by
+            intro m ea eb hena henb
+            rw [TowerState.setPolicyAt_envAt?] at hena henb
+            rw [TowerState.setPolicyAt_heap, TowerState.setPolicyAt_heap]
+            exact h_ctx.level_envs_visβ m ea eb hena henb }
+      · exact HeapEvolutionβ.from_heapExt h_ctx.hv_a h_ctx.hv_b
+          ⟨[], by rw [TowerState.setPolicyAt_heap]; simp⟩
+          ⟨[], by rw [TowerState.setPolicyAt_heap]; simp⟩
+
 end LeanBlack
+
 
 
 
