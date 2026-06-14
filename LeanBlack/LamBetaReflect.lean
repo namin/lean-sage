@@ -43,16 +43,20 @@
   the **`evalList` clause is re-threaded onto `WFCtxTβ`** (`frameβ_evalList_evalW`,
   §7k), and the **minor eval cases `.quote` / `.installPolicy` are done** (§7l, via
   the `setPolicyAt` lemmas). eval's `.app` splits (`BetaRel.app_inv`) into a
-  structural and a root-contraction branch; the **structural branch is now done**
-  (`frameβ_app_structural_evalW`, §7m — unconditional: both sides run an `.app`, so
-  the gated `applyVia` clause §7j handles the gate; composes the eval IH + §7k +
-  §7j). The eval constructors still open are the **two deep cruxes**: eval's `.app`
-  **root-contraction** branch — the conditional-β crux (where β fires: redex
-  `(λx.body) v` vs. contractum `let x=v in body`, needing the standard-gate
-  `BuiltinReady` condition) — and `.set` (cross-side meta-mutation — `isMetaMutation`
-  compares indices `EnvVisβ` does not pin; needs a β-`PolicyRespectsBisim` +
-  different-index update machinery). Then the mutual `FrameStmtβ` assembly.
-  (DUMP_LAM §4 step 3 has the plans.)
+  structural and a root-contraction branch, **both now proved over `WFCtxTβ`** (§7m):
+  the **structural branch** (`frameβ_app_structural_evalW`) unconditionally — both
+  sides run an `.app`, so the gated `applyVia` clause §7j handles the gate (composes
+  the eval IH + §7k + §7j); and the **root-contraction branch**
+  (`frameβ_app_root_evalW_cond`) **modulo one explicit operational hypothesis**
+  `h_gate_b`. The route avoids any diagonal: `app_to_redex_inv` + `letE_inv` expose
+  the *reduced* redex `(λx.body') v'`, the structural branch maps the a-side onto the
+  b-side redex, and `h_gate_b` (the b-side redex≡contractum equality, = the standard-
+  gate `BuiltinReady` content of `DUMP_LAM` §0 Obstruction B) finishes it. The
+  remaining work is thus narrowed to: discharging `h_gate_b` from a `BuiltinReady`
+  premise threaded into the statement (via `beta_letE_pure_EvalEquivAt`), and the
+  hard `.set` (cross-side meta-mutation — `isMetaMutation` compares indices `EnvVisβ`
+  does not pin; needs a β-`PolicyRespectsBisim` + different-index update machinery).
+  Then the mutual `FrameStmtβ` assembly. (DUMP_LAM §4 step 3 has the plans.)
 -/
 import LeanBlack.LamBeta
 import LeanBlack.Frame
@@ -1689,6 +1693,72 @@ theorem frameβ_app_structural_evalW (n : Nat) (ptable : PolicyTable) (level : N
                   (EnvValid.length_mono h_ctx.ev_a h_he_chain.len_a)
                   (EnvValid.length_mono h_ctx.ev_b h_he_chain.len_b)
                   (h_he_chain.envVisβ_preserve env_a env_b h_ctx.ev_a h_ctx.ev_b h_ctx.env_visβ)
+
+/-! ### 7m (cont.). The root-contraction branch, modulo the b-side gate bridge
+
+The `app_inv` `inr` case — **where β fires**. `BetaRel.app_to_redex_inv` (`LamBeta`
+§4d) exposes the a-side redex shape `args = [f, a]` (`f` `BetaRel`-reaching the
+lambda, `a` the operand); `BetaRel.letE_inv` exposes the *reduced* contractum
+`exp_b = .letE x v' body'`. The key move avoids any diagonal/reflexivity: lift the
+intermediate redex to the **reduced** one `(λx. body') v'` (so `f ↝ λx.body'` by
+`BetaRel.congr` under the binder, `a ↝ v'`), then the **already-proven structural
+branch** (`frameβ_app_structural_evalW`) maps the a-side `.app args` onto the
+*b-side reduced redex* `.app [λx.body', v']` — delivering `ValVisβ`, `WFCtxTβ`,
+`HeapEvolutionβ`, and validity for `(r_b, T_b')` outright. What is left is purely
+operational and *on the b-side only*: the reduced redex `.app [λx.body', v']` and
+its contractum `.letE x v' body'` (= `exp_b`) must produce the **same** outcome at
+`(env_b, T_b)`.
+
+That last step is exactly `DUMP_LAM.md` §0 Obstruction B: redex≡contractum holds
+only under the **standard gate** (`applyVia` falls through to `applyDirect`); a
+non-standard gate or top-of-tower separates them. So it is the operational content
+of the conditional `BuiltinReady` premise — provided here as an explicit hypothesis
+`h_gate_b` (a `RedexContractumAgree`-style predicate on the b-side state), which
+the eventual conditional fundamental lemma discharges from `BuiltinReady` via the
+proven base β `beta_letE_pure_EvalEquivAt` (`ContextualBetaPure.lean:214`). The
+route is thus fully type-checked end to end; only `h_gate_b`'s discharge (the
+premise threading) remains for the mutual assembly. -/
+
+/-- **eval's `.app`, root-contraction branch, modulo the b-side gate bridge.** The
+    `app_inv` `inr` case, reduced to a single explicit operational obligation
+    `h_gate_b`: on the b-side, every redex's outcome is matched by its contractum's.
+    Everything else — exposing the redex (`app_to_redex_inv`), reducing the
+    contractum (`letE_inv`), lifting to the reduced redex (`BetaRel.congr`), and the
+    cross-side simulation (`frameβ_app_structural_evalW`) — is discharged. `h_gate_b`
+    is the operational form of the standard-gate `BuiltinReady` condition (`DUMP_LAM`
+    §0 Obstruction B); it is `beta_letE_pure_EvalEquivAt` instantiated at `(env_b,
+    T_b)` once the premise is threaded into the statement. -/
+theorem frameβ_app_root_evalW_cond (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (args : List Expr) (x : String) (body v exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState)
+    (ih_eval : FrameβEvalStmtW n) (ih_list : FrameβEvalListStmtW n)
+    (ih_via : FrameβApplyViaStmtW n)
+    (hresp_pt : PolicyTableRespectsBisimT ptable)
+    (h1 : BetaRel (.app args) (.app [.lam [x] body, v]))
+    (h2 : BetaRel (.letE x v body) exp_b)
+    (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (h_gate_b : ∀ (y : String) (B V : Expr) (rr : Val) (TT : TowerState),
+        eval (n + 1) ptable level (.app [.lam [y] B, V]) env_b T_b = some (rr, TT) →
+        eval (n + 1) ptable level (.letE y V B) env_b T_b = some (rr, TT))
+    (heval : eval (n + 1) ptable level (.app args) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  -- expose the a-side redex shape and the reduced b-side contractum
+  obtain ⟨f, a, rfl, hf, ha⟩ := h1.app_to_redex_inv
+  obtain ⟨v', body', rfl, hv', hbody'⟩ := h2.letE_inv
+  -- lift to the *reduced* redex `(λx. body') v'` (β-congruence under the binder)
+  have hlam_cong : BetaRel (.lam [x] body) (.lam [x] body') :=
+    BetaRel.congr hbody' (.lam [x] .hole)
+  have hbrl : BetaRelList [f, a] [.lam [x] body', v'] :=
+    .cons (hf.trans hlam_cong) (.cons (ha.trans hv') .nil)
+  -- the already-proven structural branch maps a-side `.app args` to the b-side redex
+  obtain ⟨r_b, T_b', h_redex_b, h_vv, h_ctx', h_he, hv_ra, hv_rb⟩ :=
+    frameβ_app_structural_evalW n ptable level [f, a] [.lam [x] body', v']
+      env_a env_b T_a T_b r_a T_a' ih_eval ih_list ih_via hresp_pt hbrl h_ctx heval
+  -- the b-side gate bridge turns the redex outcome into the contractum (= exp_b) outcome
+  exact ⟨r_b, T_b', h_gate_b x body' v' r_b T_b' h_redex_b, h_vv, h_ctx', h_he, hv_ra, hv_rb⟩
 
 end LeanBlack
 

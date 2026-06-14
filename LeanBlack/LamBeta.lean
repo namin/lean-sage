@@ -811,6 +811,30 @@ theorem app_inv_wand_detects_root :
   · exact absurd heq (by simp)
   · exact hroot
 
+/-- **The root-contraction entry point.** When `.app args` `BetaRel`-reaches a
+    *concrete redex* `(λx. body) v` (an application whose head is literally a
+    lambda), the argument list is exactly the two-element `[f, a]` with `f`
+    `BetaRel`-reaching the lambda and `a` the operand. Proof: `app_inv` on the
+    hypothesis can only be its `inl` (still-an-`.app`) branch — the `inr`
+    root-contraction branch would make a `.letE` `BetaRel`-reach an `.app`, which
+    `letE_inv` forbids — so the args are `BetaRelList`-related to `[λx.body, v]`,
+    and that list inverts to `[f, a]`. This is the inversion the gated `.app`
+    eval case's root branch consumes to expose the redex on the a-side. -/
+theorem BetaRel.app_to_redex_inv {args : List Expr} {x : String} {body v : Expr}
+    (h : BetaRel (.app args) (.app [.lam [x] body, v])) :
+    ∃ f a, args = [f, a] ∧ BetaRel f (.lam [x] body) ∧ BetaRel a v := by
+  rcases h.app_inv with ⟨args', heq, hbrl⟩ | ⟨x', body', v', _, h2⟩
+  · simp only [Expr.app.injEq] at heq; subst heq
+    cases hbrl with
+    | cons hf ht =>
+        cases ht with
+        | cons ha hnil =>
+            cases hnil
+            rename_i f a
+            exact ⟨f, a, rfl, hf, ha⟩
+  · obtain ⟨_, _, heq2, _, _⟩ := h2.letE_inv
+    simp at heq2
+
 /-! ## 5. What §4 closes, and what is still open
 
 **In hand (this section, sorry-free, axioms ⊆ {propext, Classical.choice,
@@ -835,6 +859,11 @@ Quot.sound}).** The body-independent substrate the allocating cases need:
   `refl` / `trans` / `append`), which is also the `evalList`-clause relation
   the full mutual statement needs. `app_inv_wand_detects_root` validates that
   the disjunction's root-contraction branch genuinely fires for the Wand pair.
+* **`BetaRel.app_to_redex_inv`** (§4d) — the root branch's entry point: when
+  `.app args` `BetaRel`-reaches a *concrete redex* `(λx. body) v`, the args are
+  exactly `[f, a]` with `BetaRel f (λx.body)` and `BetaRel a v` (the `inr`
+  branch is ruled out via `letE_inv`). This is what the reflective `.app`
+  root-contraction eval case (`LamBetaReflect` §7m) inverts to expose the redex.
 
 §6 then assembles the eval obligation (`HeapEvolutionβ`, `WFβ`) and
 discharges **every gate-free structural case** on it: the allocating
