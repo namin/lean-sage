@@ -19,6 +19,7 @@ import LeanBlack.Policies
 import LeanBlack.ProofBased
 import LeanBlack.Compose
 import LeanBlack.ContextualBetaPure
+import LeanBlack.CtxEquiv
 import LeanBlack.GovChain
 
 open LeanBlack
@@ -54,6 +55,16 @@ open LeanBlack
 /-- info: 'contextual_beta_at_start' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms contextual_beta_at_start
+
+-- `.lam` case diagnosis (`CtxEquiv.lean`): the two impossibility results
+-- that pin why the `.lam` case is not closable in either naive frame.
+/-- info: 'LeanBlack.lam_EvalEquiv_congruence_fails' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms LeanBlack.lam_EvalEquiv_congruence_fails
+
+/-- info: 'LeanBlack.beta_not_unconditional_CtxEquiv' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms LeanBlack.beta_not_unconditional_CtxEquiv
 
 /-- info: 'LeanBlack.chain_CE' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
