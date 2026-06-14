@@ -32,7 +32,12 @@
   `WFCtxTβ`-based eval statement `FrameβEvalStmtW` — the metacircular level
   shift, threading `materialize_MatInvβ` + `materialize_policiesEqβ` to build
   `WFCtxTβ` at `level + 1` for the IH and rebuild it at `level` for the output.
-  Remaining reflective cases: `.set` and the gated `.app` (`applyVia`).
+  The non-recursive eval cases (`.num`/`.bool`/`.var`/`.lam`, §7g) are also done
+  over `FrameβEvalStmtW`. Remaining for the eval clause: re-thread the recursive
+  gate-free cases (`.letE`/`.ifte`/`.seq`, needs a `MatInvβ`-across-alloc lift)
+  and the hard reflective cases `.set` (cross-side meta-mutation — `isMetaMutation`
+  compares indices `EnvVisβ` does not pin; needs a β-`PolicyRespectsBisim` +
+  different-index update machinery) and the gated `.app` (`applyVia`).
 -/
 import LeanBlack.LamBeta
 import LeanBlack.Frame
@@ -618,4 +623,104 @@ theorem frameβ_em_eval (n : Nat) (ptable : PolicyTable) (level : Nat)
               policies_resp_all := h_ctx_out_up.policies_resp_all
               level_envs_visβ := h_ctx_out_up.level_envs_visβ }
 
+/-! ## 7g. The non-recursive eval cases over `WFCtxTβ`
+
+The atoms (`.num` / `.bool`), variable lookup (`.var`), and closure formation
+(`.lam`) on `FrameβEvalStmtW`. None changes the tower state, so the output
+`WFCtxTβ` is the input verbatim — these are the β-analogs of `LamBeta`'s
+`frameβ_num_case` / `frameβ_var_case` / `frameβ_lam_case` (proved over `WFβ`),
+re-stated over the full reflective wrapper. The recursive gate-free cases
+(`.letE` / `.ifte` / `.seq`) re-thread over `WFCtxTβ` by the same reassembly as
+`frameβ_em_eval` (level-structure fields from the sub-eval outputs, ambient-env
+fields lifted across `HeapEvolutionβ`), needing a `MatInvβ`-across-alloc lift;
+deferred with the reflective `.set` / `applyVia` cases. -/
+
+/-- `.num` on `FrameβEvalStmtW` (state unchanged ⟹ output context = input). -/
+theorem frameβ_num_caseW (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (i : Int) (exp_b : Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_a : Val) (T_a' : TowerState)
+    (hβ : BetaRel (.num i) exp_b) (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (heval : eval (n + 1) ptable level (.num i) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  have hb := hβ.num_eq; subst hb
+  simp only [eval, Option.some.injEq, Prod.mk.injEq] at heval
+  obtain ⟨hr, ht⟩ := heval; subst hr; subst ht
+  exact ⟨.num i, T_b, by simp [eval], (fun m => by cases m <;> simp [ValVisβ_aux]),
+         h_ctx, HeapEvolutionβ.refl _ _, trivial, trivial⟩
+
+/-- `.bool` on `FrameβEvalStmtW`. -/
+theorem frameβ_bool_caseW (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (c : Bool) (exp_b : Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_a : Val) (T_a' : TowerState)
+    (hβ : BetaRel (.bool c) exp_b) (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (heval : eval (n + 1) ptable level (.bool c) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  have hb := hβ.bool_eq; subst hb
+  simp only [eval, Option.some.injEq, Prod.mk.injEq] at heval
+  obtain ⟨hr, ht⟩ := heval; subst hr; subst ht
+  exact ⟨.bool c, T_b, by simp [eval], (fun m => by cases m <;> simp [ValVisβ_aux]),
+         h_ctx, HeapEvolutionβ.refl _ _, trivial, trivial⟩
+
+/-- `.var` on `FrameβEvalStmtW`: the lookup threads through `env_visβ` to a
+    `ValVisβ`-related value; the state is unchanged. -/
+theorem frameβ_var_caseW (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (y : String) (exp_b : Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_a : Val) (T_a' : TowerState)
+    (hβ : BetaRel (.var y) exp_b) (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (heval : eval (n + 1) ptable level (.var y) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  have hb := hβ.var_eq; subst hb
+  simp only [eval] at heval
+  cases hla : env_a.lookup y with
+  | none => simp [hla] at heval
+  | some idx_a =>
+    simp only [hla] at heval
+    cases hpa : T_a.heap[idx_a]? with
+    | none => simp [hpa] at heval
+    | some va =>
+      simp only [hpa, Option.some.injEq, Prod.mk.injEq] at heval
+      obtain ⟨hr, ht⟩ := heval; subst hr; subst ht
+      have he := h_ctx.env_visβ 1 y
+      simp only [hla] at he
+      cases hlb : env_b.lookup y with
+      | none => simp [hlb] at he
+      | some idx_b =>
+        simp only [hlb, hpa] at he
+        cases hpb : T_b.heap[idx_b]? with
+        | none => simp [hpb] at he
+        | some vb =>
+          refine ⟨vb, T_b, by simp only [eval, hlb, hpb], (fun m => ?_), h_ctx,
+                  HeapEvolutionβ.refl _ _, h_ctx.hv_a idx_a va hpa, h_ctx.hv_b idx_b vb hpb⟩
+          have hm := h_ctx.env_visβ m y
+          simp only [hla, hlb, hpa, hpb] at hm
+          exact hm
+
+/-- `.lam` on `FrameβEvalStmtW`: closure formation (state unchanged); the
+    closures relate by `ValVisβ_lam_closures` (`BetaRel` bodies + `env_visβ`). -/
+theorem frameβ_lam_caseW (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (ps : List String) (body exp_b : Expr) (env_a env_b : Env) (T_a T_b : TowerState)
+    (r_a : Val) (T_a' : TowerState)
+    (hβ : BetaRel (.lam ps body) exp_b) (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (heval : eval (n + 1) ptable level (.lam ps body) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  rw [eval_lam_closure] at heval
+  injection heval with heval'; injection heval' with hr ht; subst hr; subst ht
+  obtain ⟨body', rfl, hbody⟩ := hβ.lam_inv
+  exact ⟨.closure ps body' env_b, T_b, eval_lam_closure n ptable level ps body' env_b T_b,
+         ValVisβ_lam_closures ps body body' env_a env_b T_a.heap T_b.heap hbody h_ctx.env_visβ,
+         h_ctx, HeapEvolutionβ.refl _ _, h_ctx.ev_a, h_ctx.ev_b⟩
+
 end LeanBlack
+
