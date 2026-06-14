@@ -34,13 +34,14 @@
     Lean-equal. Plus the `.ifte` / `.letE` `BetaRel` inversions.
     §5 records precisely what this closes and what stays open.
   - §6: the faithful eval obligation (`HeapEvolutionβ`, `WFβ`,
-    `FrameβEvalStmt`) and the **gate-free structural cases discharged** —
+    `FrameβEvalStmt`) with **every gate-free structural case discharged** —
     `frameβ_letE_eval` (`.letE`, a port of `frame_tower`'s `.letE` with
-    `EnvVisβ_alloc_cons` replacing the cons-env equality) and
-    `frameβ_ifte_eval` (`.ifte`, with `ValVisβ_bool_false_iff` forcing
-    cross-side branch agreement). The proof that the §4 substrate composes
-    into real fundamental-lemma cases. `.seq` is the only structural case
-    left; `.app`/`.em`/`.set` are the gated/reflective open core.
+    `EnvVisβ_alloc_cons` replacing the cons-env equality), `frameβ_ifte_eval`
+    (`.ifte`, with `ValVisβ_bool_false_iff` forcing cross-side branch
+    agreement), and `frameβ_seq_eval` (`.seq`, list-structured via
+    `seq_cons_inv`). Proof that the §4 substrate composes into real
+    fundamental-lemma cases. Only the `WFCtxTβ` statement-wrapper upgrade
+    and the gated/reflective `.app`/`.em`/`.set` remain (the open core).
 
   The weakening `ValVis_weak ⊆ ValVisβ` holds by the same structural
   induction as `Bisim.ValVis_aux_to_weak` with `BetaRel.refl` discharging
@@ -709,27 +710,26 @@ Quot.sound}).** The body-independent substrate the allocating cases need:
   in the `lam_inv` family.
 
 §6 then assembles the eval obligation (`HeapEvolutionβ`, `WFβ`) and
-discharges the **first allocating case** (`.letE`, `frameβ_letE_eval`) and
-the **branching case** (`.ifte`, `frameβ_ifte_eval`) on it — the proof
-that this substrate composes into real fundamental-lemma cases.
+discharges **every gate-free structural case** on it: the allocating
+binder (`.letE`, `frameβ_letE_eval`), the branch (`.ifte`,
+`frameβ_ifte_eval`), and the sequence (`.seq`, `frameβ_seq_eval`) — the
+proof that this substrate composes into real fundamental-lemma cases.
+Together with the §3 atoms/`.lam`, the **entire gate-free fragment of the
+faithful eval clause is now closed**.
 
-**Still open (the genuine core, unchanged in shape).**
+**Still open (the genuine core, now sharply isolated).**
 
-1. *Upgrade `WFβ` to the full `WFCtxTβ`.* §6's `WFβ` carries the
-   load-bearing allocation invariants (`HeapValid` / `EnvValid`), enough
-   for the gate-free structural fragment. The full wrapper adds the
-   policy / materialized-level fields of `Frame.WFCtxT` — relax `env_eq`
-   to `EnvVisβ`, drop `heap_len_eq` (β breaks it), relax the cross-side
-   level-env fields — which only the reflective `.em` / `.set` and gated
-   `.app` read and preserve. Deferred deliberately, *with* those cases: a
-   wrapper carrying half-formed reflective fields would misstate the
-   boundary.
-2. *The last structural case* `.seq` (`.ifte` is now done — §6d). Same
-   pattern as `frameβ_letE_eval` / `frameβ_ifte_eval`: a `BetaRel`
-   inversion + IH thread. `.seq` needs the list-shaped `seq_inv` (its
-   `Ctx` former carries `pre`/`post` lists) and a fold over the element
-   evals; like `.ifte` it allocates nothing at the node.
-3. *The elimination side* — `.app` / `applyVia`, the **gate threading**
+1. *Upgrade `WFβ` to the full `WFCtxTβ`, and to the mutual statement.*
+   §6's `WFβ` carries the load-bearing allocation invariants (`HeapValid`
+   / `EnvValid`), all the *structural* cases need. The full wrapper adds
+   the policy / materialized-level fields of `Frame.WFCtxT` — relax
+   `env_eq` to `EnvVisβ`, drop `heap_len_eq` (β breaks it), relax the
+   cross-side level-env fields — which only the reflective `.em` / `.set`
+   and gated `.app` read and preserve; plus the `evalList` / `applyVia` /
+   `applyDirect` clauses (with a trivial `ListValVisβ`). Deferred
+   deliberately, *with* those cases below: a wrapper carrying half-formed
+   reflective fields would misstate the boundary.
+2. *The elimination side* — `.app` / `applyVia`, the **gate threading**
    (route (b)). The `.app` `BetaRel` inversion is itself a disjunction
    (root contraction: the redex *is* an app), and the closure is *run*
    through the `base-apply` gate. This, with the reflective `.em` / `.set`,
@@ -737,22 +737,27 @@ that this substrate composes into real fundamental-lemma cases.
    the premise that is meant to tame it. The de-risking first target is the
    concrete Wand pair `(λx. x) 0` / `let x = 0 in x` under a binder, whose
    redex/contractum closures `ValVisβ_relates_beta_closures` (§2) already
-   relates. -/
+   relates.
+
+With every structural case discharged, the remaining work is exactly
+(1) the statement wrapper and (2) the gate — no structural plumbing is
+left between here and the full `.lam` congruence. -/
 
 /-! ## 6. The faithful eval obligation, and the structural cases
 
 §4 supplies the statement-*independent* substrate. This section assembles
-the faithful obligation for the **eval** clause and discharges the
-gate-free structural cases on it — the first *allocating* case (`.letE`,
-§6c) and the *branching* case (`.ifte`, §6d) — the milestone showing the
-substrate composes into real fundamental-lemma cases, which the §3 sketch
-could not.
+the faithful obligation for the **eval** clause and discharges **every
+gate-free structural case** on it — the allocating binder (`.letE`, §6c),
+the branch (`.ifte`, §6d), and the sequence (`.seq`, §6e) — the milestone
+showing the substrate composes into real fundamental-lemma cases, which
+the §3 sketch could not.
 
 Pieces: `HeapEvolutionβ` (the cross-side heap-evolution carrier), `WFβ`
 (the gate-free fragment's context invariant), `frameβ_letE_eval` (the
-`.letE` step, a port of `frame_tower`'s `.letE`), and `frameβ_ifte_eval`
-(the `.ifte` step, where `ValVisβ_bool_false_iff` forces both sides to the
-same branch).
+`.letE` step, a port of `frame_tower`'s `.letE`), `frameβ_ifte_eval` (the
+`.ifte` step, where `ValVisβ_bool_false_iff` forces both sides to the same
+branch), and `frameβ_seq_eval` (the `.seq` step, list-structured via
+`seq_cons_inv`).
 
 `WFβ` carries the **load-bearing allocation invariants** the §3 sketch
 dropped — `HeapValid` / `EnvValid` on both sides — and nothing else. It is
@@ -1103,5 +1108,134 @@ theorem frameβ_ifte_eval (n : Nat) (ptable : PolicyTable) (level : Nat)
             h_env_out, hv_ra, hv_rb⟩
     rw [eval_ifte_step n ptable level c' t' e' env_b T_b T_c_b cv_b h_eval_c_b]
     exact h_eval_branch_b
+
+/-! ### 6e. The `.seq` case — list-structured, non-allocating at the node
+
+`.seq` is the fiddliest structural former because its `Ctx` (`Ctx.seq
+pre c post`) carries `pre`/`post` *lists*. The needed inversions are
+list-shaped: `seq_nil_inv` (β can't fire from the empty sequence) and the
+cons-style `seq_cons_inv` (β under `.seq (e :: rest)` stays a `.seq`,
+β-relating the head and the tail-as-a-sequence — the shape that matches
+`eval`'s head/tail recursion). With those, `frameβ_seq_eval` threads the
+IH over the head eval (value discarded) and the tail sequence, mirroring
+`eval`'s three arms. This completes the gate-free structural fragment. -/
+
+/-- β never fires from the empty sequence. -/
+theorem BetaRel.seq_nil_inv {b : Expr} (h : BetaRel (.seq []) b) : b = .seq [] := by
+  induction h with
+  | refl => rfl
+  | tail _ step ih =>
+      subst ih
+      obtain ⟨C, _, _, _, hC, _⟩ := step
+      cases C <;> simp [Ctx.plug] at hC
+
+/-- **β under `.seq (e :: rest)` stays a `.seq`**, β-relating the head and
+    the tail-as-a-sequence. The cons-style inversion matching `eval`'s
+    head/tail recursion. -/
+theorem BetaRel.seq_cons_inv {e : Expr} {rest : List Expr} {b : Expr}
+    (h : BetaRel (.seq (e :: rest)) b) :
+    ∃ e' rest', b = .seq (e' :: rest') ∧ BetaRel e e' ∧
+      BetaRel (.seq rest) (.seq rest') := by
+  induction h with
+  | refl => exact ⟨e, rest, rfl, .refl _, .refl _⟩
+  | tail _ step ih =>
+      obtain ⟨e', rest', rfl, he, hrest⟩ := ih
+      obtain ⟨C, x, body, v, hC, hb⟩ := step
+      cases C with
+      | seq pre C' post =>
+          simp only [Ctx.plug, Expr.seq.injEq] at hC
+          cases pre with
+          | nil =>
+              simp only [List.nil_append, List.cons.injEq] at hC
+              obtain ⟨rfl, hpost⟩ := hC
+              refine ⟨C'.plug (.letE x v body), rest', ?_,
+                      he.tail ⟨C', x, body, v, rfl, rfl⟩, hrest⟩
+              rw [hb]; simp only [Ctx.plug, List.nil_append]; rw [hpost]
+          | cons p pre' =>
+              simp only [List.cons_append, List.cons.injEq] at hC
+              obtain ⟨hp, hrest'⟩ := hC
+              refine ⟨e', pre' ++ C'.plug (.letE x v body) :: post, ?_, he, ?_⟩
+              · rw [hb]; simp only [Ctx.plug, List.cons_append]; rw [hp]
+              · rw [hrest'] at hrest
+                exact hrest.tail
+                  ⟨.seq pre' C' post, x, body, v, by simp [Ctx.plug], by simp [Ctx.plug]⟩
+      | _ => simp [Ctx.plug] at hC
+
+/-- One evaluation step of a ≥2-element sequence: evaluate the head
+    (discarding its value, keeping its state), then continue with the
+    tail sequence. -/
+theorem eval_seq_cons_step (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (e f : Expr) (rest2 : List Expr) (env : Env) (T T' : TowerState) (v : Val)
+    (hv : eval n ptable level e env T = some (v, T')) :
+    eval (n + 1) ptable level (.seq (e :: f :: rest2)) env T
+      = eval n ptable level (.seq (f :: rest2)) env T' := by
+  simp only [eval, hv]
+
+theorem eval_seq_cons_none (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (e f : Expr) (rest2 : List Expr) (env : Env) (T : TowerState)
+    (hv : eval n ptable level e env T = none) :
+    eval (n + 1) ptable level (.seq (e :: f :: rest2)) env T = none := by
+  simp only [eval, hv]
+
+/-- The `.seq` inductive step on the faithful `FrameβEvalStmt`. -/
+theorem frameβ_seq_eval (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (exps : List Expr) (exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_a : Val) (T_a' : TowerState)
+    (ih : FrameβEvalStmt n)
+    (hβ : BetaRel (.seq exps) exp_b)
+    (hwf : WFβ env_a env_b T_a T_b)
+    (henv : EnvVisβ env_a env_b T_a.heap T_b.heap)
+    (heval : eval (n + 1) ptable level (.seq exps) env_a T_a = some (r_a, T_a')) :
+    ∃ r_b T_b',
+      eval (n + 1) ptable level exp_b env_b T_b = some (r_b, T_b') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
+      WFβ env_a env_b T_a' T_b' ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧
+      EnvVisβ env_a env_b T_a'.heap T_b'.heap ∧
+      ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  cases exps with
+  | nil =>
+      have hb := hβ.seq_nil_inv; subst hb
+      simp only [eval, Option.some.injEq, Prod.mk.injEq] at heval
+      obtain ⟨hr, ht⟩ := heval; subst hr; subst ht
+      exact ⟨.nilV, T_b, by simp only [eval], fun m => by cases m <;> simp [ValVisβ_aux],
+             hwf, HeapEvolutionβ.refl _ _, henv, trivial, trivial⟩
+  | cons e rest =>
+      cases rest with
+      | nil =>
+          -- singleton `.seq [e]` : evaluates `e` directly
+          obtain ⟨e', rest', rfl, hβ_e, hβ_rest⟩ := hβ.seq_cons_inv
+          have hr : rest' = [] := by
+            have := hβ_rest.seq_nil_inv; exact Expr.seq.inj this
+          subst hr
+          simp only [eval] at heval
+          obtain ⟨r_b, T_b', h_eval_e_b, h_vv_r, hwf_out, h_he, h_env_out, hv_ra, hv_rb⟩ :=
+            ih ptable level e e' env_a env_b T_a T_b r_a T_a' hβ_e hwf henv heval
+          refine ⟨r_b, T_b', ?_, h_vv_r, hwf_out, h_he, h_env_out, hv_ra, hv_rb⟩
+          simp only [eval]; exact h_eval_e_b
+      | cons f rest2 =>
+          -- `.seq (e :: f :: rest2)` : head then tail-sequence
+          obtain ⟨e', rest', rfl, hβ_e, hβ_rest⟩ := hβ.seq_cons_inv
+          obtain ⟨f', rest2', hr'⟩ : ∃ f' rest2', rest' = f' :: rest2' := by
+            obtain ⟨f', rest2', hb_eq, _, _⟩ := hβ_rest.seq_cons_inv
+            exact ⟨f', rest2', Expr.seq.inj hb_eq⟩
+          subst hr'
+          cases hee : eval n ptable level e env_a T_a with
+          | none =>
+              rw [eval_seq_cons_none n ptable level e f rest2 env_a T_a hee] at heval
+              simp at heval
+          | some pr =>
+              obtain ⟨v_a, T_e_a⟩ := pr
+              rw [eval_seq_cons_step n ptable level e f rest2 env_a T_a T_e_a v_a hee] at heval
+              obtain ⟨v_b, T_e_b, h_eval_e_b, _h_vv_v, hwf_e, h_he_e, h_env_e, _, _⟩ :=
+                ih ptable level e e' env_a env_b T_a T_b v_a T_e_a hβ_e hwf henv hee
+              obtain ⟨r_b, T_b', h_eval_rest_b, h_vv_r, hwf_out, h_he_rest,
+                      h_env_out, hv_ra, hv_rb⟩ :=
+                ih ptable level (.seq (f :: rest2)) (.seq (f' :: rest2'))
+                  env_a env_b T_e_a T_e_b r_a T_a' hβ_rest hwf_e h_env_e heval
+              refine ⟨r_b, T_b', ?_, h_vv_r, hwf_out, h_he_e.trans h_he_rest,
+                      h_env_out, hv_ra, hv_rb⟩
+              rw [eval_seq_cons_step n ptable level e' f' rest2' env_b T_b T_e_b v_b h_eval_e_b]
+              exact h_eval_rest_b
 
 end LeanBlack
