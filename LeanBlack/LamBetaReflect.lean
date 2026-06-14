@@ -1927,6 +1927,55 @@ theorem gate_redex_to_letE_anyfuel (k : Nat) (ptable : PolicyTable) (level : Nat
   exact gate_redex_to_letE m ptable level x B V env T h_depth h_mat0 h_builtin0
     h_pure h_heap r Tf h_redex
 
+/-- **The reverse gate bridge: contractum ⟹ redex.** The operational core of the
+    *reverse* simulation `ReverseSimβ`.  Under the same standard gate + pure operand,
+    the `.letE` contractum and the β-redex reduce to the **identical** body
+    evaluation (`eval_letE` and `eval_beta_builtin` are both equations to
+    `eval n B (cons x …) {T' with heap := T'.heap ++ [v]}`), so the contractum's
+    convergence yields the redex's — at the *same result*, but **`+2` fuel** (the
+    redex spends a head step and an apply step the `.letE` does not;
+    `app_lam_redex_min_fuel`).  The operand's convergence (at fuel `n`) is extracted
+    from the converging `.letE`; purity carries the gate to the post-operand state. -/
+theorem gate_letE_to_redex (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (x : String) (B V : Expr) (env : Env) (T : TowerState)
+    (h_depth : level + 1 < Tower.maxDepth)
+    (h_mat0 : T.levels.length > level + 1)
+    (h_builtin0 : builtinBaseApplyAt level T)
+    (h_pure : Pure V = true) (h_heap : PureHeap T.heap)
+    (r : Val) (Tf : TowerState)
+    (h_letE : eval (n + 1) ptable level (.letE x V B) env T = some (r, Tf)) :
+    eval (n + 3) ptable level (.app [.lam [x] B, V]) env T = some (r, Tf) := by
+  cases h_ev : eval n ptable level V env T with
+  | none => simp [eval, h_ev] at h_letE
+  | some pr =>
+      obtain ⟨v_val, T'⟩ := pr
+      rw [eval_letE n ptable level x V B env T v_val T' h_ev] at h_letE
+      have h_ev' : eval (n + 1) ptable level V env T = some (v_val, T') :=
+        eval_fuel_mono (by omega) h_ev
+      have h_ext : StateExtends T T' := eval_pure_extends h_pure h_heap h_ev
+      have h_mat' : T'.levels.length > level + 1 := by have := h_ext.levels_le; omega
+      have h_builtin' : builtinBaseApplyAt level T' := builtinBaseApplyAt_extends h_ext h_builtin0
+      rw [eval_beta_builtin n ptable level x B V env T h_depth v_val T' h_ev' h_mat' h_builtin']
+      exact h_letE
+
+/-- `gate_letE_to_redex` at arbitrary fuel: a converging `.letE` (fuel `k ≥ 1`)
+    gives the redex at fuel `k + 2`. -/
+theorem gate_letE_to_redex_anyfuel (k : Nat) (ptable : PolicyTable) (level : Nat)
+    (x : String) (B V : Expr) (env : Env) (T : TowerState)
+    (h_depth : level + 1 < Tower.maxDepth)
+    (h_mat0 : T.levels.length > level + 1)
+    (h_builtin0 : builtinBaseApplyAt level T)
+    (h_pure : Pure V = true) (h_heap : PureHeap T.heap)
+    (r : Val) (Tf : TowerState)
+    (h_letE : eval k ptable level (.letE x V B) env T = some (r, Tf)) :
+    eval (k + 2) ptable level (.app [.lam [x] B, V]) env T = some (r, Tf) := by
+  obtain ⟨n, rfl⟩ : ∃ n, k = n + 1 := by
+    cases k with
+    | zero => simp [eval] at h_letE
+    | succ n => exact ⟨n, rfl⟩
+  exact gate_letE_to_redex n ptable level x B V env T h_depth h_mat0 h_builtin0
+    h_pure h_heap r Tf h_letE
+
 /-- **eval's `.app` root-contraction branch, under the recognized conditional
     premise** — `frameβ_app_root_evalW_cond` with its abstract `h_gate_b` discharged.
     The premise is now exactly `DUMP_LAM.md` §0's standard-gate `BuiltinReady` (depth
