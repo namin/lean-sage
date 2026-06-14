@@ -23,8 +23,13 @@
   This is the genuine new relational content the reflective cases need. It is
   isolated here so `LamBeta.lean` (the committed gate-free result) stays clean.
 
-  Status: linchpin `freshLevelEnv_envVisβ` proved; `WFCtxTβ` defined. The
-  reflective eval cases (`.em`/`.set`/`applyVia`) build on these.
+  Status: linchpin `freshLevelEnv_envVisβ` proved; `WFCtxTβ` defined; and the
+  full **`materialize` cross-side β preservation** (`materialize_MatInvβ`, via
+  `MatInvβ` + `materializeStep_MatInvβ`) proved — `materialize` carries the
+  cross-side level relation, establishing it for each fresh level by the
+  linchpin and lifting old levels by `EnvVisβ_extends`. The reflective eval
+  cases (`.em`/`.set`/`applyVia`) consume `materialize_MatInvβ` +
+  `materialize_cross_side_some_iff` directly.
 -/
 import LeanBlack.LamBeta
 import LeanBlack.Frame
@@ -227,5 +232,175 @@ structure WFCtxTβ (env_a env_b : Env) (T_a T_b : TowerState) (level : Nat)
   level_envs_visβ : ∀ n env_a' env_b',
     T_a.envAt? n = some env_a' → T_b.envAt? n = some env_b' →
     EnvVisβ env_a' env_b' T_a.heap T_b.heap
+
+/-! ## 7d. `materialize` preserves the cross-side β level invariant
+
+The reflective cases (`.em`, `applyVia`) materialize `level + 1` on both sides
+and then read the up-env. The invariant they carry/need is the cross-side
+β level relation `MatInvβ` (the `WFCtxTβ` level fields). This section proves
+`materialize` preserves it — establishing it for each newly-materialized level
+by the linchpin `freshLevelEnv_envVisβ` (§7b) and lifting the pre-existing
+levels by `EnvVisβ_extends`. The β replacement for `materialize_cross_side_*`
+(`Tower.lean`, which thread *equality*). -/
+
+/-- Appending a list of closure-free cells preserves `HeapValid`. -/
+theorem heapValid_append_closed (h ext : Heap)
+    (hh : HeapValid h) (hc : ∀ v ∈ ext, closedValB v = true) : HeapValid (h ++ ext) := by
+  intro i w hp
+  by_cases hlt : i < h.length
+  · have hp_old : h[i]? = some w := by rw [← getElem?_prefix h ext i hlt]; exact hp
+    exact ValValid.heap_extends w (hh i w hp_old) ⟨ext, rfl⟩
+  · rw [List.getElem?_append_right (Nat.le_of_not_lt hlt)] at hp
+    exact closedVal_ValValid w (hc w (List.mem_of_getElem? hp)) (h ++ ext)
+
+/-- `freshLevelEnv` preserves `HeapValid` (my own; `Frame`'s is `private`). -/
+theorem freshLevelEnv_heapValidβ (h : Heap) (hh : HeapValid h) :
+    HeapValid (freshLevelEnv h).1 := by
+  rw [freshLevelEnv_heap_eq, List.append_assoc]
+  refine heapValid_append_closed h _ hh ?_
+  intro v hv
+  rcases List.mem_append.mp hv with h_in | h_in
+  · exact primPairs_atoms_closed v h_in
+  · simp at h_in; rw [h_in]; rfl
+
+/-- `freshLevelEnv`'s env is valid in its heap (my own; via §7b at `h_a = h_b`). -/
+theorem freshLevelEnv_envValidβ (h : Heap) (hh : HeapValid h) :
+    EnvValid (freshLevelEnv h).2 (freshLevelEnv h).1 := by
+  obtain ⟨_, _, hev_fa, _, _⟩ :=
+    buildBindings_foldl_envVisβ primPairs h h .nil .nil primPairs_atoms_closed hh hh
+      (by intro _ _ hl; simp [Env.lookup] at hl) (by intro _ _ hl; simp [Env.lookup] at hl)
+      (by intro name; simp [EnvVisβ_aux, Env.lookup])
+  exact envValid_cons_fresh "base-apply" _ _ _ hev_fa
+
+/-- `materializeStep` reads back pre-existing levels unchanged. -/
+theorem materializeStep_envAt?_lt (T : TowerState) (n : Nat) (h : n < T.levels.length) :
+    (materializeStep T).envAt? n = T.envAt? n := by
+  unfold materializeStep TowerState.envAt? TowerState.levelAt?
+  rw [List.getElem?_append_left h]
+
+/-- `materializeStep`'s new level (at the old level-count index) holds the
+    fresh env. -/
+theorem materializeStep_envAt?_eq (T : TowerState) :
+    (materializeStep T).envAt? T.levels.length = some (freshLevelEnv T.heap).2 := by
+  unfold materializeStep TowerState.envAt? TowerState.levelAt?
+  rw [List.getElem?_append_right (Nat.le_refl _)]; simp
+
+/-- `materializeStep` reads back `none` past its (one larger) level count. -/
+theorem materializeStep_envAt?_gt (T : TowerState) (n : Nat) (h : T.levels.length < n) :
+    (materializeStep T).envAt? n = none := by
+  unfold materializeStep TowerState.envAt? TowerState.levelAt?
+  rw [List.getElem?_eq_none (by simp [List.length_append]; omega)]; rfl
+
+/-- The bundled cross-side β level invariant — the level fields of `WFCtxTβ`,
+    as a standalone predicate `materialize` preserves. -/
+def MatInvβ (T_a T_b : TowerState) : Prop :=
+  HeapValid T_a.heap ∧ HeapValid T_b.heap ∧
+  T_a.levels.length = T_b.levels.length ∧
+  (∀ n env, T_a.envAt? n = some env → EnvValid env T_a.heap) ∧
+  (∀ n env, T_b.envAt? n = some env → EnvValid env T_b.heap) ∧
+  (∀ n ea eb, T_a.envAt? n = some ea → T_b.envAt? n = some eb →
+    EnvVisβ ea eb T_a.heap T_b.heap)
+
+/-- **One `materializeStep` preserves `MatInvβ`.** The newly-materialized level
+    is related by the linchpin `freshLevelEnv_envVisβ`; pre-existing levels are
+    lifted across the heap extension by `EnvVisβ_extends`. -/
+theorem materializeStep_MatInvβ {T_a T_b : TowerState} (h : MatInvβ T_a T_b) :
+    MatInvβ (materializeStep T_a) (materializeStep T_b) := by
+  obtain ⟨hh_a, hh_b, h_count, hv_a, hv_b, h_visβ⟩ := h
+  -- new heaps extend the old by closure-free cells
+  obtain ⟨ext_a, hex_a⟩ := freshLevelEnv_heap_extends T_a.heap
+  obtain ⟨ext_b, hex_b⟩ := freshLevelEnv_heap_extends T_b.heap
+  have hstep_a : (materializeStep T_a).heap = (freshLevelEnv T_a.heap).1 := rfl
+  have hstep_b : (materializeStep T_b).heap = (freshLevelEnv T_b.heap).1 := rfl
+  have hh_a' : HeapValid (materializeStep T_a).heap := by
+    rw [hstep_a]; exact freshLevelEnv_heapValidβ T_a.heap hh_a
+  have hh_b' : HeapValid (materializeStep T_b).heap := by
+    rw [hstep_b]; exact freshLevelEnv_heapValidβ T_b.heap hh_b
+  have h_count' : (materializeStep T_a).levels.length = (materializeStep T_b).levels.length := by
+    rw [materializeStep_levels_length, materializeStep_levels_length, h_count]
+  -- pre-existing levels stay valid (heap_extends); the new level is fresh-valid
+  have hv_a' : ∀ n env, (materializeStep T_a).envAt? n = some env →
+      EnvValid env (materializeStep T_a).heap := by
+    intro n env hen
+    rw [hstep_a, hex_a]
+    by_cases hlt : n < T_a.levels.length
+    · rw [materializeStep_envAt?_lt T_a n hlt] at hen
+      exact EnvValid.heap_extends (hv_a n env hen) ⟨ext_a, rfl⟩
+    · by_cases heq : n = T_a.levels.length
+      · subst heq; rw [materializeStep_envAt?_eq] at hen
+        injection hen with hen; subst hen
+        rw [← hex_a]; exact freshLevelEnv_envValidβ T_a.heap hh_a
+      · rw [materializeStep_envAt?_gt T_a n (by omega)] at hen; simp at hen
+  have hv_b' : ∀ n env, (materializeStep T_b).envAt? n = some env →
+      EnvValid env (materializeStep T_b).heap := by
+    intro n env hen
+    rw [hstep_b, hex_b]
+    by_cases hlt : n < T_b.levels.length
+    · rw [materializeStep_envAt?_lt T_b n hlt] at hen
+      exact EnvValid.heap_extends (hv_b n env hen) ⟨ext_b, rfl⟩
+    · by_cases heq : n = T_b.levels.length
+      · subst heq; rw [materializeStep_envAt?_eq] at hen
+        injection hen with hen; subst hen
+        rw [← hex_b]; exact freshLevelEnv_envValidβ T_b.heap hh_b
+      · rw [materializeStep_envAt?_gt T_b n (by omega)] at hen; simp at hen
+  -- the cross-side β relation at every level of the stepped states
+  have h_visβ' : ∀ n ea eb, (materializeStep T_a).envAt? n = some ea →
+      (materializeStep T_b).envAt? n = some eb →
+      EnvVisβ ea eb (materializeStep T_a).heap (materializeStep T_b).heap := by
+    intro n ea eb hea heb
+    rw [hstep_a, hstep_b, hex_a, hex_b]
+    by_cases hlt : n < T_a.levels.length
+    · -- pre-existing level: lift the input relation across the extension
+      rw [materializeStep_envAt?_lt T_a n hlt] at hea
+      rw [materializeStep_envAt?_lt T_b n (h_count ▸ hlt)] at heb
+      exact EnvVisβ_extends ea eb T_a.heap T_b.heap ext_a ext_b hh_a hh_b
+        (hv_a n ea hea) (hv_b n eb heb) (h_visβ n ea eb hea heb)
+    · by_cases heq : n = T_a.levels.length
+      · -- the newly-materialized level: the linchpin
+        subst heq
+        rw [materializeStep_envAt?_eq] at hea
+        rw [h_count, materializeStep_envAt?_eq] at heb
+        injection hea with hea; injection heb with heb; subst hea; subst heb
+        rw [← hex_a, ← hex_b]
+        exact freshLevelEnv_envVisβ T_a.heap T_b.heap hh_a hh_b
+      · rw [materializeStep_envAt?_gt T_a n (by omega)] at hea; simp at hea
+  exact ⟨hh_a', hh_b', h_count', hv_a', hv_b', h_visβ'⟩
+
+/-- Iterating `materializeStep` preserves `MatInvβ`. -/
+theorem materializeStep_iter_MatInvβ (T_a T_b : TowerState) (k : Nat)
+    (h : MatInvβ T_a T_b) :
+    MatInvβ (Nat.fold k (fun _ _ T' => materializeStep T') T_a)
+            (Nat.fold k (fun _ _ T' => materializeStep T') T_b) := by
+  induction k with
+  | zero => simpa [Nat.fold] using h
+  | succ k ih => simp only [Nat.fold]; exact materializeStep_MatInvβ ih
+
+/-- **`materialize` preserves the cross-side β level invariant.** Whether it is
+    a no-op (level already materialized) or materializes new levels (the fold),
+    `MatInvβ` carries through — the β replacement for
+    `materialize_cross_side_envs_eq` (`Tower.lean`), built on the linchpin. This
+    is the fact `.em` / `applyVia` consume after materializing `level + 1` on
+    both sides: the up-envs are `EnvVisβ`-related (the `level_envs_visβ` field of
+    the resulting `MatInvβ`), and the single-side / count invariants hold. -/
+theorem materialize_MatInvβ {T_a T_b T_a' T_b' : TowerState} {n : Nat}
+    (h : MatInvβ T_a T_b)
+    (h_mat_a : T_a.materialize n = some T_a') (h_mat_b : T_b.materialize n = some T_b') :
+    MatInvβ T_a' T_b' := by
+  have h_count := h.2.2.1
+  unfold TowerState.materialize at h_mat_a h_mat_b
+  by_cases h1 : n ≥ Tower.maxDepth
+  · simp [h1] at h_mat_a
+  · simp [h1] at h_mat_a h_mat_b
+    by_cases h2 : T_a.levels.length > n
+    · have h2_b : T_b.levels.length > n := h_count ▸ h2
+      simp [h2] at h_mat_a; simp [h2_b] at h_mat_b
+      obtain rfl := h_mat_a.symm; obtain rfl := h_mat_b.symm
+      exact h
+    · have h2_b : ¬ T_b.levels.length > n := h_count ▸ h2
+      simp [h2] at h_mat_a; simp [h2_b] at h_mat_b
+      obtain rfl := h_mat_a.symm; obtain rfl := h_mat_b.symm
+      have h_eq_k : n + 1 - T_a.levels.length = n + 1 - T_b.levels.length := by rw [h_count]
+      rw [h_eq_k]
+      exact materializeStep_iter_MatInvβ T_a T_b _ h
 
 end LeanBlack
