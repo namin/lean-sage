@@ -2458,6 +2458,72 @@ theorem frameβ_em_evalWP (n : Nat) (ptable : PolicyTable) (level : Nat)
               policies_resp_all := h_ctx_out.policies_resp_all
               level_envs_visβ := h_ctx_out.level_envs_visβ }
 
+/-! ## 7p. The other three mutual clauses over `BReady`
+
+eval's `.app` calls `evalList` then `applyVia`, so those clauses must be premised
+too (eval's `.app` will feed them its `BReady`). Re-cuts of `frameβ_evalList_evalW`
+/ `frameβ_applyVia_eval` / `frameβ_applyDirect_evalW` onto the `BReady` premise; the
+threading is the same `BReady.closed` / `BReady.alloc` used in the eval cases. The
+value-side premise is `PureVal` / `PureValList` (the closure bodies a closure-op
+carries are pure). -/
+
+/-- `evalList` over `BReady` (the premised analog of `FrameβEvalListStmtW`). -/
+def FrameβEvalListStmtWP (n : Nat) : Prop :=
+  ∀ (ptable : PolicyTable) (level : Nat) (exps_a exps_b : List Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (rs_a : List Val) (T_a' : TowerState),
+    BetaRelList exps_a exps_b →
+    PureList exps_a = true →
+    PolicyTableRespectsBisimT ptable →
+    WFCtxTβ env_a env_b T_a T_b level →
+    BReady T_b →
+    evalList n ptable level exps_a env_a T_a = some (rs_a, T_a') →
+    ∃ rs_b T_b',
+      evalList n ptable level exps_b env_b T_b = some (rs_b, T_b') ∧
+      ListValVisβ rs_a rs_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ListValValid rs_a T_a'.heap ∧ ListValValid rs_b T_b'.heap
+
+/-- The `evalList` inductive step over `BReady` — re-cut of `frameβ_evalList_evalW`,
+    threading `BReady` across the (pure) head evaluation via `BReady.closed`. -/
+theorem frameβ_evalList_evalWP (n : Nat)
+    (ih_eval : FrameβEvalStmtWP n) (ih_list : FrameβEvalListStmtWP n) :
+    FrameβEvalListStmtWP (n + 1) := by
+  intro ptable level exps_a exps_b env_a env_b T_a T_b rs_a T_a' hβ hpure hresp_pt h_ctx hbr heval
+  cases hβ with
+  | nil =>
+      simp only [evalList, Option.some.injEq, Prod.mk.injEq] at heval
+      obtain ⟨hr, hT⟩ := heval; subst hr; subst hT
+      exact ⟨[], T_b, by simp [evalList], trivial, h_ctx, HeapEvolutionβ.refl _ _, trivial, trivial⟩
+  | cons hβ_e hβ_rest =>
+      rename_i e e' rest rest'
+      simp only [PureList, Bool.and_eq_true] at hpure
+      obtain ⟨hpe, hprest⟩ := hpure
+      simp only [evalList] at heval
+      cases he : eval n ptable level e env_a T_a with
+      | none => rw [he] at heval; simp at heval
+      | some pr =>
+          obtain ⟨v_a, T_a_inner⟩ := pr
+          rw [he] at heval; simp only at heval
+          cases hrest : evalList n ptable level rest env_a T_a_inner with
+          | none => rw [hrest] at heval; simp at heval
+          | some pr2 =>
+              obtain ⟨vs_a, T_a_inner2⟩ := pr2
+              rw [hrest] at heval; simp only [Option.some.injEq, Prod.mk.injEq] at heval
+              obtain ⟨hr, hT⟩ := heval; subst hr; subst hT
+              obtain ⟨v_b, T_b_inner, h_eval_e_b, h_vv_v, h_ctx_inner, h_he_inner, hv_va, hv_vb⟩ :=
+                ih_eval ptable level e e' env_a env_b T_a T_b v_a T_a_inner hβ_e hpe hresp_pt h_ctx hbr he
+              have hbr_inner : BReady T_b_inner := BReady.closed hbr (hβ_e.pure_preserve hpe) h_eval_e_b
+              obtain ⟨vs_b, T_b_inner2, h_eval_rest_b, h_lvv, h_ctx_inner2, h_he_inner2,
+                      hv_vsa, hv_vsb⟩ :=
+                ih_list ptable level rest rest' env_a env_b T_a_inner T_b_inner vs_a T_a_inner2
+                  hβ_rest hprest hresp_pt h_ctx_inner hbr_inner hrest
+              have h_vv_v' : ValVisβ v_a v_b T_a_inner2.heap T_b_inner2.heap :=
+                h_he_inner2.valVisβ_preserve v_a v_b hv_va hv_vb h_vv_v
+              have hv_va' : ValValid v_a T_a_inner2.heap := ValValid.length_mono v_a hv_va h_he_inner2.len_a
+              have hv_vb' : ValValid v_b T_b_inner2.heap := ValValid.length_mono v_b hv_vb h_he_inner2.len_b
+              refine ⟨v_b :: vs_b, T_b_inner2, ?_, ⟨h_vv_v', h_lvv⟩, h_ctx_inner2,
+                      h_he_inner.trans h_he_inner2, ⟨hv_va', hv_vsa⟩, ⟨hv_vb', hv_vsb⟩⟩
+              simp [evalList, h_eval_e_b, h_eval_rest_b]
+
 end LeanBlack
 
 
