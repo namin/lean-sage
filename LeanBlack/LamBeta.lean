@@ -31,7 +31,10 @@
     `_weak` extension lemmas) and, the genuine new relational content,
     `EnvVisβ_alloc_cons`: threading `EnvVisβ` across a *cross-side*
     allocation, where `frame_tower` instead proves the two environments
-    Lean-equal. Plus the `.ifte` / `.letE` `BetaRel` inversions.
+    Lean-equal. Plus the `.ifte` / `.letE` `BetaRel` inversions, and §4d's
+    **`BetaRel.app_inv`** — the elimination side's structural primitive (β
+    under `.app` is a disjunction: still an `.app`, or a root contraction)
+    over `BetaRelList` (the `evalList`-clause relation).
     §5 records precisely what this closes and what stays open.
   - §6: the faithful eval obligation (`HeapEvolutionβ`, `WFβ`,
     `FrameβEvalStmt`) with **every gate-free structural case discharged** —
@@ -634,10 +637,10 @@ theorem EnvVisβ_alloc_cons (x : String) (env_a env_b : Env) (v_a v_b : Val)
 fundamental lemma needs the analogous inversion — "β under `F` stays an
 `F` with `BetaRel`-related children" — to expose the other side's shape.
 Here are the two control-flow formers; `.seq` / `.set` / `.primApp`
-follow the same template. The omitted `.app` case is the genuinely hard
-one: it additionally admits a *root* contraction (the redex *is* an
-app), so its inversion is a disjunction, not a congruence — that is the
-elimination side of the open core. -/
+follow the same template. The `.app` case is the genuinely hard one: it
+additionally admits a *root* contraction (the redex *is* an app), so its
+inversion is a disjunction, not a congruence — that is the elimination
+side of the open core, discharged in §4d. -/
 
 /-- β under `.ifte` stays an `.ifte`, β-relating the three children. -/
 theorem BetaRel.ifte_inv {c t e b : Expr}
@@ -691,6 +694,103 @@ theorem BetaRel.letE_inv {x : String} {e1 body b : Expr}
           rw [hbb]; simp only [Ctx.plug]; rw [hx_eq]
       | _ => simp [Ctx.plug] at hC
 
+/-! ### 4d. The `.app` `BetaRel` inversion — the elimination side's
+    structural primitive
+
+Unlike the §4c congruences, β under `.app` admits a **root** contraction
+(the redex *is* an application), so its inversion is a *disjunction*:
+either every contraction stayed internal to the argument list — `b` is
+still an `.app` whose arguments are `BetaRelList`-related to the original
+— or at some point the application `(λx. body) v` itself contracted, after
+which `b` is `BetaRel`-reachable from the contractum `let x = v in body`.
+
+This is the inversion the gated `.app` / `applyVia` eval case consumes
+(the elimination side of the open core). `BetaRelList` — pointwise
+`BetaRel` on argument lists — is *also* the relation the full mutual
+statement's `evalList` clause needs (the `ListValVisβ` mirror at the
+expression level), so it is built here once. -/
+
+/-- Pointwise `BetaRel` on argument lists: the `evalList` analog of
+    `BetaRel`, relating two lists of the same length elementwise. -/
+inductive BetaRelList : List Expr → List Expr → Prop
+  | nil : BetaRelList [] []
+  | cons {a b : Expr} {as bs : List Expr} :
+      BetaRel a b → BetaRelList as bs → BetaRelList (a :: as) (b :: bs)
+
+theorem BetaRelList.refl : ∀ (xs : List Expr), BetaRelList xs xs
+  | []      => .nil
+  | _ :: xs => .cons (.refl _) (refl xs)
+
+theorem BetaRelList.trans {as bs cs : List Expr}
+    (h1 : BetaRelList as bs) (h2 : BetaRelList bs cs) : BetaRelList as cs := by
+  induction h1 generalizing cs with
+  | nil => exact h2
+  | cons hab _ ih =>
+      cases h2 with
+      | cons hbc hbcs => exact .cons (hab.trans hbc) (ih hbcs)
+
+theorem BetaRelList.append {as as' bs bs' : List Expr}
+    (h1 : BetaRelList as as') (h2 : BetaRelList bs bs') :
+    BetaRelList (as ++ bs) (as' ++ bs') := by
+  induction h1 with
+  | nil => exact h2
+  | cons hab _ ih => exact .cons hab ih
+
+/-- **β under `.app` — the disjunction inversion.** Either `b` is still an
+    application with `BetaRelList`-related arguments (no root contraction
+    fired), or the original application β-reduces to a concrete redex
+    `(λx. body) v` and `b` is `BetaRel`-reachable from its contractum
+    `let x = v in body` (a root contraction fired, and everything after it
+    happens in the contractum). -/
+theorem BetaRel.app_inv {args : List Expr} {b : Expr}
+    (h : BetaRel (.app args) b) :
+    (∃ args', b = .app args' ∧ BetaRelList args args')
+    ∨ (∃ (x : String) (body v : Expr),
+         BetaRel (.app args) (.app [.lam [x] body, v]) ∧
+         BetaRel (.letE x v body) b) := by
+  induction h with
+  | refl => exact Or.inl ⟨args, rfl, BetaRelList.refl args⟩
+  | tail hmid step ih =>
+      cases ih with
+      | inl hl =>
+          obtain ⟨margs, rfl, hForall⟩ := hl
+          obtain ⟨C, x, body, v, hC, hb⟩ := step
+          cases C with
+          | hole =>
+              simp only [Ctx.plug, Expr.app.injEq] at hC
+              subst hC
+              exact Or.inr ⟨x, body, v, hmid, by rw [hb]; simp only [Ctx.plug]; exact .refl _⟩
+          | app pre C' post =>
+              simp only [Ctx.plug, Expr.app.injEq] at hC
+              subst hC
+              refine Or.inl ⟨pre ++ C'.plug (.letE x v body) :: post, ?_, ?_⟩
+              · rw [hb]; simp only [Ctx.plug]
+              · exact hForall.trans (BetaRelList.append (BetaRelList.refl pre)
+                  (BetaRelList.cons (BetaRel.beta C' x body v) (BetaRelList.refl post)))
+          | _ => simp [Ctx.plug] at hC
+      | inr hr =>
+          obtain ⟨x, body, v, h1, h2⟩ := hr
+          exact Or.inr ⟨x, body, v, h1, h2.tail step⟩
+
+/-- **`app_inv` detects the Wand pair's root contraction** — the
+    elimination-side analog of `ValVisβ_relates_beta_closures`. For the
+    artifact's own redex `(λx. x) 0` reducing to `let x = 0 in x`, the
+    contractum is *not* an application, so `app_inv` cannot fall into its
+    "still an `.app`" branch; it must (and does) land in the root-
+    contraction branch, exposing the very redex `(λx. x) 0` whose
+    contractum it reduces through. This pins that the disjunction is not
+    vacuously satisfied by the internal branch alone. -/
+theorem app_inv_wand_detects_root :
+    ∃ (x : String) (body v : Expr),
+      BetaRel (.app [.lam ["x"] (.var "x"), .num 0]) (.app [.lam [x] body, v]) ∧
+      BetaRel (.letE x v body) (.letE "x" (.num 0) (.var "x")) := by
+  have h : BetaRel (.app [.lam ["x"] (.var "x"), .num 0])
+                   (.letE "x" (.num 0) (.var "x")) :=
+    BetaRel.beta .hole "x" (.var "x") (.num 0)
+  rcases h.app_inv with ⟨_, heq, _⟩ | hroot
+  · exact absurd heq (by simp)
+  · exact hroot
+
 /-! ## 5. What §4 closes, and what is still open
 
 **In hand (this section, sorry-free, axioms ⊆ {propext, Classical.choice,
@@ -708,6 +808,13 @@ Quot.sound}).** The body-independent substrate the allocating cases need:
   different fresh indices), and this lemma supplies that.
 * `BetaRel.ifte_inv` / `BetaRel.letE_inv` — two more structural inversions
   in the `lam_inv` family.
+* **`BetaRel.app_inv`** (§4d) — the elimination side's structural primitive,
+  now proved: β under `.app` is a *disjunction* — still an `.app` with
+  `BetaRelList`-related arguments, or a root contraction to the contractum.
+  Built on `BetaRelList` (pointwise `BetaRel` on argument lists, with
+  `refl` / `trans` / `append`), which is also the `evalList`-clause relation
+  the full mutual statement needs. `app_inv_wand_detects_root` validates that
+  the disjunction's root-contraction branch genuinely fires for the Wand pair.
 
 §6 then assembles the eval obligation (`HeapEvolutionβ`, `WFβ`) and
 discharges **every gate-free structural case** on it: the allocating
@@ -730,14 +837,17 @@ faithful eval clause is now closed**.
    deliberately, *with* those cases below: a wrapper carrying half-formed
    reflective fields would misstate the boundary.
 2. *The elimination side* — `.app` / `applyVia`, the **gate threading**
-   (route (b)). The `.app` `BetaRel` inversion is itself a disjunction
-   (root contraction: the redex *is* an app), and the closure is *run*
-   through the `base-apply` gate. This, with the reflective `.em` / `.set`,
-   is where the real research risk sits; `BuiltinReady` (standard gate) is
-   the premise that is meant to tame it. The de-risking first target is the
-   concrete Wand pair `(λx. x) 0` / `let x = 0 in x` under a binder, whose
-   redex/contractum closures `ValVisβ_relates_beta_closures` (§2) already
-   relates.
+   (route (b)). The structural half is now in hand: `app_inv` (§4d) supplies
+   the `BetaRel` inversion (the disjunction whose root-contraction branch is
+   the genuine novelty), and `BetaRelList` the `evalList` relation. What
+   remains is the *evaluation* of the app: the closure is **run** through the
+   `base-apply` gate, so its body evaluates and the two sides — redex-applied
+   vs. contractum-bound — must be shown to reach `ValVisβ`-related results.
+   This, with the reflective `.em` / `.set`, is where the real research risk
+   sits; `BuiltinReady` (standard gate) is the premise that is meant to tame
+   it. The de-risking first target is the concrete Wand pair `(λx. x) 0` /
+   `let x = 0 in x` under a binder, whose redex/contractum closures
+   `ValVisβ_relates_beta_closures` (§2) already relates.
 
 With every structural case discharged, the remaining work is exactly
 (1) the statement wrapper and (2) the gate — no structural plumbing is
