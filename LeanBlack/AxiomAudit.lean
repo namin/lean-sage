@@ -20,6 +20,7 @@ import LeanBlack.ProofBased
 import LeanBlack.Compose
 import LeanBlack.ContextualBetaPure
 import LeanBlack.CtxEquiv
+import LeanBlack.LamBetaReflect
 import LeanBlack.GovChain
 
 open LeanBlack
@@ -56,8 +57,11 @@ open LeanBlack
 #guard_msgs in
 #print axioms contextual_beta_at_start
 
--- `.lam` case diagnosis (`CtxEquiv.lean`): the two impossibility results
--- that pin why the `.lam` case is not closable in either naive frame.
+-- `.lam` case diagnosis: the three impossibility results that pin why the `.lam`
+-- case is not closable in any naive frame. A and B (`CtxEquiv.lean`) force the
+-- ground coarsening and the side conditions; C (`LamBetaReflect.lean`) shows the
+-- backward `.lam` simulation `ReverseSimβ`, stated with the all-levels gate but no
+-- depth margin, is false — so the gate alone is insufficient for the reverse.
 /-- info: 'LeanBlack.lam_EvalEquiv_congruence_fails' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms LeanBlack.lam_EvalEquiv_congruence_fails
@@ -65,6 +69,10 @@ open LeanBlack
 /-- info: 'LeanBlack.beta_not_unconditional_CtxEquiv' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms LeanBlack.beta_not_unconditional_CtxEquiv
+
+/-- info: 'LeanBlack.reverseSimβ_false' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms LeanBlack.reverseSimβ_false
 
 /-- info: 'LeanBlack.chain_CE' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in

@@ -1,14 +1,16 @@
-# The reverse simulation: the `.lam` headline is blocked on `ReverseSimβ`
+# The reverse simulation: `ReverseSimβ` is false (Obstruction C), and the conditional path
 
-**Status (2026-06-14): `ReverseSimβ` as currently stated is false.** This file was
-originally written as if `ReverseSimβ` were "the one remaining obligation, a
-mechanical mirror of `frameβ_tower` — the math is done." That framing is wrong.
-The same depth/gate obstruction that makes β only a *conditional* equivalence
-(`beta_not_unconditional_CtxEquiv`, `CtxEquiv.lean` §4) is **fatal** to
-`ReverseSimβ`, because the reverse simulation is b-side-driven. The recursive
-reverse eval cases are proved; the `.app`-root case, the assembler, the mutual
-tower, and the discharge are blocked — not by bookkeeping, but by a missing
-depth-budget side condition (the genuine open core, `CtxEquiv.lean` §5).
+**Status (2026-06-14): `ReverseSimβ` as stated is false — now machine-checked
+(`reverseSimβ_false`) — and the conditional path to the `.lam` equivalence is scoped
+and de-risked.** This file was originally written as if `ReverseSimβ` were "the one
+remaining obligation, a mechanical mirror of `frameβ_tower` — the math is done." That
+framing was wrong. The same depth/gate obstruction that makes β only a *conditional*
+equivalence (`beta_not_unconditional_CtxEquiv`, `CtxEquiv.lean` §4) is **fatal** to
+`ReverseSimβ`, because the reverse simulation is b-side-driven. The recursive reverse
+eval cases are proved (the down payment); the `.app`-root case is blocked under the
+*current* statement by a missing depth-budget side condition — but that condition is
+the known one (`CtxEquiv.lean` §5), and "The path to the prize" below shows the root
+closes under it without new machinery.
 
 ## Why `ReverseSimβ` is false as stated
 
@@ -48,9 +50,10 @@ The premises hold at `lvl = 15` for a 16-level `BReady` tower while the
 conclusion's a-side existential cannot — so `ReverseSimβ` is false. This is exactly
 `beta_not_unconditional_CtxEquiv` (same pair distinguished at `level 15`) lifted to
 the `BReady` setting; adding levels does not let the redex fire, because
-`materialize 16 = none` regardless. *(The argument is rigorous and reuses the
-machine-checked `beta_not_unconditional_CtxEquiv` mechanism, but is not yet itself a
-machine-checked `¬ ReverseSimβ`; see “Definitive next step”.)*
+`materialize 16 = none` regardless. **This is now machine-checked:
+`reverseSimβ_false : ¬ ReverseSimβ` (`LamBetaReflect.lean`), the witness above on a
+full `buildTower 16`, axiom-clean and CI-audited in `AxiomAudit.lean`.** It is the
+**third impossibility result**, alongside Obstructions A and B.
 
 **Why the forward FL escapes.** `frameβ_eval_FL` carries the *same* premises yet is
 proved, because it is **a-side-driven**: when the a-side redex converges it
@@ -86,24 +89,52 @@ corrected statement (except the `.app` root).
   `ReverseSimβ` as a *hypothesis*) stay un-instantiable, and the `.lam` headline via
   this route is not reached.
 
-## The real open core (= `CtxEquiv.lean` §5)
+## The path to the prize (the conditional `.lam` equivalence)
 
-Closing the reverse is **not** a mechanical mirror. It needs the depth-budget side
-condition §5 already identifies ("standard gate **with depth margin** + pure"):
-- A naive `level+1 < maxDepth` premise on `FrameβEvalStmtRev` does **not** thread
-  through `.em`, which recurses at `level+1` (and would then need `level+2 <
-  maxDepth`). The condition must be a *budget* that decreases through reflective
-  nesting — exactly the "em-nesting to any depth in the tower bound" that
-  `contextual_beta_pure` carries for the lam-free cases.
-- So the reverse's completion is coupled to the same reflective depth-budget problem
-  that makes β conditional in the first place — it is open core, not packaging.
+The obstruction is now pinned (Obstruction C, machine-checked). The reverse is **not**
+a dead end — it is conditional, and the condition is the one `CtxEquiv.lean` §5 and
+`contextual_beta_pure` already name. Concretely:
 
-## Definitive next step
+**1. The right side condition is a depth *budget*, not a flat margin.** Add to
+`FrameβEvalStmtRev` a premise of the form `level + emDepth exp_a < Tower.maxDepth`
+(an `Expr.emDepth`, mirroring the existing `Ctx.emDepth`). The quantity
+`level + emDepth` is **invariant under `.em`** — `.em` recurses at `level+1` on a body
+of `emDepth - 1`, so the sub-call's budget equals the parent's. A flat
+`level+1 < maxDepth` does *not* thread (it would need `level+2 < maxDepth` under `.em`);
+the budget does. This is exactly `contextual_beta_at_start`'s `C.emDepth + 1 < maxDepth`
+premise, now carried into the reflective (`.lam`) frame.
 
-Either:
-- **(a)** machine-check `¬ ReverseSimβ` — a third impossibility result alongside
-  `lam_EvalEquivAt_forces_empty` and `beta_not_unconditional_CtxEquiv`; needs a
-  16-level `BReady` witness tower at `level 15` (the redex/contractum pair above); or
-- **(b)** restate `ReverseSimβ` / `FrameβEvalStmtRev` with the §5 depth-budget side
-  condition and complete the `.app` root + assembler + tower + discharge under it.
-  Everything in “What is proved” transfers to (b) unchanged except the `.app` root.
+**2. The `.app` root closes under the budget without the `+2` problem.** The earlier
+worry — `gate_letE_to_redex` raises the redex's fuel `+2` over the contractum, so a
+tower-mirror reverse would need IHs at `n+2` while the induction gives `n` — is
+**avoidable**. Don't convert contractum↦redex via `gate_letE_to_redex`. Instead
+reconstruct the a-side redex *directly* from the IHs the mutual tower already provides:
+the b-side contractum `let x=V_b in B_b` (fuel `n+1`) internally evaluates `V_b`
+(fuel `≤ n`) and `B_b` (fuel `n`) in the alloc-extended context; the **reverse `eval`
+IH on the operand** gives the a-side `V_a` (+`ValVisβ`), the **reverse `eval` IH on the
+body** gives the a-side `B_a` run in the matching alloc-extended context, and the redex
+is then *assembled* — `applyVia` on the closure (its `materialize (level+1)` succeeds
+**because of the budget**) → `applyDirect` closure case → that same body run. Both the
+alloc-context plumbing (`frameβ_letE_evalRev`) and the closure application
+(`frameβ_applyDirect_evalRev`) are **already proved**; the redex's extra steps are
+absorbed by the conclusion's `∃ k`. No `gate_letE_to_redex`, no `+2`, IHs at `n`.
+
+**3. The down payment is in hand.** Everything in "What is proved" transfers to the
+budgeted statement unchanged except the `.app` root (the recursive cases just thread
+the budget to their sub-calls; the budget invariant makes that mechanical, and `.em`
+is already vacuous-or-fine). So the remaining work is: define `Expr.emDepth`; add the
+budget premise; prove the `.app` root by §2; thread the budget through the assembler;
+re-run the mutual tower and discharge the (now true) budgeted `ReverseSimβ⁺`; lift to
+`obsConv_iff_beta` and `Ctx.plug_cong_master`-to-`.lam`.
+
+## Status summary
+
+- **Salvage (done):** the dividing line is fully machine-checked — forward `.lam`
+  refinement (`obsConv_refine_forward`) + three axiom-audited impossibilities
+  (`lam_EvalEquiv_congruence_fails`, `beta_not_unconditional_CtxEquiv`,
+  `reverseSimβ_false`). β under a reflective binder is a *strict refinement*, an
+  equivalence only under the gate + pure + depth budget.
+- **Prize (scoped, de-risked):** the conditional `.lam` equivalence under the budget,
+  via §1–§3 above. No longer "mechanical mirror" and no longer "false" — a bounded,
+  reuse-heavy effort whose one genuinely new lemma (the `.app` root, §2) has a clear
+  proof plan that needs no machinery the reverse build doesn't already have.

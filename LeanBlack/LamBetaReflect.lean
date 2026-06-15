@@ -4804,6 +4804,92 @@ theorem frameβ_app_structural_evalRev (n : Nat) (ptable : PolicyTable) (level :
                   (EnvValid.length_mono h_ctx.ev_b h_he_chain.len_b)
                   (h_he_chain.envVisβ_preserve env_a env_b h_ctx.ev_a h_ctx.ev_b h_ctx.env_visβ)
 
+/-! ## 8. `ReverseSimβ` is false — the reverse simulation cannot hold
+
+`ReverseSimβ` would let the contractum's convergence *force* the redex's.
+But at the **top of the tower** (`lvl = maxDepth - 1 = 15`) the redex
+`(λx. x) 0` cannot apply — `applyVia` materializes `lvl + 1 = 16 ≥ maxDepth`,
+which is `none` — so it never converges, while the contractum
+`let x = 0 in x` still converges to `0`.  This is the *full-tower* analogue
+of `beta_not_unconditional_CtxEquiv` (empty tower), now satisfying the
+strong `BReady` (all-levels gate) premise `ReverseSimβ` carries. -/
+
+/-- `buildTower N` materializes to `buildTower (N+1)` by one `materializeStep`,
+    expressed through `TowerState.materialize` (so the public preservation
+    wrappers apply). Needs `N < maxDepth` for `materialize` to succeed. -/
+private theorem buildTower_materialize_succ (N : Nat) (hN : N < Tower.maxDepth) :
+    (buildTower N).materialize ((buildTower N).levels.length) = some (buildTower (N + 1)) := by
+  rw [buildTower_levels_length]
+  unfold TowerState.materialize
+  rw [if_neg (by omega), if_neg (by rw [buildTower_levels_length]; omega)]
+  rw [buildTower_levels_length]
+  rw [show N + 1 - N = 1 by omega]
+  rw [buildTower_succ]
+  simp [Nat.fold]
+
+/-- Every level env of `buildTower N` is valid in its heap (and the heap is
+    deeply valid). Proved jointly by induction so the `materialize` wrappers
+    (which need `HeapValid` as a side hypothesis) chain. -/
+private theorem buildTower_HeapValid_and_envsValid (N : Nat) (hN : N ≤ Tower.maxDepth) :
+    HeapValid (buildTower N).heap ∧
+    (∀ m env, (buildTower N).envAt? m = some env → EnvValid env (buildTower N).heap) := by
+  induction N with
+  | zero =>
+      refine ⟨?_, ?_⟩
+      · intro i v h; rw [show (buildTower 0).heap = [] from rfl] at h; cases h
+      · intro m env h
+        rw [show (buildTower 0) = ({ heap := [], levels := [] } : TowerState) from rfl] at h
+        unfold TowerState.envAt? TowerState.levelAt? at h
+        simp at h
+  | succ N ih =>
+      obtain ⟨hHV, hEV⟩ := ih (by omega)
+      have hmat := buildTower_materialize_succ N (by omega)
+      refine ⟨?_, ?_⟩
+      · exact materialize_HeapValid_preserves _ _ _ hmat hHV
+      · exact materialize_level_envs_valid_preserves _ _ _ hmat hHV hEV
+
+/-- Every policy of `buildTower N` respects bisim (they are all
+    `rejectAllPolicy`). -/
+private theorem buildTower_policies_resp (N : Nat) (hN : N ≤ Tower.maxDepth) :
+    ∀ m p, (buildTower N).policyAt? m = some p → PolicyRespectsBisimT p := by
+  induction N with
+  | zero =>
+      intro m p h
+      rw [show (buildTower 0) = ({ heap := [], levels := [] } : TowerState) from rfl] at h
+      unfold TowerState.policyAt? TowerState.levelAt? at h
+      simp at h
+  | succ N ih =>
+      have hmat := buildTower_materialize_succ N (by omega)
+      exact materialize_policies_resp_preserves _ _ _ _ hmat (ih (by omega))
+        rejectAllPolicy_respects_bisimT
+
+theorem reverseSimβ_false : ¬ ReverseSimβ := by
+  intro h
+  -- BReady (buildTower 16)
+  have hbr : BReady (buildTower 16) := by
+    refine ⟨⟨?_, fun L hL => buildTower_builtin 16 L hL⟩, buildTower_pureHeap 16⟩
+    rw [buildTower_levels_length]; decide
+  -- The diagonal well-formedness at level 15.
+  obtain ⟨hHV, hEV⟩ := buildTower_HeapValid_and_envsValid 16 (by decide)
+  have hwf : WFCtxTβ Env.nil Env.nil (buildTower 16) (buildTower 16) 15 :=
+    WFCtxTβ.refl hHV (fun x i hl => by simp [Env.lookup] at hl) hEV
+      (buildTower_policies_resp 16 (by decide))
+  -- BetaRel ea eb  (β root step in the empty context)
+  have hβ : BetaRel (.app [.lam ["x"] (.var "x"), .num 0])
+      (.letE "x" (.num 0) (.var "x")) := by
+    have := BetaRel.beta Ctx.hole "x" (.var "x") (.num 0)
+    simpa [Ctx.plug] using this
+  have hpure : Pure (.app [.lam ["x"] (.var "x"), .num 0]) = true := by decide
+  -- b-side contractum converges at fuel 2
+  have hev_b : eval 2 [] 15 (.letE "x" (.num 0) (.var "x")) Env.nil (buildTower 16)
+      = some (Val.num 0, ((buildTower 16).alloc (Val.num 0)).1) := by
+    simp [eval, TowerState.alloc, Env.lookup, Heap.alloc]
+  obtain ⟨k', ra, Sa', hev_a, _⟩ :=
+    h 2 [] 15 _ _ Env.nil Env.nil (buildTower 16) (buildTower 16) _ _ hβ hpure
+      (fun idx p hp => by simp at hp) hwf hbr hev_b
+  rw [eval_app_depth_none _ _ _ _ (show Tower.maxDepth ≤ 15 + 1 by decide) k'] at hev_a
+  exact absurd hev_a (by simp)
+
 end LeanBlack
 
 
