@@ -4936,6 +4936,193 @@ theorem reverseSimβ_false : ¬ ReverseSimβ := by
   rw [eval_app_depth_none _ _ _ _ (show Tower.maxDepth ≤ 15 + 1 by decide) k'] at hev_a
   exact absurd hev_a (by simp)
 
+/-- **Cross-side transport of the standard gate.** From a `WFCtxTβ` and the b-side
+    `builtinBaseApplyAt`, the a-side `builtinBaseApplyAt` follows: equal level counts
+    materialize the same `level+1` up-env on the a-side; the level invariant relates
+    the two up-envs (`EnvVisβ`); and the b-side `base-apply` cell being the ground
+    `.builtinBaseApply` pins the a-side cell to the same (`ValVisβ_builtinBaseApply_iff`). -/
+theorem builtinBaseApplyAt_cross_of_WFCtxTβ {env_a env_b : Env}
+    {T_a T_b : TowerState} {level : Nat}
+    (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (h_b : builtinBaseApplyAt level T_b) : builtinBaseApplyAt level T_a := by
+  obtain ⟨upEnv_b, idx_b, h_env_b, h_lookup_b, h_cell_b⟩ := h_b
+  obtain ⟨upEnv_a, h_env_a⟩ :=
+    envAt?_some_cross T_b T_a (level + 1) upEnv_b h_ctx.level_count_eq.symm h_env_b
+  have h_vis := h_ctx.level_envs_visβ (level + 1) upEnv_a upEnv_b h_env_a h_env_b
+  -- read off the a-side lookup (must be `some`) and the a-side cell (must be the builtin)
+  cases h_lookup_a : upEnv_a.lookup "base-apply" with
+  | none =>
+      have h1 := h_vis 1 "base-apply"
+      simp only [h_lookup_a, h_lookup_b] at h1
+  | some idx_a =>
+      cases h_cell_a : T_a.heap[idx_a]? with
+      | none =>
+          have h1 := h_vis 1 "base-apply"
+          simp only [h_lookup_a, h_lookup_b, h_cell_a, h_cell_b] at h1
+      | some cell_a =>
+          -- build the full cross-side `ValVisβ` from the level relation; the b-side cell is
+          -- the ground `.builtinBaseApply`, so the a-side cell collapses to it
+          have h_cell_vis : ValVisβ cell_a .builtinBaseApply T_a.heap T_b.heap := by
+            intro m
+            have hm := h_vis m "base-apply"
+            simp only [h_lookup_a, h_lookup_b, h_cell_a, h_cell_b] at hm
+            exact hm
+          have h_eq : cell_a = .builtinBaseApply :=
+            (ValVisβ_builtinBaseApply_iff h_cell_vis).mpr rfl
+          exact ⟨upEnv_a, idx_a, h_env_a, h_lookup_a, by rw [h_cell_a, h_eq]⟩
+
+/-- **The reverse β-redex/contractum step, budgeted (literal λ).** The b-side drives
+    with the `.letE` contractum; the a-side redex `(λx.body_a) v_a` is reconstructed
+    directly (operand IH, alloc-context, body IH, then `eval_beta_builtin` assembles the
+    redex from the body run via the cross-side-transported standard gate). The redex-proper
+    reverse — the heart of the conditional `.lam` equivalence. -/
+theorem frameβ_redex_letE_evalRevB (n : Nat) (ptable : PolicyTable) (level : Nat)
+    (x : String) (body_a v_a body_b v_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_b : Val) (T_b' : TowerState)
+    (ih_eval : FrameβEvalStmtRevB n)
+    (hβ_body : BetaRel body_a body_b) (hβ_v : BetaRel v_a v_b)
+    (hpure_body : Pure body_a = true) (hpure_v : Pure v_a = true)
+    (hresp : PolicyTableRespectsBisimT ptable)
+    (h_ctx : WFCtxTβ env_a env_b T_a T_b level)
+    (hbr : BReady T_b)
+    (hbudget : level + (Expr.app [Expr.lam [x] body_a, v_a]).emDepth + 1 < Tower.maxDepth)
+    (heval : eval (n + 1) ptable level (.letE x v_b body_b) env_b T_b = some (r_b, T_b')) :
+    ∃ (k : Nat) (r_a : Val) (T_a' : TowerState),
+      eval k ptable level (.app [.lam [x] body_a, v_a]) env_a T_a = some (r_a, T_a') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧ WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧ ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap := by
+  -- budget unfolding: emDepth of the redex is `max body_a.emDepth v_a.emDepth`
+  have h_emDepth : (Expr.app [Expr.lam [x] body_a, v_a]).emDepth
+      = max body_a.emDepth v_a.emDepth := by
+    simp only [Expr.emDepth, Expr.emDepthList, Nat.max_zero]
+  rw [h_emDepth] at hbudget
+  have hbudget_v : level + v_a.emDepth + 1 < Tower.maxDepth := by
+    have := Nat.le_max_right body_a.emDepth v_a.emDepth; omega
+  have hbudget_body : level + body_a.emDepth + 1 < Tower.maxDepth := by
+    have := Nat.le_max_left body_a.emDepth v_a.emDepth; omega
+  have hdepth : level + 1 < Tower.maxDepth := by
+    have := Nat.zero_le (max body_a.emDepth v_a.emDepth); omega
+  -- b-side purity (from a-side purity + the BetaRel pair)
+  have hpv_b : Pure v_b = true := hβ_v.pure_preserve hpure_v
+  -- unfold the b-side `.letE`: operand then alloc then body
+  simp only [eval] at heval
+  cases he : eval n ptable level v_b env_b T_b with
+  | none => rw [he] at heval; simp at heval
+  | some pr =>
+    obtain ⟨v_b_val, T_b1⟩ := pr
+    rw [he] at heval
+    -- STEP 1 — operand: reconstruct the a-side operand from the IH
+    obtain ⟨k_v, v_a_val, T_a1, h_eval_v_a, h_vv_v, h_ctx1, h_he_v, hv_va, hv_vb⟩ :=
+      ih_eval ptable level v_a v_b env_a env_b T_a T_b v_b_val T_b1 hβ_v hpure_v hresp
+        h_ctx hbr hbudget_v he
+    -- BReady carries through the operand and its alloc on the b-side
+    have hbr1 : BReady T_b1 := hbr.closed hpv_b he
+    have hbr_body : BReady { T_b1 with heap := T_b1.heap ++ [v_b_val] } :=
+      BReady.alloc hbr hpv_b he
+    simp only [TowerState.alloc, Heap.alloc] at heval
+    -- STEP 2 — alloc context: extend both envs/heaps with the operand value
+    have h_lookup_a : (T_a1.heap ++ [v_a_val])[T_a1.heap.length]? = some v_a_val :=
+      getElem?_snoc _ _
+    have h_lookup_b : (T_b1.heap ++ [v_b_val])[T_b1.heap.length]? = some v_b_val :=
+      getElem?_snoc _ _
+    have hh_a_alloc : HeapValid (T_a1.heap ++ [v_a_val]) := by
+      intro i v hp
+      by_cases h_lt : i < T_a1.heap.length
+      · have hp_old : T_a1.heap[i]? = some v := by
+          rw [← getElem?_prefix T_a1.heap [v_a_val] i h_lt]; exact hp
+        exact ValValid.heap_extends v (h_ctx1.hv_a i v hp_old) ⟨[v_a_val], rfl⟩
+      · have h_eq : i = T_a1.heap.length := by
+          have h_le : i < (T_a1.heap ++ [v_a_val]).length := by
+            rw [List.getElem?_eq_some_iff] at hp; obtain ⟨h, _⟩ := hp; exact h
+          simp [List.length_append] at h_le; omega
+        subst h_eq; rw [h_lookup_a] at hp; simp only [Option.some.injEq] at hp; subst hp
+        exact ValValid.heap_extends v_a_val hv_va ⟨[v_a_val], rfl⟩
+    have hh_b_alloc : HeapValid (T_b1.heap ++ [v_b_val]) := by
+      intro i v hp
+      by_cases h_lt : i < T_b1.heap.length
+      · have hp_old : T_b1.heap[i]? = some v := by
+          rw [← getElem?_prefix T_b1.heap [v_b_val] i h_lt]; exact hp
+        exact ValValid.heap_extends v (h_ctx1.hv_b i v hp_old) ⟨[v_b_val], rfl⟩
+      · have h_eq : i = T_b1.heap.length := by
+          have h_le : i < (T_b1.heap ++ [v_b_val]).length := by
+            rw [List.getElem?_eq_some_iff] at hp; obtain ⟨h, _⟩ := hp; exact h
+          simp [List.length_append] at h_le; omega
+        subst h_eq; rw [h_lookup_b] at hp; simp only [Option.some.injEq] at hp; subst hp
+        exact ValValid.heap_extends v_b_val hv_vb ⟨[v_b_val], rfl⟩
+    have hev_a' : EnvValid (.cons x T_a1.heap.length env_a) (T_a1.heap ++ [v_a_val]) :=
+      envValid_cons_fresh x v_a_val env_a T_a1.heap h_ctx1.ev_a
+    have hev_b' : EnvValid (.cons x T_b1.heap.length env_b) (T_b1.heap ++ [v_b_val]) :=
+      envValid_cons_fresh x v_b_val env_b T_b1.heap h_ctx1.ev_b
+    have h_env' : EnvVisβ (.cons x T_a1.heap.length env_a) (.cons x T_b1.heap.length env_b)
+        (T_a1.heap ++ [v_a_val]) (T_b1.heap ++ [v_b_val]) :=
+      EnvVisβ_alloc_cons x env_a env_b v_a_val v_b_val T_a1.heap T_b1.heap
+        h_ctx1.hv_a h_ctx1.hv_b h_ctx1.ev_a h_ctx1.ev_b hv_va hv_vb h_vv_v h_ctx1.env_visβ
+    obtain ⟨hlva', hlvb', hlvisβ'⟩ :=
+      level_fields_alloc v_a_val v_b_val h_ctx1.hv_a h_ctx1.hv_b
+        h_ctx1.level_envs_valid_a h_ctx1.level_envs_valid_b h_ctx1.level_envs_visβ
+    have h_ctx_alloc : WFCtxTβ (.cons x T_a1.heap.length env_a)
+        (.cons x T_b1.heap.length env_b)
+        { T_a1 with heap := T_a1.heap ++ [v_a_val] }
+        { T_b1 with heap := T_b1.heap ++ [v_b_val] } level :=
+      { policy_eq_at := h_ctx1.policy_eq_at
+        hv_a := hh_a_alloc, hv_b := hh_b_alloc, ev_a := hev_a', ev_b := hev_b'
+        policy_resp := h_ctx1.policy_resp
+        env_visβ := h_env'
+        level_envs_valid_a := hlva', level_envs_valid_b := hlvb'
+        level_count_eq := h_ctx1.level_count_eq
+        policies_eq := h_ctx1.policies_eq
+        policies_resp_all := h_ctx1.policies_resp_all
+        level_envs_visβ := hlvisβ' }
+    -- STEP 3 — body: reconstruct the a-side body run from the IH (alloc keeps `level`)
+    obtain ⟨k_body, r_a, T_a', h_eval_b_a, h_vv_r, h_ctx_body, h_he_body, hv_ra, hv_rb⟩ :=
+      ih_eval ptable level body_a body_b
+        (.cons x T_a1.heap.length env_a) (.cons x T_b1.heap.length env_b)
+        { T_a1 with heap := T_a1.heap ++ [v_a_val] }
+        { T_b1 with heap := T_b1.heap ++ [v_b_val] } r_b T_b'
+        hβ_body hpure_body hresp h_ctx_alloc hbr_body hbudget_body heval
+    -- STEP 4 — assemble the a-side redex via `eval_beta_builtin`.
+    -- a-side standard gate on `T_a1`, transported cross-side from `T_b1`.
+    have h_builtin_b1 : builtinBaseApplyAt level T_b1 :=
+      hbr1.1.2 level hdepth
+    have h_builtin_a1 : builtinBaseApplyAt level T_a1 :=
+      builtinBaseApplyAt_cross_of_WFCtxTβ h_ctx1 h_builtin_b1
+    have h_mat_a1 : T_a1.levels.length > level + 1 := by
+      have hfull : Tower.maxDepth ≤ T_a1.levels.length := h_ctx1.level_count_eq ▸ hbr1.1.1
+      omega
+    -- fuel reconciliation: lift operand to `(m+1)` and body to `m` with `m = max k_v k_body`
+    have h_eval_v_a_m : eval (max k_v k_body + 1) ptable level v_a env_a T_a
+        = some (v_a_val, T_a1) :=
+      eval_fuel_mono (by have := Nat.le_max_left k_v k_body; omega) h_eval_v_a
+    have h_eval_b_a_m : eval (max k_v k_body) ptable level body_a
+        (.cons x T_a1.heap.length env_a) { T_a1 with heap := T_a1.heap ++ [v_a_val] }
+        = some (r_a, T_a') := eval_fuel_mono (Nat.le_max_right k_v k_body) h_eval_b_a
+    have h_redex_a : eval (max k_v k_body + 3) ptable level
+        (.app [.lam [x] body_a, v_a]) env_a T_a = some (r_a, T_a') := by
+      rw [eval_beta_builtin (max k_v k_body) ptable level x body_a v_a env_a T_a hdepth
+        v_a_val T_a1 h_eval_v_a_m h_mat_a1 h_builtin_a1]
+      exact h_eval_b_a_m
+    -- assemble heap-evolution and the output `WFCtxTβ`
+    have h_he_alloc : HeapEvolutionβ T_a1 T_b1
+        { T_a1 with heap := T_a1.heap ++ [v_a_val] }
+        { T_b1 with heap := T_b1.heap ++ [v_b_val] } :=
+      HeapEvolutionβ.from_heapExt h_ctx1.hv_a h_ctx1.hv_b ⟨[v_a_val], rfl⟩ ⟨[v_b_val], rfl⟩
+    have h_he_chain : HeapEvolutionβ T_a T_b T_a' T_b' :=
+      h_he_v.trans (h_he_alloc.trans h_he_body)
+    refine ⟨max k_v k_body + 3, r_a, T_a', h_redex_a, h_vv_r, ?_, h_he_chain, hv_ra, hv_rb⟩
+    exact
+      { policy_eq_at := h_ctx_body.policy_eq_at
+        hv_a := h_ctx_body.hv_a, hv_b := h_ctx_body.hv_b
+        ev_a := h_ctx.ev_a.length_mono h_he_chain.len_a
+        ev_b := h_ctx.ev_b.length_mono h_he_chain.len_b
+        policy_resp := h_ctx_body.policy_resp
+        env_visβ := h_he_chain.envVisβ_preserve env_a env_b h_ctx.ev_a h_ctx.ev_b h_ctx.env_visβ
+        level_envs_valid_a := h_ctx_body.level_envs_valid_a
+        level_envs_valid_b := h_ctx_body.level_envs_valid_b
+        level_count_eq := h_ctx_body.level_count_eq
+        policies_eq := h_ctx_body.policies_eq
+        policies_resp_all := h_ctx_body.policies_resp_all
+        level_envs_visβ := h_ctx_body.level_envs_visβ }
+
 end LeanBlack
 
 
