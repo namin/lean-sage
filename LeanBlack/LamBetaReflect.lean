@@ -71,6 +71,32 @@
 import LeanBlack.LamBeta
 import LeanBlack.Frame
 
+/- Maximum `.em`-nesting depth of an expression — the reflective analog of
+   `Ctx.emDepth`, lifted from a single-hole context to a whole `Expr` (max over
+   sub-terms). It bounds the tower depth an evaluation reaches: a redex sitting at
+   em-depth `d` below eval level `L` fires its gate at tower level `L + d + 1`, so
+   the budget `L + e.emDepth + 1 < Tower.maxDepth` keeps every gate in range and is
+   invariant under `.em` (which trades `+1` em-depth for `+1` level). -/
+mutual
+def Expr.emDepth : Expr → Nat
+  | .num _ => 0
+  | .bool _ => 0
+  | .quote _ => 0
+  | .var _ => 0
+  | .ifte c t e => max c.emDepth (max t.emDepth e.emDepth)
+  | .lam _ body => body.emDepth
+  | .app args => Expr.emDepthList args
+  | .set _ e => e.emDepth
+  | .em e => e.emDepth + 1
+  | .primApp fn args => max fn.emDepth (Expr.emDepthList args)
+  | .letE _ e1 body => max e1.emDepth body.emDepth
+  | .seq exps => Expr.emDepthList exps
+  | .installPolicy _ => 0
+def Expr.emDepthList : List Expr → Nat
+  | [] => 0
+  | e :: rest => max e.emDepth (Expr.emDepthList rest)
+end
+
 namespace LeanBlack
 
 /-! ## 7a. Ground values self-bisimulate, and validity helpers
@@ -3403,6 +3429,26 @@ def FrameβEvalStmtRev (n : Nat) : Prop :=
     (env_a env_b : Env) (T_a T_b : TowerState) (r_b : Val) (T_b' : TowerState),
     BetaRel exp_a exp_b → Pure exp_a = true → PolicyTableRespectsBisimT ptable →
     WFCtxTβ env_a env_b T_a T_b level → BReady T_b →
+    eval n ptable level exp_b env_b T_b = some (r_b, T_b') →
+    ∃ (k : Nat) (r_a : Val) (T_a' : TowerState),
+      eval k ptable level exp_a env_a T_a = some (r_a, T_a') ∧
+      ValVisβ r_a r_b T_a'.heap T_b'.heap ∧
+      WFCtxTβ env_a env_b T_a' T_b' level ∧
+      HeapEvolutionβ T_a T_b T_a' T_b' ∧
+      ValValid r_a T_a'.heap ∧ ValValid r_b T_b'.heap
+
+/-- The **budgeted** reverse eval clause — `FrameβEvalStmtRev` plus the depth-budget
+    side condition `level + exp_a.emDepth + 1 < Tower.maxDepth` that `ReverseSimβ`
+    omits (and is therefore false without; see `reverseSimβ_false`). The budget is
+    invariant under `.em` (recurse at `level+1` on a body of `emDepth - 1`) and
+    supplies, at the `.app` root, the margin `level + 1 < maxDepth` that lets the
+    redex's gated apply fire — the only place the reverse genuinely needs it. -/
+def FrameβEvalStmtRevB (n : Nat) : Prop :=
+  ∀ (ptable : PolicyTable) (level : Nat) (exp_a exp_b : Expr)
+    (env_a env_b : Env) (T_a T_b : TowerState) (r_b : Val) (T_b' : TowerState),
+    BetaRel exp_a exp_b → Pure exp_a = true → PolicyTableRespectsBisimT ptable →
+    WFCtxTβ env_a env_b T_a T_b level → BReady T_b →
+    level + exp_a.emDepth + 1 < Tower.maxDepth →
     eval n ptable level exp_b env_b T_b = some (r_b, T_b') →
     ∃ (k : Nat) (r_a : Val) (T_a' : TowerState),
       eval k ptable level exp_a env_a T_a = some (r_a, T_a') ∧

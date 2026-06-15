@@ -95,37 +95,54 @@ The obstruction is now pinned (Obstruction C, machine-checked). The reverse is *
 a dead end — it is conditional, and the condition is the one `CtxEquiv.lean` §5 and
 `contextual_beta_pure` already name. Concretely:
 
-**1. The right side condition is a depth *budget*, not a flat margin.** Add to
-`FrameβEvalStmtRev` a premise of the form `level + emDepth exp_a < Tower.maxDepth`
-(an `Expr.emDepth`, mirroring the existing `Ctx.emDepth`). The quantity
-`level + emDepth` is **invariant under `.em`** — `.em` recurses at `level+1` on a body
-of `emDepth - 1`, so the sub-call's budget equals the parent's. A flat
-`level+1 < maxDepth` does *not* thread (it would need `level+2 < maxDepth` under `.em`);
-the budget does. This is exactly `contextual_beta_at_start`'s `C.emDepth + 1 < maxDepth`
-premise, now carried into the reflective (`.lam`) frame.
+**Foundations (done, in `LamBetaReflect.lean`, `lake build` green):** `Expr.emDepth`
+(+ `Expr.emDepthList`) — the reflective analog of `Ctx.emDepth`, max over sub-terms;
+and `FrameβEvalStmtRevB`, the budgeted reverse eval clause = `FrameβEvalStmtRev` plus
+the premise `level + exp_a.emDepth + 1 < Tower.maxDepth`.
 
-**2. The `.app` root closes under the budget without the `+2` problem.** The earlier
-worry — `gate_letE_to_redex` raises the redex's fuel `+2` over the contractum, so a
-tower-mirror reverse would need IHs at `n+2` while the induction gives `n` — is
-**avoidable**. Don't convert contractum↦redex via `gate_letE_to_redex`. Instead
-reconstruct the a-side redex *directly* from the IHs the mutual tower already provides:
-the b-side contractum `let x=V_b in B_b` (fuel `n+1`) internally evaluates `V_b`
-(fuel `≤ n`) and `B_b` (fuel `n`) in the alloc-extended context; the **reverse `eval`
-IH on the operand** gives the a-side `V_a` (+`ValVisβ`), the **reverse `eval` IH on the
-body** gives the a-side `B_a` run in the matching alloc-extended context, and the redex
-is then *assembled* — `applyVia` on the closure (its `materialize (level+1)` succeeds
-**because of the budget**) → `applyDirect` closure case → that same body run. Both the
-alloc-context plumbing (`frameβ_letE_evalRev`) and the closure application
-(`frameβ_applyDirect_evalRev`) are **already proved**; the redex's extra steps are
-absorbed by the conclusion's `∃ k`. No `gate_letE_to_redex`, no `+2`, IHs at `n`.
+**1. The budget threads.** `level + e.emDepth + 1 < maxDepth` is **invariant under
+`.em`** (`.em` recurses at `level+1` on a body of `emDepth − 1`, keeping the sum), and
+at the `.app` root it gives the margin `level + 1 < maxDepth` even when the redex has
+`emDepth 0` (the `+1`). A flat `level+1 < maxDepth` does *not* thread (it would need
+`level+2 < maxDepth` under `.em`). At `level 0` this is exactly
+`contextual_beta_at_start`'s `C.emDepth + 1 < maxDepth`.
+
+**2. The `.app` root, by direct reconstruction (no `gate_letE_to_redex`, no `+2`).**
+The b-side drives with the contractum `let x = V_b in B_b` (fuel `n+1`); unfolding it
+gives the b-side `V_b` (fuel `≤ n`) and `B_b` (fuel `n`) runs. Reconstruct the a-side
+redex `(.app [f, a])` (where `f ~β λx.body'`, `a ~β V_b`) thus:
+- **function `f`:** *form* the b-side λ-value `L_b := .lam [x] body'` (`body'` is in hand
+  from the contractum) — its eval is **free at any fuel ≥ 1** (`eval n L_b = closure`),
+  so the **reverse `eval` IH on `(f, L_b)` at b-side fuel `n`** reconstructs the a-side
+  `eval f → fv_a` with `ValVisβ fv_a (closure x body' env_b)`; `ValVisβ_closure_inv`
+  then gives `fv_a = .closure [x] B_a cenv_a`, `B_a ~β body'`, `cenv_a ~ env_b`. *This
+  is what dissolves the `+2`* — exposing the b-side λ needs **no** `gate_letE_to_redex`
+  (which would `+2` the fuel), because a λ is a value;
+- **operand `a` / body `B_a`:** reverse `eval` IH on `(a, V_b)` and on `(B_a, body')` in
+  the matching alloc-extended context (reusing `frameβ_letE_evalRev`'s context plumbing
+  and `frameβ_applyDirect_evalRev`'s closure case);
+- **assemble:** `eval (.app [f,a])` = eval `f` → `fv_a`, `evalList [a]`, then `applyVia`
+  whose `materialize (level+1)` succeeds **by the budget** → `applyDirect` closure case
+  → the `B_a` run; the redex's extra steps are absorbed by the conclusion's `∃ k`.
+
+**Open subtlety (the one genuinely new lemma):** the body IH on `(B_a, body')` needs
+`level + B_a.emDepth + 1 < maxDepth`, but `B_a` is the *closure's* body, not a syntactic
+sub-term of the source `exp_a`. It is bounded — `B_a.emDepth ≤ f.emDepth` because
+closures freeze bodies verbatim and `f ~β λx.body'` forces the λ to occur in `f`
+syntactically (a var cannot β-reduce to a λ; β-reduction only rearranges existing
+syntax, never raising `emDepth`). Turning that into a lemma (`eval`-produced closure
+bodies have `emDepth ≤` the source's) is the crux's real content — Obstruction A
+("closures freeze bodies") working *for* us. This may instead motivate a **runtime**
+budget (a `BuiltinReadyN`-style state invariant that closures in scope are em-budgeted),
+the form the forward `contextual_beta_pure` already uses; which representation is
+cleanest is the open design call.
 
 **3. The down payment is in hand.** Everything in "What is proved" transfers to the
-budgeted statement unchanged except the `.app` root (the recursive cases just thread
-the budget to their sub-calls; the budget invariant makes that mechanical, and `.em`
-is already vacuous-or-fine). So the remaining work is: define `Expr.emDepth`; add the
-budget premise; prove the `.app` root by §2; thread the budget through the assembler;
-re-run the mutual tower and discharge the (now true) budgeted `ReverseSimβ⁺`; lift to
-`obsConv_iff_beta` and `Ctx.plug_cong_master`-to-`.lam`.
+budgeted clause unchanged except the `.app` root (recursive cases thread the budget to
+sub-calls; the invariant makes that mechanical; `.em` stays vacuous-or-fine). Remaining
+work: prove the `.app` root by §2 (+ the closure-body-`emDepth` lemma); thread the
+budget through the assembler; re-run the mutual tower; discharge the budgeted
+`ReverseSimβ⁺`; lift to `obsConv_iff_beta` and `Ctx.plug_cong_master`-to-`.lam`.
 
 ## Status summary
 
@@ -134,7 +151,9 @@ re-run the mutual tower and discharge the (now true) budgeted `ReverseSimβ⁺`;
   (`lam_EvalEquiv_congruence_fails`, `beta_not_unconditional_CtxEquiv`,
   `reverseSimβ_false`). β under a reflective binder is a *strict refinement*, an
   equivalence only under the gate + pure + depth budget.
-- **Prize (scoped, de-risked):** the conditional `.lam` equivalence under the budget,
-  via §1–§3 above. No longer "mechanical mirror" and no longer "false" — a bounded,
-  reuse-heavy effort whose one genuinely new lemma (the `.app` root, §2) has a clear
-  proof plan that needs no machinery the reverse build doesn't already have.
+- **Prize (foundations coded, crux scoped):** `Expr.emDepth` and the budgeted clause
+  `FrameβEvalStmtRevB` are in and build green. The `.app` root has a worked proof plan
+  (§2) that **dissolves the `+2`** (reverse-simulate the redex function against a
+  free fuel-1 λ-value, no `gate_letE_to_redex`). The one genuinely new lemma left is
+  the closure-body `emDepth` bound (or its runtime-budget alternative) — the real
+  remaining content, then the mechanical thread-through + tower + discharge + lift.
