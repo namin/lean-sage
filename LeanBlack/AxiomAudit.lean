@@ -57,11 +57,18 @@ open LeanBlack
 #guard_msgs in
 #print axioms contextual_beta_at_start
 
--- `.lam` case diagnosis: the three impossibility results that pin why the `.lam`
--- case is not closable in any naive frame. A and B (`CtxEquiv.lean`) force the
--- ground coarsening and the side conditions; C (`LamBetaReflect.lean`) shows the
--- backward `.lam` simulation `ReverseSimβ`, stated with the all-levels gate but no
--- depth margin, is false — so the gate alone is insufficient for the reverse.
+-- `.lam` dividing line. Positive half: the forward refinement holds — under the gate,
+-- the redex refines its contractum (`obsConv_refine_forward`, `LamBetaReflect.lean`).
+-- Negative half: three impossibilities pin why the converse is *not* closable in any
+-- naive frame. A and B (`CtxEquiv.lean`) force the ground coarsening and the side
+-- conditions; C (`LamBetaReflect.lean`) shows the backward `.lam` simulation
+-- `ReverseSimβ`, stated with the all-levels gate but no depth margin, is false — so the
+-- gate alone is insufficient for the reverse. Together: β under a reflective binder is a
+-- strict refinement, an equivalence only under the gate + pure + depth budget.
+/-- info: 'LeanBlack.obsConv_refine_forward' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms LeanBlack.obsConv_refine_forward
+
 /-- info: 'LeanBlack.lam_EvalEquiv_congruence_fails' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms LeanBlack.lam_EvalEquiv_congruence_fails
