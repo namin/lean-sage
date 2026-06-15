@@ -139,11 +139,25 @@ against a constructed free λ-value, plus a closure-body bound `B_a.emDepth ≤ 
 a `BuiltinReadyN`-style runtime budget). This is extra generality for the fully general
 clause, orthogonal to the headline.
 
-**3. Down payment + remaining.** Proved: the structural/recursive reverse eval cases,
-`evalList`/`applyDirect`/`applyVia`, and now the **redex-proper root**. Remaining to the
-headline: the eval **assembler** + **mutual tower** threading the budget (mechanical —
-`.em` invariant, sub-term budgets), **discharge** the budgeted `ReverseSimβ⁺`, and
-**lift** to `obsConv_iff_beta` and `Ctx.plug_cong_master`-to-`.lam`.
+**3. Down payment + the genuine open core.** Proved: the structural/recursive reverse
+eval cases, `evalList`/`applyDirect`/`applyVia`, and now the **redex-proper root**.
+
+The remaining assembly is **not** mechanical (an earlier draft of this file said it was
+— that was wrong). The budgeted eval tower must also budget the apply machinery: eval's
+`.app`-structural and `.primApp` cases dispatch through `applyVia`/`applyDirect`, whose
+closure case runs the **closure's body** via the eval IH. To invoke the *budgeted* eval
+IH there, the body's `emDepth` must be bounded — but a closure body is **not a syntactic
+sub-term of the source**, so the static `exp.emDepth` budget cannot bound it (it came
+from an earlier `.lam`, possibly via the environment). For the redex-proper root this was
+free (literal λ ⟹ body is a sub-term); for the general apply machinery it is not.
+
+The clean fix is a **value-level em-bound invariant** — a heap/env predicate (à la
+`PureHeap` / `BuiltinReadyN`: "every closure in scope has a body within the depth
+budget") **plus its preservation through `eval`** (a lemma family across all 13 eval
+cases, mirroring `allPureIndep` / `PureHeap` preservation). That invariant is the genuine
+remaining content — exactly why §5 calls `.lam` the open core; it bottoms out here. After
+it: the budgeted mutual tower, discharge of `ReverseSimβ⁺`, and lift to
+`obsConv_iff_beta` / `Ctx.plug_cong_master`-to-`.lam`.
 
 ## Status summary
 
@@ -152,12 +166,12 @@ headline: the eval **assembler** + **mutual tower** threading the budget (mechan
   (`lam_EvalEquiv_congruence_fails`, `beta_not_unconditional_CtxEquiv`,
   `reverseSimβ_false`). β under a reflective binder is a *strict refinement*, an
   equivalence only under the gate + pure + depth budget.
-- **Prize (crux PROVED):** `Expr.emDepth`, the budgeted clause `FrameβEvalStmtRevB`,
-  and — the hard part — the **redex-proper reverse `.app` root**
+- **Prize (crux PROVED, open core scoped):** `Expr.emDepth`, the budgeted clause
+  `FrameβEvalStmtRevB`, and — the hard part — the **redex-proper reverse `.app` root**
   `frameβ_redex_letE_evalRevB` are all in and build green (sorry-free, axiom-clean). The
   `+2` is dissolved (assemble via `eval_beta_builtin`, gate recovered cross-side by
   `builtinBaseApplyAt_cross_of_WFCtxTβ`), and this is exactly the case the `.lam`
-  headline's backward root needs (the contracted redex is always a literal λ). Remaining
-  to the headline: the **mechanical** budget thread-through + assembler + mutual tower +
-  discharge of `ReverseSimβ⁺` + lift to `Ctx.plug_cong_master`-to-`.lam`. (Full-generality
-  non-literal-`f` roots are extra, not needed for the headline.)
+  headline's backward root needs (the contracted redex is always a literal λ). The
+  remaining open core (§3) is the **value-level em-bound invariant + its `eval`
+  preservation** — needed to budget the apply machinery's closure bodies — then the
+  budgeted tower, discharge of `ReverseSimβ⁺`, and lift to `Ctx.plug_cong_master`-to-`.lam`.
