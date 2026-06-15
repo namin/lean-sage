@@ -1,40 +1,16 @@
-# The reverse simulation: discharging `ReverseSimβ`
+# The reverse simulation: the `.lam` headline is blocked on `ReverseSimβ`
 
-This file consolidates the **one remaining obligation** in lean-sage's conditional
-ground-contextual β-equivalence under `.lam`: the *reverse* cross-side simulation
-`ReverseSimβ`. Everything else in the chain is proved (`sorry`-free, axioms
-⊆ `{propext, Classical.choice, Quot.sound}`). All names below are checked Lean
-declarations in `LeanBlack/`.
+**Status (2026-06-14): `ReverseSimβ` as currently stated is false.** This file was
+originally written as if `ReverseSimβ` were "the one remaining obligation, a
+mechanical mirror of `frameβ_tower` — the math is done." That framing is wrong.
+The same depth/gate obstruction that makes β only a *conditional* equivalence
+(`beta_not_unconditional_CtxEquiv`, `CtxEquiv.lean` §4) is **fatal** to
+`ReverseSimβ`, because the reverse simulation is b-side-driven. The recursive
+reverse eval cases are proved; the `.app`-root case, the assembler, the mutual
+tower, and the discharge are blocked — not by bookkeeping, but by a missing
+depth-budget side condition (the genuine open core, `CtxEquiv.lean` §5).
 
-## Where the reverse sits
-
-The headline is a **conditional** ground-contextual equivalence of the β redex and
-its contractum — conditional because the *unconditional* version is provably false:
-
-- **Obstruction A** — `lam_EvalEquivAt_forces_empty` (`CtxEquiv.lean`): the fine
-  `EvalEquivAt` congruence is *false* under `.lam` (closures capture bodies
-  verbatim). Forces the coarse **ground** `CtxEquiv`.
-- **Obstruction B** — `beta_not_unconditional_CtxEquiv` (`CtxEquiv.lean`): even
-  ground `CtxEquiv` is false unconditionally (at the tower top the redex's gated
-  apply cannot fire). Forces the **standard-gate / pure** side conditions.
-
-`CtxEquiv` (`CtxEquiv.lean`) is an `↔` of `ObsConv`, so the `.lam` congruence needs
-**both** observational refinements:
-
-```
-ObsConv (C.plug M) ↔ ObsConv (C.plug N)      -- M = redex, N = contractum, M →β N
-```
-
-| direction | bridge | status |
-|---|---|---|
-| `ObsConv (C.plug M) → ObsConv (C.plug N)` | `obsConv_refine_forward` | **proved** (via `frameβ_eval_FL`) |
-| `ObsConv (C.plug N) → ObsConv (C.plug M)` | `obsConv_refine_backward` | **modulo `ReverseSimβ`** |
-
-`obsConv_iff_beta` bundles the two. The forward fundamental lemma is the *complete*
-`frameβ_tower : ∀ n, FrameStmtβP n` (`LamBetaReflect.lean`), instantiated
-diagonally. The only hole is `ReverseSimβ`.
-
-## The obligation, precisely
+## Why `ReverseSimβ` is false as stated
 
 ```lean
 def ReverseSimβ : Prop :=
@@ -47,86 +23,87 @@ def ReverseSimβ : Prop :=
       eval k' pt lvl ea va Sa = some (ra, Sa') ∧ ValVisβ ra rb Sa'.heap Sb'.heap
 ```
 
-The **b-side drives** (its `eval` is given), the a-side is reconstructed. Note the
-two distinguishing features versus the forward `FrameβEvalStmtWP`:
+It quantifies over the eval level `lvl` with premises `WFCtxTβ … lvl` and
+`BReady Sb` only, and **neither bounds `lvl`**:
+- `WFCtxTβ` (`LamBetaReflect.lean`) has no field constraining `level`.
+- `BReady := BuiltinReadyAll ∧ PureHeap`, and
+  `BuiltinReadyAll T := maxDepth ≤ T.levels.length ∧ ∀ L, L+1 < maxDepth →
+  builtinBaseApplyAt L T` — it forces a full (≥ `maxDepth = 16`) tower with gates
+  at levels `0…14`, but says **nothing** about the eval level `lvl`.
 
-1. **`∃ k'` fuel.** β-expansion *adds* the redex's head+apply steps, so the redex
-   needs strictly more fuel than its contractum (`app_lam_redex_min_fuel`: redex
-   `≥ 3`; `eval_letE` = body+1; `eval_beta_builtin` = body+3). A same-fuel reverse
-   is **false**. (This corrects the unsatisfiable shape the deprecated
-   `obsConv_refine_of_FL_rev` carried.)
-2. **`Pure ea`, not `Pure eb`** — the a-side (redex) drives the purity premise,
-   exactly as in the forward direction.
+So instantiate at `lvl = maxDepth - 1 = 15`, with the Wand pair of
+`beta_not_unconditional_CtxEquiv`:
+```
+ea = .app [.lam ["x"] (.var "x"), .num 0]    -- redex (Pure, BetaRel-related to eb)
+eb = .letE "x" (.num 0) (.var "x")           -- its contractum
+```
+- **b-side converges.** `eval … eb …` reduces by `.letE` (alloc `0`, look up `x`);
+  it never materializes, so it returns `(.num 0, …)` at `lvl = 15`.
+- **a-side cannot.** `eval … ea …` routes the apply through `applyVia`, whose first
+  act is `materialize (lvl+1) = materialize 16 = none` (`16 ≥ maxDepth`,
+  *independent of `levels.length`*). So the redex returns `none` for **every** fuel
+  `k'` (`eval_app_depth_none` / `applyVia_depth_none` / `app_lam_redex_depth`).
 
-## What is already proved
+The premises hold at `lvl = 15` for a 16-level `BReady` tower while the
+conclusion's a-side existential cannot — so `ReverseSimβ` is false. This is exactly
+`beta_not_unconditional_CtxEquiv` (same pair distinguished at `level 15`) lifted to
+the `BReady` setting; adding levels does not let the redex fire, because
+`materialize 16 = none` regardless. *(The argument is rigorous and reuses the
+machine-checked `beta_not_unconditional_CtxEquiv` mechanism, but is not yet itself a
+machine-checked `¬ ReverseSimβ`; see “Definitive next step”.)*
 
-- **Reverse root core — free.** `gate_letE_to_redex` (+ `_anyfuel`),
-  `LamBetaReflect.lean`. Under the standard gate + pure operand, the contractum
-  `.letE x V B` and the redex `.app [λx.B, V]` reduce to the **identical**
-  body-evaluation (`eval_letE` and `eval_beta_builtin` are *both* equations to
-  `eval n B (cons x …) {T' with heap := T'.heap ++ [v]}`). Hence
-  `eval (n+1) letE = some (r,Tf) ⟹ eval (n+3) redex = some (r,Tf)` — same result,
-  `+2` fuel. This is the source of `ReverseSimβ`'s `∃ k'`.
-- **Reverse statement + leaf layer.** `FrameβEvalStmtRev` and the leaf cases
-  `frameβ_num_caseRev`, `frameβ_bool_caseRev`, `frameβ_lam_caseRev`,
-  `frameβ_quote_caseRev` (`LamBetaReflect.lean`). Clean mirrors of the forward leaf
-  lemmas: invert `exp_b`, read off its result, reconstruct the a-side at fuel 1.
-- **Consumers ready.** `obsConv_refine_backward` and `obsConv_iff_beta` already
-  take `ReverseSimβ` and produce the conditional equivalence; nothing downstream
-  needs to change once `ReverseSimβ` is a theorem.
+**Why the forward FL escapes.** `frameβ_eval_FL` carries the *same* premises yet is
+proved, because it is **a-side-driven**: when the a-side redex converges it
+*supplies* the depth margin (`app_lam_redex_depth : … → level+1 < maxDepth`). The
+reverse is b-side-driven by the contractum, which supplies no margin. The asymmetry
+is precise: `.em` materializes `(level+1)` on *both* sides (so at bad depth both
+diverge — the reverse `.em` case is then vacuous, and is proved), whereas the
+redex/contractum `.app` pair materializes on the a-side only.
 
-## What remains (mechanical mirror of the forward tower)
+## What is proved (sorry-free, axioms ⊆ {propext, Classical.choice, Quot.sound})
 
-A bottom-up reverse mirror of `frameβ_tower`. Each clause is the b-side-driven,
-`∃k`-fuel analog of the corresponding forward step lemma.
+Every reverse clause's machinery **except the `.app` root**:
+- Leaves: `frameβ_{num,bool,lam,quote,var,set,installPolicy}_caseRev`.
+- Reverse `evalList`: `frameβ_evalList_evalRev`.
+- Reverse `applyDirect`: `frameβ_applyDirect_evalRev` (+ `rev_applyDirect_upgrade`).
+- Reverse `applyVia`: `frameβ_applyVia_evalRev` (+ `rev_applyVia_upgrade`).
+- Recursive eval cases: `frameβ_{ifte,seq,letE,em,primApp}_evalRev`, and the
+  structural `.app` sub-case `frameβ_app_structural_evalRev`.
+- Determinism `eval/evalList/applyVia/applyDirect_det`; the reverse `ValVisβ`
+  inversions and value foundations.
 
-1. **`var` leaf** (`frameβ_var_caseRev`). Needs the *two-sided* `EnvVisβ` lookup:
-   from `env_b.lookup y = some idx_b` derive `env_a.lookup y = some idx_a` and
-   `ValVisβ` of the heap cells (the forward `frameβ_var_caseW` does the a→b
-   direction; mirror it).
-2. **Reverse `evalList`** (`FrameβEvalListStmtRev` + step). Per-element reverse
-   eval; combine the `∃k`s by `evalList_fuel_mono` to a common bound.
-3. **Reverse `applyDirect` / `applyVia`** (`FrameβApplyDirectStmtRev`,
-   `FrameβApplyViaStmtRev` + steps). The genuine reverse work:
-   - closure case → reverse `eval` on the body (mutual);
-   - the gate / `materialize` handling under `BReady` (full tower ⟹ `materialize`
-     no-op; non-standard-gate branch vacuous — same structure as the forward
-     `frameβ_applyVia_evalWP`);
-   - `prim` / `builtinBaseApply` cases mirror the forward.
-4. **Recursive eval cases**: `ifte`, `seq`, `letE`, `em` (structural);
-   `app` structural + **root** (the root closes with `gate_letE_to_redex_anyfuel`);
-   `primApp` (uses reverse `applyDirect`). Each: reverse IH on sub-terms for
-   convergence, `frameβ_eval_FL` for the cross-side value/`WFCtxTβ` relation where a
-   sub-value's identity is needed (e.g. the `ifte` condition), then reassemble at a
-   common fuel.
-5. **Assembler** `frameβ_eval_stepRev` (dispatch all 13 constructors; `set` /
-   `installPolicy` vacuous under `Pure`), and the **mutual tower**
-   `frameβ_tower_rev : ∀ n, FrameStmtβRev n` (mirror of `frameβ_tower`).
-6. **Discharge**: `ReverseSimβ` follows from the reverse eval clause by inducting
-   on the b-side fuel and combining the `∃k`s.
+These are the genuine recursive reverse work and carry over unchanged to any
+corrected statement (except the `.app` root).
 
-### Reuse / leverage
+## What is blocked
 
-- **`frameβ_eval_FL`** supplies the forward value relations and `WFCtxTβ`
-  propagation mid-proof — do *not* re-derive `ValVisβ` from scratch in the reverse
-  cases; get it from the forward FL + determinism (`eval_fuel_mono`).
-- The β-inversions (`BetaRel.{ifte,em,letE,app,primApp}_inv`, `app_inv`) and the
-  purity/`BReady`/`ValVisβ` plumbing (`BetaRel.pure_eq`, `ValVisβ_pureVal_rev`,
-  `BReady.closed`/`closedList`, `ValVisβ_lam_closures`, …) are all in place from the
-  forward build.
+- The `.app` **root** case (redex ↦ `.letE` contractum): not provable as a clause
+  of the current `FrameβEvalStmtRev` (no depth margin). `gate_letE_to_redex_anyfuel`
+  needs `level+1 < maxDepth`, which the driving b-side `.letE` does not supply.
+- Hence the eval assembler `frameβ_eval_stepRev`, the mutual tower
+  `frameβ_tower_rev`, and the discharge of `ReverseSimβ` cannot be written.
+- Consequently `obsConv_refine_backward` / `obsConv_iff_beta` (which take
+  `ReverseSimβ` as a *hypothesis*) stay un-instantiable, and the `.lam` headline via
+  this route is not reached.
 
-### Fuel discipline (the one new bookkeeping)
+## The real open core (= `CtxEquiv.lean` §5)
 
-Forward steps preserve fuel; reverse steps don't. In every recursive reverse case:
-collect the sub-`∃k`s, take a common bound, lift each sub-result with
-`eval_fuel_mono` / `evalList_fuel_mono`, then run the current node. The `app` root
-adds the `+2` from `gate_letE_to_redex`.
+Closing the reverse is **not** a mechanical mirror. It needs the depth-budget side
+condition §5 already identifies ("standard gate **with depth margin** + pure"):
+- A naive `level+1 < maxDepth` premise on `FrameβEvalStmtRev` does **not** thread
+  through `.em`, which recurses at `level+1` (and would then need `level+2 <
+  maxDepth`). The condition must be a *budget* that decreases through reflective
+  nesting — exactly the "em-nesting to any depth in the tower bound" that
+  `contextual_beta_pure` carries for the lam-free cases.
+- So the reverse's completion is coupled to the same reflective depth-budget problem
+  that makes β conditional in the first place — it is open core, not packaging.
 
-## After `ReverseSimβ`
+## Definitive next step
 
-`obsConv_iff_beta` becomes an unconditional-given-side-conditions `↔`. The final
-`.lam` headline is `Ctx.plug_cong_master` (`CtxPure.lean`) extended to the `.lam`
-constructor: the congruence machinery (`CtxEquiv.under_lam`, `CtxEquiv.congr`) is
-free once the side conditions (`BReady` / `Pure`) are shown closed under context
-composition — the standard `plug_cong_master` condition-threading, here for the
-binder.
+Either:
+- **(a)** machine-check `¬ ReverseSimβ` — a third impossibility result alongside
+  `lam_EvalEquivAt_forces_empty` and `beta_not_unconditional_CtxEquiv`; needs a
+  16-level `BReady` witness tower at `level 15` (the redex/contractum pair above); or
+- **(b)** restate `ReverseSimβ` / `FrameβEvalStmtRev` with the §5 depth-budget side
+  condition and complete the `.app` root + assembler + tower + discharge under it.
+  Everything in “What is proved” transfers to (b) unchanged except the `.app` root.
