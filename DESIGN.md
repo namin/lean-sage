@@ -210,7 +210,7 @@ composition + chain-link wrappers landed later — see
 ```
 lean-sage/
 ├── lakefile.lean                 — library + smoke + demos + proofBasedSmoke executables
-├── lean-toolchain                — leanprover/lean4:v4.20.0
+├── lean-toolchain                — leanprover/lean4:v4.29.1
 ├── LeanBlack.lean                — top-level imports
 ├── LeanBlack/
 │   ├── Black.lean                — Val/Expr/Env, Heap, primitives, MutationCtx, BlackPolicy, val_beq
