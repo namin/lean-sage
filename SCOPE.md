@@ -31,7 +31,7 @@ depth" below for what it does and does not establish.
 All theorems are kernel-checked with no `sorry` or `admit`, on the
 standard axioms only (`propext` / `Classical.choice` / `Quot.sound`),
 CI-enforced by [`LeanBlack/AxiomAudit.lean`](LeanBlack/AxiomAudit.lean).
-Toolchain: `leanprover/lean4:v4.29.1`. For the claim-by-claim
+Toolchain: `leanprover/lean4:v4.30.0`. For the claim-by-claim
 classification (kernel theorem / instantiated on concrete data /
 runtime demo / not mechanized), see [`CLAIMS.md`](CLAIMS.md).
 
