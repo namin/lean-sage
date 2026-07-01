@@ -155,7 +155,45 @@ def ungatedDoublingBreaksPlus : Option Val :=
     (.seq [.em (.installPolicy 0), installDoubling, .app [.var "+", .num 1, .num 2]])
 -- expected: num(6)
 
-/-! ## 5. Runner -/
+/-! ## 5. Proving the installation sound (not just exhibiting it)
+
+    Two halves, both as kernel theorems:
+
+    (a) SAFETY — universal, straight from the machinery. Every `.set`
+        this gate admits at level 1 carries a `CE_weak_strong` witness.
+        Follows in two lines from `approvedPolicy_soundForCE_weak_strong`;
+        the only side-condition is that each approval binds to level 1. -/
+
+theorem gate_soundForCE :
+    BlackPolicy.SoundForCE_weak_strong 1 (approvedPolicy [multnCertificate]) := by
+  apply approvedPolicy_soundForCE_weak_strong
+  intro am h_mem
+  simp only [List.mem_singleton] at h_mem
+  subst h_mem
+  rfl
+
+/-- (b) OPERATIONAL — the source install actually triggers that gate.
+    Together with `gate_soundForCE`: the modification the source program
+    installs is admitted, and everything admitted is conservative. -/
+theorem installMultn_admits :
+    evalProgram demoFuel gate (.seq [installGate, installMultn]) = some (.bool true) := by
+  native_decide
+
+theorem installDoubling_refused :
+    evalProgram demoFuel gate (.seq [installGate, installDoubling]) = some (.bool false) := by
+  native_decide
+
+/-- The Expr→Val link, as a theorem, for the `.lam` case: evaluating a
+    lambda IS the closure over the current environment — definitional,
+    no reconstruction. Composing this up through `.em`/`.letE`/`.set`
+    (so that `multnClosure` need not be eval-derived at all) is the
+    remaining, larger, "make it fully proved" step. -/
+theorem eval_lam (n : Nat) (pt : PolicyTable) (lv : Nat)
+    (ps : List String) (b : Expr) (env : Env) (T : TowerState) :
+    eval (n + 1) pt lv (.lam ps b) env T = some (.closure ps b env, T) := by
+  simp [eval]
+
+/-! ## 6. Runner -/
 
 def shortRepr : Option Val → String
   | none                   => "<none>"
