@@ -16,5 +16,8 @@ lean_exe «smoke» where
 lean_exe «demos» where
   root := `Demos
 
+lean_exe «demo» where
+  root := `Demo
+
 lean_exe «proofBasedSmoke» where
   root := `ProofBasedSmoke
