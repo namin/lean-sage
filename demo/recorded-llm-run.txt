@@ -1,0 +1,14 @@
+[proposer] call #1 to us.anthropic.claude-sonnet-5
+[proposer] guard=pair? tests=2
+[proposer] behavior:
+.primApp (.var "car") [.var "op"]
+[proposer] spec supplied
+generated Proposals/Proposal_1.lean; checking (lake env lean)…
+install admitted: bool(true) (expect bool(true))
+(+ 1 2) preserved: num(3) (expect num(3))
+test 1: num(1) (expect num(1))
+test 2: sym(a) (expect sym(a))
+
+
+ADMITTED — proposal #1: certificate assembled through the master theorem; record kept at Proposals/Proposal_1.lean.
+[proposer] ADMITTED on attempt #1.

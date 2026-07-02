@@ -160,7 +160,7 @@ def nextProposalNum : IO Nat := do
   let entries ← System.FilePath.readDir "Proposals"
   let nums := entries.filterMap fun e =>
     if e.fileName.startsWith "Proposal_" && e.fileName.endsWith ".lean" then
-      (e.fileName.drop 9 |>.dropRight 5).toNat?
+      (e.fileName.drop 9 |>.dropEnd 5).toNat?
     else none
   return 1 + nums.foldl Nat.max 0
 

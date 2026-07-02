@@ -17,11 +17,19 @@ lean-sage is highlighted in
 ## Quickstart
 
 ```bash
-lake build                # library + axiom audit + three executables
+lake build                # library + axiom audit + all executables
 lake exe smoke            # 4 scenes, 8 tests   — structural-policy
 lake exe demos            # 12 scenes, 29 tests — reflection capabilities
 lake exe proofBasedSmoke  # 11 scenes, 32 tests — proof-based admission
+lake exe demoGuarded      # master theorem: two admissions + a provable refusal
+lake exe demoStack        # stacking: two modifications live at once
+lake exe booth llm "…"    # the LLM proposal booth (needs Bedrock)
 ```
+
+For the stage demo — the three beats above with a recorded fallback for
+the live LLM step — run [`demo/keynote-demo.sh`](demo/keynote-demo.sh)
+(`--offline` to replay the recorded run with no network, `--no-pause`
+to rehearse straight through).
 
 Success criterion:
 
