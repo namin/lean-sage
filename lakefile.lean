@@ -33,3 +33,6 @@ lean_exe «demoStack» where
 
 lean_exe «demoSeq» where
   root := `DemoSeq
+
+lean_exe «demoForget» where
+  root := `DemoForget

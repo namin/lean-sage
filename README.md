@@ -24,6 +24,7 @@ lake exe proofBasedSmoke  # 11 scenes, 32 tests — proof-based admission
 lake exe demoGuarded      # master theorem: two admissions + a provable refusal
 lake exe demoStack        # stacking: two modifications live at once
 lake exe demoSeq          # a useful admission: applicable sequences, 0/6 -> 6/6 clients
+lake exe demoForget       # why histories: a forgetful gate can't tell improvement from regression
 lake exe booth llm "…"    # the LLM proposal booth (needs Bedrock)
 ```
 
@@ -343,6 +344,7 @@ A confident summary of what is and is not claimed. See
 | [`DemoGuarded.lean`](DemoGuarded.lean) | `lake exe demoGuarded` — two admissions through the master theorem + the provable `closure?` refusal |
 | [`DemoStack.lean`](DemoStack.lean) | `lake exe demoStack` — multn ⊕ bool-selector stacked through one gate |
 | [`DemoSeq.lean`](DemoSeq.lean) | `lake exe demoSeq` — a useful admission (Clojure-style applicable sequences): 6 stuck clients unlocked, unmodified higher-order library gains reach, baseline certified; currying provably refused |
+| [`DemoForget.lean`](DemoForget.lean) | `lake exe demoForget` — why histories: to a gate that checks only against day zero, an improvement and the regression that undoes it are indistinguishable (same shape, same GuardSpec) — it admits the regression, 6/6 → 0/6 clients, baseline intact throughout; the accumulating obligation tells them apart and refuses |
 | [`Booth.lean`](Booth.lean) | `lake exe booth check\|llm` — the proposal booth (LLM proposer + kernel gate) |
 | [`DESIGN_MASTER_THEOREM.md`](DESIGN_MASTER_THEOREM.md) | The guarded-extension family: proved-once vs per-proposal, stacking, scope |
 | [`DESIGN_LLM.md`](DESIGN_LLM.md) | The proposer contract, booth pipeline, trust story |
