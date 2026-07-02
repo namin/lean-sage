@@ -30,3 +30,6 @@ lean_exe «booth» where
 
 lean_exe «demoStack» where
   root := `DemoStack
+
+lean_exe «demoSeq» where
+  root := `DemoSeq
