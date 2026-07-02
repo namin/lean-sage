@@ -18,5 +18,7 @@ import LeanBlack.CtxEquiv
 import LeanBlack.LamBeta
 import LeanBlack.LamBetaReflect
 import LeanBlack.GovChain
+import LeanBlack.GuardedExt
+import LeanBlack.GuardedExtApproval
 import LeanBlack.Public
 import LeanBlack.AxiomAudit

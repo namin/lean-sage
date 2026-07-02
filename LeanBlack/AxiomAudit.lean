@@ -22,6 +22,8 @@ import LeanBlack.ContextualBetaPure
 import LeanBlack.CtxEquiv
 import LeanBlack.LamBetaReflect
 import LeanBlack.GovChain
+import LeanBlack.GuardedExt
+import LeanBlack.GuardedExtApproval
 
 open LeanBlack
 
@@ -96,3 +98,39 @@ open LeanBlack
 /-- info: 'LeanBlack.wand_defeated_existential' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms LeanBlack.wand_defeated_existential
+
+/-! ## Guarded-extension family (`GuardedExt.lean`, `GuardedExtApproval.lean`)
+
+The master theorem, the per-guard obligations' instances, the
+family-level impossibility results, and the approval packaging are
+all kernel-only. (`DemoGuarded.lean`'s two *admission facts* use
+`native_decide`, matching `Demo.lean`'s practice — they are structural
+Bool checks on concrete probe values, outside this audited surface.) -/
+
+/-- info: 'guardedExt_soundForCE_first_install_tower' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms guardedExt_soundForCE_first_install_tower
+
+/-- info: 'guardSpec_numq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms guardSpec_numq
+
+/-- info: 'guardSpec_boolq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms guardSpec_boolq
+
+/-- info: 'no_guardSpec_primq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms no_guardSpec_primq
+
+/-- info: 'no_guardSpec_closureq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms no_guardSpec_closureq
+
+/-- info: 'multn_admits_guardedExt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms multn_admits_guardedExt
+
+/-- info: 'LeanBlack.guardedExtApproval_at_proof' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms LeanBlack.guardedExtApproval_at_proof
