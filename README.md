@@ -63,6 +63,42 @@ For a hands-on walkthrough that builds approvals from scratch, see
 [`DESIGN.md`](DESIGN.md) and [`DESIGN_PROOF.md`](DESIGN_PROOF.md).
 For exact scope (what is and is not claimed), [`SCOPE.md`](SCOPE.md).
 
+## The open proposal surface (guarded-extension family)
+
+Beyond the single worked multn modification, there is now an *open*
+family of admissible modifications with a small per-proposal cost:
+
+- **Master theorem** — [`LeanBlack/GuardedExt.lean`](LeanBlack/GuardedExt.lean):
+  `guardedExt_soundForCE_first_install_tower` proves, once, that any
+  guarded-extension wrapper `(λ (op args). if (g op) ⟨behavior⟩ else
+  (orig op args))` conservatively extends the baseline given a
+  `GuardSpec g` — two ~20-line lemmas (the guard is total; where it
+  fires, the baseline is undefined). multn is the `g := "num?"`
+  instance (`multn_admits_guardedExt`). The family's interior boundary
+  is provable: `no_guardSpec_primq` / `no_guardSpec_closureq` are
+  kernel proofs that no certificate *can* exist for guards that would
+  intercept baseline-defined applications. Design:
+  [`DESIGN_MASTER_THEOREM.md`](DESIGN_MASTER_THEOREM.md). Demo:
+  `lake exe demoGuarded`.
+- **Stacking** — [`LeanBlack/GuardedExtStack.lean`](LeanBlack/GuardedExtStack.lean):
+  `guardedExt_stack_soundForCE` admits a *second* wrapper over an
+  already-installed one when the guards are disjoint
+  (`GuardsDisjoint`). Demo: `lake exe demoStack` — multn (`num?`) and
+  a bool-selector (`bool?`) live simultaneously, baseline preserved.
+- **The proposal booth** — [`Booth.lean`](Booth.lean) (`lake exe booth
+  check | llm`): an LLM (Bedrock, via
+  [`LeanBlack/Bedrock.lean`](LeanBlack/Bedrock.lean)) proposes a guard,
+  a behavior, and — for guards without a pre-proved `GuardSpec` — the
+  proof; `lake env lean` checks it (rejecting `sorry`), with
+  error-feedback retries. The proposer is entirely outside the trusted
+  base. Design and trust story:
+  [`DESIGN_LLM.md`](DESIGN_LLM.md).
+
+`native_decide` is confined to the demos (admission shape-checks and
+`ValDeep`), matching `Demo.lean`'s practice; every *semantic* theorem
+above is kernel-only and pinned in
+[`LeanBlack/AxiomAudit.lean`](LeanBlack/AxiomAudit.lean).
+
 ## Artifact claim map
 
 | Paper-level claim | Files / theorems / demos |
@@ -295,6 +331,11 @@ A confident summary of what is and is not claimed. See
 | [`Smoke.lean`](Smoke.lean) | Structural-policy smoke runner |
 | [`Demos.lean`](Demos.lean) | 12 reflection capabilities (cross-level cascade, composition, adaptive wrappers) |
 | [`ProofBasedSmoke.lean`](ProofBasedSmoke.lean) | Proof-based scenes incl. end-to-end multn through the kernel gate |
+| [`DemoGuarded.lean`](DemoGuarded.lean) | `lake exe demoGuarded` — two admissions through the master theorem + the provable `closure?` refusal |
+| [`DemoStack.lean`](DemoStack.lean) | `lake exe demoStack` — multn ⊕ bool-selector stacked through one gate |
+| [`Booth.lean`](Booth.lean) | `lake exe booth check\|llm` — the proposal booth (LLM proposer + kernel gate) |
+| [`DESIGN_MASTER_THEOREM.md`](DESIGN_MASTER_THEOREM.md) | The guarded-extension family: proved-once vs per-proposal, stacking, scope |
+| [`DESIGN_LLM.md`](DESIGN_LLM.md) | The proposer contract, booth pipeline, trust story |
 | [`TUTORIAL.md`](TUTORIAL.md) | Hands-on walkthrough — start here to build your first approval |
 | [`DESIGN.md`](DESIGN.md) | Architectural rationale (substrate half) |
 | [`DESIGN_PROOF.md`](DESIGN_PROOF.md) | Proof-based admission design |
@@ -316,6 +357,10 @@ A confident summary of what is and is not claimed. See
 | `LeanBlack/ProofBased.lean` | `ApprovedModification`, proof-based gate, multn approval (#2's proof-bearing half), Wand defeat (#4), proof-based soundness (#5) |
 | `LeanBlack/Compose.lean` | `ValVis_weak` / `CE_weak` / `CE_weak_strong` transitivity (#6) — composition across admissions |
 | `LeanBlack/IdentityDelegate.lean` | `identityDelegate_CE_of_closure` + `identityDelegateApproval` — concrete second link in a CE chain |
+| `LeanBlack/GuardedExt.lean` | The guarded-extension family: master theorem, `GuardSpec`, per-guard instances, the `prim?`/`closure?` impossibility results, multn subsumption |
+| `LeanBlack/GuardedExtApproval.lean` | Approval packaging for the family (selective certificate → full-prefix) |
+| `LeanBlack/GuardedExtStack.lean` | Disjoint-guard second install (`GuardsDisjoint`, `guardedExt_stack_soundForCE`) + `EnvDeep`/`ValDeep` decidability |
+| `LeanBlack/Bedrock.lean` | `aws bedrock-runtime` client for the LLM proposer (ported from lean-green) |
 | `LeanBlack/Public.lean` | Single-file entry point exposing the headline API |
 
 **Contextual-β layer** (carries #7; `.lam` positions remain open):
