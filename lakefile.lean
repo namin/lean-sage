@@ -24,3 +24,6 @@ lean_exe «proofBasedSmoke» where
 
 lean_exe «demoGuarded» where
   root := `DemoGuarded
+
+lean_exe «booth» where
+  root := `Booth

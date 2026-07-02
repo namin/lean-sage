@@ -83,9 +83,11 @@ def primPairs : List (String × Val) :=
   , ("cdr",      .prim "cdr")
   , ("null?",    .prim "null?")
   , ("mul-list", .prim "mul-list")
+  , ("sym?",     .prim "sym?")
+  , ("pair?",    .prim "pair?")
   ]
 
-theorem primPairs_length : primPairs.length = 13 := by
+theorem primPairs_length : primPairs.length = 15 := by
   unfold primPairs; rfl
 
 /-- Allocate a fresh "level" worth of cells in the heap: one cell
@@ -366,6 +368,7 @@ theorem primPairs_atoms_closed : ∀ v ∈ primPairs.map (·.2), closedValB v = 
   -- After unfold, hv shows v is one of the .prim values.
   simp [List.map] at hv
   rcases hv with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
+    | rfl | rfl
   all_goals rfl
 
 /-- After k materializeStep iterations, the heap is the input heap appended
@@ -566,9 +569,9 @@ theorem freshLevelEnv_env_eq (h_a h_b : Heap) (h_len : h_a.length = h_b.length) 
   simp only [Heap.alloc]
   rw [h_envPrims, h_inner_a, h_inner_b, h_len]
 
-/-- `freshLevelEnv h` produces a heap with exactly 14 more cells than `h`. -/
+/-- `freshLevelEnv h` produces a heap with exactly 16 more cells than `h`. -/
 theorem freshLevelEnv_heap_length (h : Heap) :
-    (freshLevelEnv h).1.length = h.length + 14 := by
+    (freshLevelEnv h).1.length = h.length + 16 := by
   have h_inner := buildBindings_foldl_length primPairs h (.nil : Env)
   rw [primPairs_length] at h_inner
   unfold freshLevelEnv

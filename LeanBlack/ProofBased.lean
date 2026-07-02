@@ -755,6 +755,7 @@ theorem primPairs_values_PureVal :
   unfold primPairs at hv
   simp [List.map] at hv
   rcases hv with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
+    | rfl | rfl
   all_goals rfl
 
 theorem freshLevelEnv_preserves_PureHeap (h : Heap) (h_pure : PureHeap h) :
@@ -985,7 +986,27 @@ theorem applyPrim_PureVal {name : String} {args : List Val} {v : Val}
                             | [.builtinBaseApply], h =>
                               obtain rfl := Option.some.inj h; rfl
                           · rw [if_neg h₁₃] at h
-                            cases h
+                            by_cases h₁₄ : name = "sym?"
+                            · rw [if_pos h₁₄] at h
+                              unfold applyPrim_symQ at h
+                              match args, h with
+                              | [.num _], h | [.bool _], h | [.nilV], h
+                              | [.cons _ _], h | [.sym _], h
+                              | [.closure _ _ _], h | [.prim _], h
+                              | [.builtinBaseApply], h =>
+                                obtain rfl := Option.some.inj h; rfl
+                            · rw [if_neg h₁₄] at h
+                              by_cases h₁₅ : name = "pair?"
+                              · rw [if_pos h₁₅] at h
+                                unfold applyPrim_pairQ at h
+                                match args, h with
+                                | [.num _], h | [.bool _], h | [.nilV], h
+                                | [.cons _ _], h | [.sym _], h
+                                | [.closure _ _ _], h | [.prim _], h
+                                | [.builtinBaseApply], h =>
+                                  obtain rfl := Option.some.inj h; rfl
+                              · rw [if_neg h₁₅] at h
+                                cases h
 
 /-! ### Inductive step
 

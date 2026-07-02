@@ -148,6 +148,16 @@ def applyPrim_nullQ : List Val → Option Val
   | [_]     => some (.bool false)
   | _       => none
 
+def applyPrim_symQ : List Val → Option Val
+  | [.sym _] => some (.bool true)
+  | [_]      => some (.bool false)
+  | _        => none
+
+def applyPrim_pairQ : List Val → Option Val
+  | [.cons _ _] => some (.bool true)
+  | [_]         => some (.bool false)
+  | _           => none
+
 def applyPrim (name : String) (args : List Val) : Option Val :=
   if name = "+" then applyPrim_plus args
   else if name = "-" then applyPrim_minus args
@@ -162,6 +172,8 @@ def applyPrim (name : String) (args : List Val) : Option Val :=
   else if name = "car" then applyPrim_car args
   else if name = "cdr" then applyPrim_cdr args
   else if name = "null?" then applyPrim_nullQ args
+  else if name = "sym?" then applyPrim_symQ args
+  else if name = "pair?" then applyPrim_pairQ args
   else none
 
 /-! ## Structural beq (for policies that compare Val cells) -/

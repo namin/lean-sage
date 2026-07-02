@@ -2023,6 +2023,112 @@ private theorem applyPrim_nullQ_bisim {args_a args_b : List Val} {h_a h_b : Heap
                 | num _ | bool _ | nilV | sym _ | cons _ _ | closure _ _ _
                 | prim _ => simp [ValVis_aux] at h_d1
 
+private theorem applyPrim_symQ_bisim {args_a args_b : List Val} {h_a h_b : Heap}
+    (h_lvv : ListValVis args_a args_b h_a h_b) :
+    applyPrim_symQ args_a = applyPrim_symQ args_b := by
+  cases args_a with
+  | nil => cases args_b with
+    | nil => rfl
+    | cons _ _ => exact h_lvv.elim
+  | cons v_a rest_a => cases args_b with
+    | nil => exact h_lvv.elim
+    | cons v_b rest_b =>
+        obtain ⟨h_vv, h_lvv_r⟩ := h_lvv
+        cases rest_a with
+        | cons _ _ => cases rest_b with
+          | cons _ _ => simp [applyPrim_symQ]
+          | nil => exact h_lvv_r.elim
+        | nil => cases rest_b with
+          | cons _ _ => exact h_lvv_r.elim
+          | nil =>
+              have h_d1 := h_vv 1
+              cases v_a with
+              | num _ => cases v_b with
+                | num _ => rfl
+                | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _
+                | builtinBaseApply => simp [ValVis_aux] at h_d1
+              | bool _ => cases v_b with
+                | bool _ => rfl
+                | num _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _
+                | builtinBaseApply => simp [ValVis_aux] at h_d1
+              | nilV => cases v_b with
+                | nilV => rfl
+                | num _ | bool _ | sym _ | cons _ _ | closure _ _ _ | prim _
+                | builtinBaseApply => simp [ValVis_aux] at h_d1
+              | sym _ => cases v_b with
+                | sym _ => rfl
+                | num _ | bool _ | nilV | cons _ _ | closure _ _ _ | prim _
+                | builtinBaseApply => simp [ValVis_aux] at h_d1
+              | cons _ _ => cases v_b with
+                | cons _ _ => rfl
+                | num _ | bool _ | nilV | sym _ | closure _ _ _ | prim _
+                | builtinBaseApply => simp [ValVis_aux] at h_d1
+              | closure _ _ _ => cases v_b with
+                | closure _ _ _ => rfl
+                | num _ | bool _ | nilV | sym _ | cons _ _ | prim _
+                | builtinBaseApply => simp [ValVis_aux] at h_d1
+              | prim _ => cases v_b with
+                | prim _ => rfl
+                | num _ | bool _ | nilV | sym _ | cons _ _ | closure _ _ _
+                | builtinBaseApply => simp [ValVis_aux] at h_d1
+              | builtinBaseApply => cases v_b with
+                | builtinBaseApply => rfl
+                | num _ | bool _ | nilV | sym _ | cons _ _ | closure _ _ _
+                | prim _ => simp [ValVis_aux] at h_d1
+
+private theorem applyPrim_pairQ_bisim {args_a args_b : List Val} {h_a h_b : Heap}
+    (h_lvv : ListValVis args_a args_b h_a h_b) :
+    applyPrim_pairQ args_a = applyPrim_pairQ args_b := by
+  cases args_a with
+  | nil => cases args_b with
+    | nil => rfl
+    | cons _ _ => exact h_lvv.elim
+  | cons v_a rest_a => cases args_b with
+    | nil => exact h_lvv.elim
+    | cons v_b rest_b =>
+        obtain ⟨h_vv, h_lvv_r⟩ := h_lvv
+        cases rest_a with
+        | cons _ _ => cases rest_b with
+          | cons _ _ => simp [applyPrim_pairQ]
+          | nil => exact h_lvv_r.elim
+        | nil => cases rest_b with
+          | cons _ _ => exact h_lvv_r.elim
+          | nil =>
+              have h_d1 := h_vv 1
+              cases v_a with
+              | num _ => cases v_b with
+                | num _ => rfl
+                | bool _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _
+                | builtinBaseApply => simp [ValVis_aux] at h_d1
+              | bool _ => cases v_b with
+                | bool _ => rfl
+                | num _ | nilV | sym _ | cons _ _ | closure _ _ _ | prim _
+                | builtinBaseApply => simp [ValVis_aux] at h_d1
+              | nilV => cases v_b with
+                | nilV => rfl
+                | num _ | bool _ | sym _ | cons _ _ | closure _ _ _ | prim _
+                | builtinBaseApply => simp [ValVis_aux] at h_d1
+              | sym _ => cases v_b with
+                | sym _ => rfl
+                | num _ | bool _ | nilV | cons _ _ | closure _ _ _ | prim _
+                | builtinBaseApply => simp [ValVis_aux] at h_d1
+              | cons _ _ => cases v_b with
+                | cons _ _ => rfl
+                | num _ | bool _ | nilV | sym _ | closure _ _ _ | prim _
+                | builtinBaseApply => simp [ValVis_aux] at h_d1
+              | closure _ _ _ => cases v_b with
+                | closure _ _ _ => rfl
+                | num _ | bool _ | nilV | sym _ | cons _ _ | prim _
+                | builtinBaseApply => simp [ValVis_aux] at h_d1
+              | prim _ => cases v_b with
+                | prim _ => rfl
+                | num _ | bool _ | nilV | sym _ | cons _ _ | closure _ _ _
+                | builtinBaseApply => simp [ValVis_aux] at h_d1
+              | builtinBaseApply => cases v_b with
+                | builtinBaseApply => rfl
+                | num _ | bool _ | nilV | sym _ | cons _ _ | closure _ _ _
+                | prim _ => simp [ValVis_aux] at h_d1
+
 /-! ## Binary numeric prims and bisimulation -/
 
 /-- Helper: for ValVis-related lists of length ≠ 2, the binary numeric prim
@@ -2706,11 +2812,59 @@ theorem applyPrim_bisim (name : String) (args_a args_b : List Val) (h_a h_b : He
     obtain ⟨b, rfl⟩ := hform
     refine ⟨.bool b, ?_, valVis_bool b, trivial, trivial⟩
     rw [← heq]; exact h
+  by_cases hp_symQ : name = "sym?"
+  · subst hp_symQ
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ,
+               hp_boolQ, hp_closureQ, hp_primQ, hp_cons, hp_car, hp_cdr,
+               hp_nullQ] at h ⊢
+    have heq := applyPrim_symQ_bisim h_lvv
+    have hform : ∃ b : Bool, r_a = .bool b := by
+      cases args_a with
+      | nil => simp [applyPrim_symQ] at h
+      | cons v rest =>
+          cases rest with
+          | cons _ _ => simp [applyPrim_symQ] at h
+          | nil =>
+              cases v with
+              | sym _ =>
+                  simp only [applyPrim_symQ, Option.some.injEq] at h
+                  exact ⟨true, h.symm⟩
+              | num _ | bool _ | nilV | cons _ _ | closure _ _ _ | prim _
+              | builtinBaseApply =>
+                  simp only [applyPrim_symQ, Option.some.injEq] at h
+                  exact ⟨false, h.symm⟩
+    obtain ⟨b, rfl⟩ := hform
+    refine ⟨.bool b, ?_, valVis_bool b, trivial, trivial⟩
+    rw [← heq]; exact h
+  by_cases hp_pairQ : name = "pair?"
+  · subst hp_pairQ
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ,
+               hp_boolQ, hp_closureQ, hp_primQ, hp_cons, hp_car, hp_cdr,
+               hp_nullQ, hp_symQ] at h ⊢
+    have heq := applyPrim_pairQ_bisim h_lvv
+    have hform : ∃ b : Bool, r_a = .bool b := by
+      cases args_a with
+      | nil => simp [applyPrim_pairQ] at h
+      | cons v rest =>
+          cases rest with
+          | cons _ _ => simp [applyPrim_pairQ] at h
+          | nil =>
+              cases v with
+              | cons _ _ =>
+                  simp only [applyPrim_pairQ, Option.some.injEq] at h
+                  exact ⟨true, h.symm⟩
+              | num _ | bool _ | nilV | sym _ | closure _ _ _ | prim _
+              | builtinBaseApply =>
+                  simp only [applyPrim_pairQ, Option.some.injEq] at h
+                  exact ⟨false, h.symm⟩
+    obtain ⟨b, rfl⟩ := hform
+    refine ⟨.bool b, ?_, valVis_bool b, trivial, trivial⟩
+    rw [← heq]; exact h
   -- Unknown name: applyPrim returns none.
   exfalso
   simp only [hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ, hp_boolQ,
              hp_closureQ, hp_primQ, hp_cons, hp_car, hp_cdr, hp_nullQ,
-             ↓reduceIte] at h
+             hp_symQ, hp_pairQ, ↓reduceIte] at h
   cases h
 
 /-! ## Cons-extension of `EnvVis` -/
@@ -4123,7 +4277,21 @@ theorem shift_applyPrim (cutoff offset : Nat) (name : String) :
                             · cases a <;> simp [applyPrim_nullQ, shift_val, List.map]
                             · simp [applyPrim_nullQ, List.map]
                           · simp only [if_neg h_null]
-                            simp
+                            by_cases h_symq : name = "sym?"
+                            · subst h_symq
+                              rcases args with _ | ⟨a, _ | _⟩
+                              · simp [applyPrim_symQ, List.map]
+                              · cases a <;> simp [applyPrim_symQ, shift_val, List.map]
+                              · simp [applyPrim_symQ, List.map]
+                            · simp only [if_neg h_symq]
+                              by_cases h_pairq : name = "pair?"
+                              · subst h_pairq
+                                rcases args with _ | ⟨a, _ | _⟩
+                                · simp [applyPrim_pairQ, List.map]
+                                · cases a <;> simp [applyPrim_pairQ, shift_val, List.map]
+                                · simp [applyPrim_pairQ, List.map]
+                              · simp only [if_neg h_pairq]
+                                simp
 
 /-! ## Tower-shift commutativity
 

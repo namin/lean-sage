@@ -4027,9 +4027,36 @@ theorem applyPrim_conv_rev (name : String) (args_a args_b : List Val) (h_a h_b :
           | [a0], _ => cases a0 <;> exact ⟨_, rfl⟩
           | [], hl => exact hl.elim
           | _ :: _ :: _, hl => exact hl.2.elim
+  by_cases hp_symQ : name = "sym?"
+  · subst hp_symQ
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ, hp_boolQ,
+               hp_closureQ, hp_primQ, hp_cons, hp_car, hp_cdr, hp_nullQ] at h ⊢
+    cases args_b with
+    | nil => simp [applyPrim_symQ] at h
+    | cons v0 rest => cases rest with
+      | cons _ _ => simp [applyPrim_symQ] at h
+      | nil =>
+          match args_a, h_lvv with
+          | [a0], _ => cases a0 <;> exact ⟨_, rfl⟩
+          | [], hl => exact hl.elim
+          | _ :: _ :: _, hl => exact hl.2.elim
+  by_cases hp_pairQ : name = "pair?"
+  · subst hp_pairQ
+    simp only [↓reduceIte, hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ, hp_boolQ,
+               hp_closureQ, hp_primQ, hp_cons, hp_car, hp_cdr, hp_nullQ, hp_symQ] at h ⊢
+    cases args_b with
+    | nil => simp [applyPrim_pairQ] at h
+    | cons v0 rest => cases rest with
+      | cons _ _ => simp [applyPrim_pairQ] at h
+      | nil =>
+          match args_a, h_lvv with
+          | [a0], _ => cases a0 <;> exact ⟨_, rfl⟩
+          | [], hl => exact hl.elim
+          | _ :: _ :: _, hl => exact hl.2.elim
   exfalso
   simp only [hp_plus, hp_minus, hp_times, hp_mul, hp_eq, hp_numQ, hp_boolQ,
-             hp_closureQ, hp_primQ, hp_cons, hp_car, hp_cdr, hp_nullQ, ↓reduceIte] at h
+             hp_closureQ, hp_primQ, hp_cons, hp_car, hp_cdr, hp_nullQ,
+             hp_symQ, hp_pairQ, ↓reduceIte] at h
   exact absurd h (by simp)
 
 /-! ### 7v (cont.). The reverse `applyDirect` clause.
