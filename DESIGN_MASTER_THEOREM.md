@@ -115,13 +115,47 @@ Wrappers are built from source through `guardedExtBody`; the admission
 closures and heaps are derived by running `eval` on the source
 (`probeOf`), as in `Demo.lean` — no hand-reconstructed environments.
 
+## Stacking — `GuardedExtStack.lean`, `DemoStack.lean`
+
+The master theorem is first-install (`oldVal = .builtinBaseApply`).
+`GuardedExtStack.lean` lifts it to a **second install**: a wrapper
+`W2` (guard `g2`) admitted over an already-installed wrapper `W1`
+(guard `g1`), when the guards are **disjoint**
+(`GuardsDisjoint g1 g2`). `guardedExt_stack_soundForCE` proves
+`CE_weak_strong` of `W2` over `W1`, so the gate admits the second
+`set!` with a kernel certificate — exactly as it did the first.
+
+The two cases, both reusing first-install machinery:
+
+- *guard-true* (`g2` fires): vacuous. `g2` firing makes the baseline
+  undefined (`spec2.misses`); disjointness makes `g1` miss, so `W1`
+  delegates to that undefined baseline — a successful `W1` call is
+  impossible. Proved by running the *existing* builtin trace lemma on
+  `W1` and colliding with `spec2.misses`.
+- *guard-false* (`g2` misses): `W2` delegates to `W1`, and the framing
+  lemma (polymorphic in the operator) reproduces `W1`'s result over
+  the alloc'd heap.
+
+`DemoStack.lean` (`lake exe demoStack`) installs multn (`num?`) then
+the bool-selector (`bool?`) through one gate whose second certificate
+is this theorem, and shows all three behaviors live at once:
+`(2 3 4) ⇒ 24`, `(#t 1 2) ⇒ 1`, `(+ 1 2) ⇒ 3`. Composed with
+`CE_weak_strong_trans` (`W2`-over-`W1` ∘ `W1`-over-builtin), the whole
+stack is a conservative extension of the baseline.
+
+Scope of the stacking result: two disjoint single-guard installs.
+n-way stacking is the same argument iterated (each new guard disjoint
+from all installed ones); not mechanized. The one hypothesis not
+derived from the admission facts is `ValDeep W1` — decidable
+(`decValDeep`), discharged by `native_decide` in the demo.
+
 ## Scope, stated plainly
 
-- **First install only.** Like the multn theorem, the master theorem
-  is stated for `oldVal = .builtinBaseApply`. Chained installs
-  compose via `CE_weak_strong_trans` (see
-  `ProofCarryingAccumulation.lean` for the existing chained example);
-  a chained *family* theorem is not proved here.
+- **First install for the *master* theorem; two-install stacking in
+  `GuardedExtStack.lean`.** The master theorem is stated for
+  `oldVal = .builtinBaseApply`; `guardedExt_stack_soundForCE` handles
+  the disjoint-guard second install, and `CE_weak_strong_trans`
+  composes the chain (see also `ProofCarryingAccumulation.lean`).
 - **Extensions of undefined territory only.** The family cannot
   express behavior-preserving rewrites of *defined* territory
   (optimizations). That corner requires the open logical relation for
@@ -130,11 +164,12 @@ closures and heaps are derived by running `eval` on the source
 - **Guards are unary recognizer prims applied to `op`.** Guards over
   operand lists, or compound guards, would need the trace lemma
   re-generalized (mechanical, not conceptual).
-- **`native_decide` appears in `DemoGuarded.lean` only**, for the two
-  admission facts (`boolSel_admits`, `multnM_admits`) — Bool shape
-  checks on concrete probe values, matching `Demo.lean`'s existing
-  practice. The kernel does not reduce `eval`'s mutual recursion, so
-  kernel `decide` is unavailable for eval-derived values. Everything
+- **`native_decide` appears in the demos only** (`DemoGuarded.lean`,
+  `DemoStack.lean`), for admission facts and `ValDeep W1` — Bool/
+  decidable checks on concrete probe values, matching `Demo.lean`'s
+  existing practice. The kernel does not reduce `eval`'s mutual
+  recursion, so kernel `decide` is unavailable for eval-derived
+  values. Everything
   semantic — master theorem, GuardSpecs, impossibility results,
   approval layer — is kernel-only, pinned in `AxiomAudit.lean` to
   `[propext, Classical.choice, Quot.sound]`.

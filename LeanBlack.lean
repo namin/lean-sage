@@ -20,5 +20,6 @@ import LeanBlack.LamBetaReflect
 import LeanBlack.GovChain
 import LeanBlack.GuardedExt
 import LeanBlack.GuardedExtApproval
+import LeanBlack.GuardedExtStack
 import LeanBlack.Public
 import LeanBlack.AxiomAudit

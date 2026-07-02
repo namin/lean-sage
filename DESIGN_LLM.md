@@ -123,8 +123,10 @@ the archive: every proposal, verdict, and certificate hash.
 
 ## What this does NOT claim
 
-- No chained installs: the master theorem is first-install; one
-  wrapper per session (stacking = the "stack theorem", future work).
+- Two-install stacking is now proved (`GuardedExtStack.lean`,
+  `guardedExt_stack_soundForCE`, disjoint guards) and demoed
+  (`DemoStack.lean`); n-way stacking is the same argument iterated,
+  not yet mechanized.
 - No new-guard *semantics*: proposals pick from the language's
   recognizers; they do not add primitives (that would change
   `applyPrim` and the bisimulation layer — a language change, not a
@@ -141,7 +143,8 @@ the archive: every proposal, verdict, and certificate hash.
       check`; records in `Proposals/`)
 - [x] Tier 3: LLM proposer — **in Lean** (`lake exe booth llm`, via
       `LeanBlack/Bedrock.lean`)
-- [ ] Stretch: stack theorem (disjoint-guard chained installs)
+- [x] Stack theorem: disjoint-guard second install
+      (`GuardedExtStack.lean`, `DemoStack.lean` — both wrappers live)
 
 First live three-vertex run driven entirely from inside Lean
 (2026-07-02, `lake exe booth llm`): asked for "make pairs applicable."

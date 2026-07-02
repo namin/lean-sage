@@ -27,3 +27,6 @@ lean_exe «demoGuarded» where
 
 lean_exe «booth» where
   root := `Booth
+
+lean_exe «demoStack» where
+  root := `DemoStack
