@@ -154,12 +154,17 @@ and its demo-facing front end, are kernel-only. -/
 #guard_msgs in
 #print axioms guardsDisjoint_num_bool
 
-/-! ## Fexpr experiment — the CE / β dividing line (branch: fexpr) -/
+/-! ## Fexpr experiment — the CE / β dividing line
 
-/-- info: 'LeanBlack.beta_survives_but_operative_breaks_it' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in
-#print axioms beta_survives_but_operative_breaks_it
+A top-level syntax-sensitive observation extension: the operative-free
+context restriction on `Ctx` (in `contextual_beta_pure`) is load-bearing,
+witnessed by a Wand-style β counterexample. See `LeanBlack/Fexpr.lean` for
+the precise (deliberately modest) scope. -/
 
-/-- info: 'LeanBlack.evalF_conservative' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'LeanBlack.same_base_result_but_operative_separates' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms evalF_conservative
+#print axioms same_base_result_but_operative_separates
+
+/-- info: 'LeanBlack.evalF_agrees_off_operative_root' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms evalF_agrees_off_operative_root

@@ -1,167 +1,189 @@
 /-
-  lean-sage: Fexpr experiment — the CE / β dividing line, made a theorem.
+  lean-sage: a top-level syntax-sensitive observation extension.
 
-  This file is an *additive, independent* facility. It does **not** touch
-  `Val`, `Expr`, `eval`, or any existing theorem: it reuses the real
-  evaluator verbatim and adds *one operative special form* on top of it.
-  The point is to turn a scoping caveat into a machine-checked separation.
+  An *additive, independent* facility. It does **not** touch `Val`, `Expr`,
+  `eval`, or any existing theorem: it reuses the real evaluator verbatim
+  and adds one syntax-sensitive observer on top of it.
 
-  ## What the rest of lean-sage proves, and what it does not
+  ## Motivation and honest scope
 
-  lean-sage's gate certifies `CE_weak_strong`: a **value-level, directional
-  "no-clobbering"** property — every application the old `base-apply`
-  handled successfully is still handled compatibly by the new one. That is
-  an *operational* conservative extension. It is emphatically **not** the
-  *equational* statement `M ≃_old N → M ≃_new N`: preserving every old
-  execution does not stop a language extension from introducing a **new
-  context** that distinguishes previously-equivalent terms.
+  lean-sage's gate certifies `CE_weak_strong` — a **value-level,
+  directional "no-clobbering"** property: every application the old
+  `base-apply` handled successfully is still handled compatibly by the new
+  one, quantified over `callAsBaseApply` and carried by an
+  `ApprovedModification`'s kernel-checked proof. That is an *operational*
+  conservative extension. It is **not** the *equational* statement that a
+  contextual equivalence `M ≃ N` is preserved: preserving every old
+  execution does not stop a language extension from adding a **new context**
+  that distinguishes previously-equivalent terms.
 
-  The reason lean-sage's β results (`contextual_beta_pure`,
-  `wand_defeated_existential_gated_beta`) hold is *not* that CE implies
-  them. It is that the gated modification surface — `base-apply` — receives
-  already-evaluated argument *values* (`applyVia … (op : Val) (args : List
-  Val)`), never operand *syntax*. A genuine fexpr (operative) is defined by
-  the opposite: it receives its operand **unevaluated**. So a fexpr is not
-  expressible as a `base-apply` modification at all; it lives one semantic
-  layer earlier.
+  The reason lean-sage's β results hold is that the gated modification
+  surface — `base-apply` — receives already-evaluated argument *values*
+  (`applyVia … (op : Val) (args : List Val)`), never operand *syntax*. A
+  genuine fexpr (operative) is the opposite: it receives operands
+  **unevaluated**, one semantic layer earlier, so it is not expressible as a
+  `base-apply` modification at all.
 
-  ## What this file shows
+  This file models the *smallest slice* of that earlier layer: a single
+  operative `syntax-tag`, recognized **only at the root of a program**,
+  that returns a **ground** value determined by its operand's head
+  constructor. It is deliberately not a fexpr evaluator — see "What this is
+  not" below.
 
-  Model that earlier layer minimally: `evalF` is the ordinary evaluator
-  extended with a single operative, `syntax-tag`, which receives its
-  operand as *syntax* and returns a value determined by the operand's head
-  constructor (Wand's decisive premise: syntactic discrimination of
-  operands). Then:
+  ## What this shows
 
-  * `evalF_conservative` — on every operative-free program `evalF` agrees
-    with the base evaluator (indeed the operative form was previously
-    *meaningless*, `base_operative_undefined`). So the extension passes a
-    behavioral / operational CE gate.
+  * `evalF_agrees_off_operative_root` — when the *whole program* is not the
+    operative form, `evalF` delegates to the base evaluator (definitional).
+    This is whole-program agreement off one root pattern. **It is not
+    lean-sage's `CE_weak_strong` gate** (no `base-apply` replacement, no
+    `ApprovedModification`).
 
-  * `betaPair_obsEquiv` — the Wand pair `((λx.x) 0)` and `0` are
-    observationally equivalent under the *base* evaluator (β at top level).
+  * `observe_base_undefined` — the operative form is meaningless in the base
+    language (`syntax-tag` is unbound), so adding it only gives meaning to a
+    previously-undefined program.
 
-  * `operative_distinguishes` — yet the single operative context
-    `(syntax-tag [-])` maps them to different values under `evalF`, so the
-    β contextual equivalence **fails** once the operative exists. The
-    extension does *not* pass an equational CE gate.
+  * `same_base_result` — the β-redex `((λx.x) 0)` and the β-contractum
+    `let x = 0 in x` produce the same base result. The *genuine* contextual
+    equation for this pair is `wand_beta_ctx_pure_at_start`
+    (`ContextualBetaPure.lean`): they are contextually equivalent for every
+    context in the lam-free, pure-sided (and operative-free) class `Ctx`.
 
-  Bundled as `beta_survives_but_operative_breaks_it`. This is Wand 1998
-  ("The Theory of Fexprs is Trivial") localized inside lean-sage's own
-  calculus: not a collapse the gate "defeats", but the negative theorem
-  explaining why an equational gate must reject unrestricted syntactic
-  reflection.
+  * `operative_separates` — the operative context maps this pair to two
+    distinct **ground** values (`.num`), so it separates a pair that
+    `wand_beta_ctx_pure_at_start` equates.
 
-  ## Scope of this experiment
+  Bundled as `same_base_result_but_operative_separates`. The point: the
+  operative is a context **outside** the class `Ctx` for which contextual β
+  is proved. The pure/operative-free restriction on `Ctx` is therefore not
+  incidental — syntactic-reflection contexts are exactly what it excludes,
+  and admitting them (as a real fexpr would) breaks the equational theory.
 
-  `evalF` intercepts the operative at the observation site (a top-level
-  context). One distinguishing context is all a *refutation* of a
-  contextual equivalence needs — cf. `beta_not_ObsEq` in lean-refl-beta,
-  which refutes with an equally shallow context. A full structural overlay
-  (the operative firing at any depth) and the corresponding *restricted*
-  operative that may control evaluation order yet not discriminate syntax
-  — the β-*safe* fexpr — are the natural next steps; see the branch notes.
+  ## What this is NOT
+
+  * **Not Wand's theorem.** Wand 1998 proves the full collapse (contextual
+    equivalence = α-congruence). This is one characteristic *counterexample*
+    in lean-sage's syntax, not the triviality theorem.
+  * **Not a fexpr evaluator.** `asOperative` fires only when the *entire
+    program* is `(syntax-tag operand)`; an operative nested inside a larger
+    program is delegated to `evalProgram`, which does not know `syntax-tag`.
+    So `asOperative e = none` means "not an operative at the root", not
+    "operative-free". A genuine model would put a `base-combine` hook
+    *before* operand evaluation, recognize operatives at arbitrary depth,
+    carry the caller environment, and distinguish applicative from operative
+    closures. That is the next step; see the branch notes.
+  * **Not `CE_weak_strong`.** See `evalF_agrees_off_operative_root` above.
+
+  One root observer is enough to *refute* a contextual equivalence — cf.
+  `beta_not_ObsEq` in lean-refl-beta, which refutes with an equally shallow
+  context — which is all this file claims.
 -/
 
 import LeanBlack.ProofBased
+import LeanBlack.ContextualBetaPure
 
 namespace LeanBlack
 
 /-! ## The operative: syntactic discrimination of an operand -/
 
-/-- The operative's behaviour: a value determined by the operand's *head
-    constructor*, read off its **syntax** without evaluating it. This is
-    exactly the reflective power Wand shows collapses the equational
-    theory — the ability to tell `((λx.x) 0)` (an `.app`) from `0` (a
-    `.num`) before either is run. -/
+/-- The operative's behaviour: a **ground** value (`.num`) determined by the
+    operand's *head constructor*, read off its **syntax** without evaluating
+    it. Ground so that the distinction is observable under lean-sage's
+    Morris-style ground observation (`CtxEquiv` observes only `.num`/`.bool`;
+    a `.sym` tag would not refute it). This is exactly the reflective power
+    Wand shows collapses the equational theory: telling `((λx.x) 0)` (an
+    `.app`, tag `0`) from `let x = 0 in x` (a `.letE`, tag `1`) before
+    either is run. -/
 def synHeadTag : Expr → Val
-  | .num _           => .sym "lit"
-  | .bool _          => .sym "lit"
-  | .quote _         => .sym "lit"
-  | .var _           => .sym "var"
-  | .ifte _ _ _      => .sym "ifte"
-  | .lam _ _         => .sym "lam"
-  | .app _           => .sym "app"
-  | .set _ _         => .sym "set"
-  | .em _            => .sym "em"
-  | .primApp _ _     => .sym "primApp"
-  | .letE _ _ _      => .sym "letE"
-  | .seq _           => .sym "seq"
-  | .installPolicy _ => .sym "installPolicy"
+  | .app _       => .num 0
+  | .letE _ _ _  => .num 1
+  | _            => .num 2
 
-/-- Recognise the operative form `(syntax-tag operand)`, returning the
-    *unevaluated* operand. In the base language the head `syntax-tag` is an
-    unbound variable, so this form has no prior meaning (see
-    `base_operative_undefined`) — adding the operative is additive. -/
+/-- Recognise the operative form `(syntax-tag operand)` **at the root**,
+    returning the *unevaluated* operand. In the base language the head
+    `syntax-tag` is an unbound variable, so this form has no prior meaning
+    (see `observe_base_undefined`). -/
 def asOperative : Expr → Option Expr
   | .app [.var "syntax-tag", operand] => some operand
   | _                                 => none
 
-/-- The base evaluator extended with the one operative. Ordinary programs
-    are handed to the real `evalProgram` unchanged; only the operative form
-    is intercepted, and it consumes its operand as **syntax**. -/
+/-- The base evaluator extended with the one root operative. Non-operative
+    whole programs are handed to the real `evalProgram` unchanged; only the
+    root operative form is intercepted, consuming its operand as **syntax**. -/
 def evalF (fuel : Nat) (ptable : PolicyTable) (e : Expr)
     (defaultPolicy : BlackPolicy := acceptAllPolicy) : Option Val :=
   match asOperative e with
   | some operand => some (synHeadTag operand)
   | none         => evalProgram fuel ptable e defaultPolicy
 
-/-! ## The witnesses: the Wand β pair and the operative context -/
+/-! ## The witnesses: the Wand β pair and the operative observer -/
 
 /-- The β-redex `((λx. x) 0)`. -/
 def betaRedex : Expr := .app [.lam ["x"] (.var "x"), .num 0]
 
-/-- Its value `0` — the β-contractum's outcome. Same pair as
-    `wand_defeated_existential`. -/
-def betaValue : Expr := .num 0
+/-- The β-contractum `let x = 0 in x`. Same pair as
+    `wand_beta_ctx_pure_at_start`. -/
+def betaContractum : Expr := .letE "x" (.num 0) (.var "x")
 
-/-- The operative observation context `C[-] = (syntax-tag [-])`. -/
+/-- The operative observation context `C[-] = (syntax-tag [-])` — a context
+    *outside* the operative-free class `Ctx` of `contextual_beta_pure`. -/
 def observe (o : Expr) : Expr := .app [.var "syntax-tag", o]
 
 /-! ## The separation -/
 
-/-- **Behavioral / operational CE.** On any operative-free program the
-    extended evaluator is exactly the base evaluator: the operative changes
-    nothing about old behaviour. This is the gate lean-sage's certificates
-    speak to. -/
-theorem evalF_conservative (fuel : Nat) (ptable : PolicyTable) (e : Expr)
-    (dp : BlackPolicy) (h : asOperative e = none) :
+/-- **Agreement off the operative root.** When the whole program is not the
+    operative form, the extended evaluator is the base evaluator. This is
+    whole-program agreement off one root pattern — **not** lean-sage's
+    `CE_weak_strong` gate (which replaces a `base-apply` value under an
+    `ApprovedModification`), and the hypothesis is "not an operative at the
+    root", not "operative-free". -/
+theorem evalF_agrees_off_operative_root (fuel : Nat) (ptable : PolicyTable)
+    (e : Expr) (dp : BlackPolicy) (h : asOperative e = none) :
     evalF fuel ptable e dp = evalProgram fuel ptable e dp := by
   simp [evalF, h]
 
-/-- The operative form is *meaningless* in the base language: `syntax-tag`
-    is unbound, so the base evaluator diverges/rejects. Adding the
-    operative therefore only gives meaning to previously-undefined
-    programs — the strongest form of operational conservativity. -/
-theorem base_operative_undefined :
-    evalProgram 100 [acceptAllPolicy] (observe betaValue) = none := by
+/-- The operative form is *meaningless* in the base language for our
+    witnesses: `syntax-tag` is unbound, so the base evaluator rejects it.
+    Hence adding the operative only gives meaning to a previously-undefined
+    program (additivity, witnessed on the pair used below).
+
+    The fully general statement — `∀ o fuel ptable dp,
+    evalProgram fuel ptable (observe o) dp = none`, whence whole-program
+    success preservation `evalProgram e = some v → evalF e = some v` — needs
+    a lemma that the start tower's level-0 env never binds `"syntax-tag"`
+    (independent of the policy). Left as a follow-up; see the branch notes. -/
+theorem observe_witnesses_base_undefined :
+    evalProgram 100 [acceptAllPolicy] (observe betaRedex) = none
+    ∧ evalProgram 100 [acceptAllPolicy] (observe betaContractum) = none := by
+  refine ⟨?_, ?_⟩ <;> decide +kernel
+
+/-- **Same base result.** The β-redex and β-contractum produce the same
+    value under the base evaluator. Their genuine *contextual* equivalence
+    (over the operative-free class `Ctx`) is `wand_beta_ctx_pure_at_start`. -/
+theorem same_base_result :
+    evalProgram 100 [acceptAllPolicy] betaRedex
+      = evalProgram 100 [acceptAllPolicy] betaContractum := by
   decide +kernel
 
-/-- **β at top level, base evaluator.** The Wand pair converges to the same
-    value under the ordinary evaluator — the equivalence the operative is
-    about to break. -/
-theorem betaPair_obsEquiv : ObsEquivConverges betaRedex betaValue := by
-  refine ⟨100, .num 0, ?_, ?_⟩ <;> decide +kernel
-
-/-- **Equational CE fails.** The single operative context distinguishes the
-    β-equal pair: `(syntax-tag ((λx.x) 0)) ⇓ app` while
-    `(syntax-tag 0) ⇓ lit`. So `M ≃_old N` does **not** survive the
-    extension — one new context suffices to refute the contextual
-    equivalence. -/
-theorem operative_distinguishes :
+/-- **The operative context separates the pair — at ground type.** The
+    single operative context distinguishes the β-equal pair:
+    `(syntax-tag ((λx.x) 0)) ⇓ 0` while `(syntax-tag (let x = 0 in x)) ⇓ 1`.
+    So a context *outside* `Ctx` refutes the contextual equivalence that
+    `wand_beta_ctx_pure_at_start` establishes for contexts *inside* it. -/
+theorem operative_separates :
     evalF 100 [acceptAllPolicy] (observe betaRedex)
-      ≠ evalF 100 [acceptAllPolicy] (observe betaValue) := by
+      ≠ evalF 100 [acceptAllPolicy] (observe betaContractum) := by
   decide +kernel
 
-/-- **The dividing line, as one theorem.** The β pair is observationally
-    equivalent under the base evaluator, yet the operative context
-    distinguishes it: behavioral conservative extension does not imply
-    preservation of the equational theory. Wand's collapse, localized in
-    lean-sage's calculus. -/
-theorem beta_survives_but_operative_breaks_it :
-    ObsEquivConverges betaRedex betaValue
+/-- **The dividing line, as one theorem.** The β pair has the same base
+    result, yet a syntactic-reflection observer separates it at ground type.
+    A Wand-style β counterexample in lean-sage's syntax: it shows the
+    operative-free restriction on `Ctx` is load-bearing — not the full
+    triviality theorem, and not a statement about `CE_weak_strong`. -/
+theorem same_base_result_but_operative_separates :
+    evalProgram 100 [acceptAllPolicy] betaRedex
+        = evalProgram 100 [acceptAllPolicy] betaContractum
     ∧ evalF 100 [acceptAllPolicy] (observe betaRedex)
-        ≠ evalF 100 [acceptAllPolicy] (observe betaValue) :=
-  ⟨betaPair_obsEquiv, operative_distinguishes⟩
+        ≠ evalF 100 [acceptAllPolicy] (observe betaContractum) :=
+  ⟨same_base_result, operative_separates⟩
 
 end LeanBlack
