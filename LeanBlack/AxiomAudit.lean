@@ -25,6 +25,7 @@ import LeanBlack.GovChain
 import LeanBlack.GuardedExt
 import LeanBlack.GuardedExtApproval
 import LeanBlack.GuardedExtStack
+import LeanBlack.Fexpr
 
 open LeanBlack
 
@@ -152,3 +153,13 @@ and its demo-facing front end, are kernel-only. -/
 /-- info: 'LeanBlack.guardsDisjoint_num_bool' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms guardsDisjoint_num_bool
+
+/-! ## Fexpr experiment — the CE / β dividing line (branch: fexpr) -/
+
+/-- info: 'LeanBlack.beta_survives_but_operative_breaks_it' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms beta_survives_but_operative_breaks_it
+
+/-- info: 'LeanBlack.evalF_conservative' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms evalF_conservative
