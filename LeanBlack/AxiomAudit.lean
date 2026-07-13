@@ -154,16 +154,26 @@ and its demo-facing front end, are kernel-only. -/
 #guard_msgs in
 #print axioms guardsDisjoint_num_bool
 
-/-! ## Fexpr experiment — the CE / β dividing line
+/-! ## Fexpr experiment — the syntax-observation / β dividing line
 
-A top-level syntax-sensitive observation extension: the operative-free
-context restriction on `Ctx` (in `contextual_beta_pure`) is load-bearing,
-witnessed by a Wand-style β counterexample. See `LeanBlack/Fexpr.lean` for
-the precise (deliberately modest) scope. -/
+A top-level syntax-sensitive observation extension. The *same* lam-free,
+pure-sided `Ctx` equates the β pair under the base evaluator
+(`base_equates_in_syntaxTagCtx`, from `wand_beta_ctx_pure_at_start`) yet
+separates it — at ground type — under `evalF`: the **evaluator index** is
+load-bearing, not any restriction on `Ctx`. A Wand-style counterexample; it
+proves nothing about `CE_weak_strong`. See `LeanBlack/Fexpr.lean` for the
+precise (deliberately modest) scope. -/
 
-/-- info: 'LeanBlack.same_base_result_but_operative_separates' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+-- The two halves of `syntaxTagCtx_equated_by_eval_but_separated_by_evalF`
+-- (whose own long name wraps the `#print axioms` message); together they
+-- pin the bundle's footprint.
+/-- info: 'LeanBlack.base_equates_in_syntaxTagCtx' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms same_base_result_but_operative_separates
+#print axioms base_equates_in_syntaxTagCtx
+
+/-- info: 'LeanBlack.operative_separates' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms operative_separates
 
 /-- info: 'LeanBlack.evalF_agrees_off_operative_root' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in

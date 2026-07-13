@@ -1,16 +1,16 @@
 /-
-  FexprSmoke — the CE / β dividing line, run.
+  FexprSmoke — the syntax-observation / β dividing line, run.
 
   A top-level syntax-sensitive observation extension. Demonstrates on
-  concrete evaluation that adding a syntactic-reflection observer leaves old
-  programs delegated to the base evaluator, yet separates — at *ground*
-  type — a β pair (`(λx.x) 0` vs `let x = 0 in x`) that is contextually
-  equivalent for every operative-free context (`wand_beta_ctx_pure_at_start`).
+  concrete evaluation that the *same* syntactic context `(syntax-tag [-])` —
+  an ordinary lean-sage `Ctx` — equates the β pair (`(λx.x) 0` vs
+  `let x = 0 in x`) under the base evaluator (`wand_beta_ctx_pure_at_start`),
+  yet separates it — at *ground* type — under `evalF`.
 
-  This is a Wand-style β counterexample: it shows the operative-free
-  restriction on `contextual_beta_pure`'s context class is load-bearing. It
-  is *not* a refutation of `CE_weak_strong` (the operative is not a
-  `base-apply` modification) and *not* Wand's full triviality theorem.
+  The load-bearing thing is the **evaluator index**, not any restriction on
+  `Ctx`: a previously-stuck context (`syntax-tag` unbound in the base) gains
+  syntax-inspecting power under `evalF`. A Wand-style counterexample; *not* a
+  refutation of `CE_weak_strong` and *not* Wand's full triviality theorem.
 
   Run: `lake exe fexprSmoke`  (expect only `OK` lines).
 -/
@@ -23,7 +23,7 @@ def check (label : String) (b : Bool) : IO Unit :=
   IO.println s!"{if b then "OK" else "XX"} {label}"
 
 def main : IO Unit := do
-  IO.println "── FexprSmoke: same base result, separated by a syntax observer ──"
+  IO.println "── FexprSmoke: same Ctx — equated by eval, separated by evalF ──"
 
   -- The β pair has the same result under the *base* evaluator.
   let mRedex := evalProgram 100 [acceptAllPolicy] betaRedex        -- (λx.x) 0
