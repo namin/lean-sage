@@ -346,6 +346,11 @@ across every admitted change. `LeanBlack/SyntaxObserver.lean` illustrates why
 the semantic interface matters by showing that syntax observation can
 distinguish terms equated by the base evaluator.
 
+In a phrase: the gate certifies *simulation* — the new apply rule reproduces
+the old one's successes — not *transport* — that equations valid before stay
+valid after. These are different obligations, and only the first is discharged
+here.
+
 For the precise relationship between the two claims, see
 [`DECOUPLING.md`](DECOUPLING.md).
 
