@@ -78,12 +78,15 @@ mean:
   nothing about whether transport holds.
 
 What the β development *does* show is the **shape** the equational side is
-forced into: the three impossibilities —
-`beta_not_unconditional_CtxEquiv`, `lam_EvalEquiv_congruence_fails`,
-`reverseSimβ_false` — establish that the equation needs ground observation,
-a depth budget, purity, and lam-freedom. They explain *why* `contextual_
-beta_pure` is conditional. They do **not**, on their own, show anything
-about CE-to-equational transport.
+forced into. The three impossibilities explain why the current development
+cannot simply drop its observation, depth, and context restrictions:
+unconditional `CtxEquiv` (`beta_not_unconditional_CtxEquiv`), exact-outcome
+congruence under `.lam` (`lam_EvalEquiv_congruence_fails`), and the
+*unbudgeted* reverse simulation (`reverseSimβ_false`) are respectively
+false. Purity is an additional *sufficient* condition used by the positive
+development, not (here) a proved-necessary one. These results constrain the
+shape of an equational theorem; they do **not** establish CE-to-equational
+nonimplication.
 
 Conversely, `obsConv_refine_forward` (`LeanBlack/LamBetaReflect.lean`) is
 positive evidence that the transport layer is *buildable*: gate readiness +
@@ -111,8 +114,12 @@ new one.
 > **The gate certifies simulation of the old application behavior — not
 > transport of the relational laws used to reason about programs.**
 
-lean-sage's β development establishes such laws separately and
-conditionally. The research problem this frames is the useful one:
+Stated as one sentence: operational CE is a *simulation* obligation;
+equational preservation across change is a *transport* obligation. lean-sage
+proves the simulation property and selected equational-*validity* results
+for particular configurations (`contextual_beta_pure`), but it does not yet
+prove a general CE-to-equational transport theorem. The research problem
+this frames is the useful one:
 
 > **What local admission conditions, interface restrictions, and relational
 > lifting principles suffice to make selected equational laws durable across
@@ -148,19 +155,21 @@ For the LICS-ask framing this sharpens two open needs:
   conditionally recoverable (`contextual_beta_pure`), and the transport
   layer looks buildable (`obsConv_refine_forward`), just not free.
 
-## Appendix — illustration of configuration-index dependence (not a CE counterexample)
+## Appendix — illustration of semantic-index dependence (not a CE counterexample)
 
-`LeanBlack/Fexpr.lean` illustrates the *configuration/semantics-index*
-point with an external, evaluator-level extension. The observation context
-`(syntax-tag [-])` is an ordinary lean-sage context `syntaxTagCtx : Ctx`
-(lam-free, depth 0, pure-sided).
+`LeanBlack/SyntaxObserver.lean` illustrates the *configuration/semantics-
+index* point with an external, evaluator-level extension. The observation
+context `(syntax-tag [-])` is an ordinary lean-sage context
+`syntaxTagCtx : Ctx` (lam-free, depth 0, pure-sided).
 
 - `base_equates_in_syntaxTagCtx` — under the base evaluator this exact
-  context equates the β pair (by instantiating `wand_beta_ctx_pure_at_start`;
-  machine-checked).
-- `operative_separates` — under a *different* function `evalF` (the base
-  evaluator plus one syntax-reading operative) the same syntactic context
-  separates the pair at ground type (`.num 0` vs `.num 1`).
+  context equates the β pair in the may-convergence sense (identical
+  `∃k, eval … = some (v, T')` behaviour for every exact `(v, T')`), by
+  instantiating `wand_beta_ctx_pure_at_start`; machine-checked. (In the
+  canonical stuck environment neither side converges.)
+- `syntaxObserver_separates` — under a *different* function `evalF` (the
+  base evaluator plus one syntax-reading operative) the same syntactic
+  context yields distinct observable ground values (`.num 0` vs `.num 1`).
 
 **This is not a `CE_weak_strong` counterexample.** `evalF` is not a
 `base-apply` modification and is not related to `eval` by
@@ -169,8 +178,11 @@ agreement off one root pattern, not the CE gate. It is a *root-only*
 observer, not a fexpr evaluator, and not Wand's triviality theorem — one
 characteristic witness that an equation is relative to the observing
 semantics, which changing the semantics can invalidate. Kernel-clean,
-pinned in `LeanBlack/AxiomAudit.lean`; run `lake exe fexprSmoke`.
+pinned in `LeanBlack/AxiomAudit.lean`; run `lake exe syntaxObserverSmoke`.
 
 The appendix sharpens the intuition; the conclusion rests on the main text:
-operational CE is a simulation obligation, equational preservation is a
-transport obligation, and lean-sage currently supplies only the first.
+operational CE is a simulation obligation and equational preservation across
+change is a transport obligation. lean-sage supplies the simulation gate and
+proves selected equational-validity laws for particular configurations
+(`contextual_beta_pure`), but no general theorem transporting those laws
+across a CE-admitted transition — that transport layer is the open problem.

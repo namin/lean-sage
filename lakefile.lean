@@ -37,5 +37,5 @@ lean_exe «demoSeq» where
 lean_exe «demoForget» where
   root := `DemoForget
 
-lean_exe «fexprSmoke» where
-  root := `FexprSmoke
+lean_exe «syntaxObserverSmoke» where
+  root := `SyntaxObserverSmoke

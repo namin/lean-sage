@@ -1,7 +1,7 @@
 /-
   lean-sage: the syntax-observation / β dividing line.
 
-  An *additive, independent* facility. It does **not** touch `Val`, `Expr`,
+  An *additive, auxiliary* facility. It does **not** touch `Val`, `Expr`,
   `eval`, or any existing theorem: it reuses the real evaluator verbatim
   and adds one syntax-sensitive observer on top of it.
 
@@ -13,11 +13,15 @@
   an *operational* conservative extension. It is **not** the *equational*
   statement that a contextual equivalence `M ≃ N` is preserved.
 
-  The reason lean-sage's β results hold is that the gated modification
-  surface — `base-apply` — receives already-evaluated argument *values*
-  (`applyVia … (op : Val) (args : List Val)`), never operand *syntax*. A
-  genuine fexpr (operative) is the opposite: it receives operands
-  **unevaluated**, one semantic layer earlier.
+  lean-sage's current gated modification surface cannot *express* this
+  syntax observer: `base-apply` receives already-evaluated argument *values*
+  (`applyVia … (op : Val) (args : List Val)`), not raw operand *syntax*; a
+  genuine fexpr (operative) needs operands **unevaluated**, one semantic
+  layer earlier. Separately, `contextual_beta_pure` establishes β under
+  builtin-ready applicative configurations with its stated purity and
+  context conditions. So this particular Wand-style observation lies outside
+  the current gate's interface — nothing here shows that every CE-admitted
+  value-level `base-apply` change preserves β.
 
   This file models the *smallest slice* of that earlier layer: a single
   operative `syntax-tag`, recognized **only at the root of a program**,
@@ -36,8 +40,9 @@
     context equates the β pair `((λx.x) 0)` and `let x = 0 in x` (obtained
     by instantiating `wand_beta_ctx_pure_at_start`, not merely asserted).
 
-  * `operative_separates` — under `evalF` the **same syntactic context**
-    maps the pair to two distinct **ground** values (`.num 0` vs `.num 1`).
+  * `syntaxObserver_separates` — under `evalF` the **same syntactic
+    context** yields distinct observable ground values (`.num 0` vs
+    `.num 1`).
 
   Bundled as `syntaxTagCtx_equated_by_eval_but_separated_by_evalF`. So the
   load-bearing thing is **not** an "operative-free" restriction on `Ctx`
@@ -160,8 +165,10 @@ theorem same_base_result :
     observer context `syntaxTagCtx` is a lam-free, pure-sided `Ctx` at
     depth 0, so `wand_beta_ctx_pure_at_start` applies verbatim: under the
     base evaluator, `(syntax-tag ((λx.x) 0))` and `(syntax-tag (let x = 0 in
-    x))` converge to the same ground outcomes. Machine-checked, not
-    asserted. -/
+    x))` have identical may-convergence behaviour to every exact result
+    `(v, T_final)` — an equivalence, not a convergence claim. (In the
+    canonical environment of `observe_witnesses_base_undefined` both are in
+    fact stuck, `syntax-tag` being unbound.) Machine-checked, not asserted. -/
 theorem base_equates_in_syntaxTagCtx
     (ptable : PolicyTable) (p : BlackPolicy) (env : Env)
     (v : Val) (T_final : TowerState) :
@@ -180,23 +187,25 @@ theorem base_equates_in_syntaxTagCtx
       rfl)
     (by decide) ptable p env v T_final
 
-/-- **The operative context separates the pair — at ground type.** Under
-    `evalF` the *same syntactic context* distinguishes the β pair:
+/-- **The observer separates the pair with distinct ground observations.**
+    Under `evalF` the *same syntactic context* distinguishes the β pair:
     `(syntax-tag ((λx.x) 0)) ⇓ 0` while
-    `(syntax-tag (let x = 0 in x)) ⇓ 1`. -/
-theorem operative_separates :
+    `(syntax-tag (let x = 0 in x)) ⇓ 1` — two distinct observable ground
+    values. -/
+theorem syntaxObserver_separates :
     evalF 100 [acceptAllPolicy] (observe betaRedex)
       ≠ evalF 100 [acceptAllPolicy] (observe betaContractum) := by
   decide +kernel
 
-/-- **The dividing line, as one theorem: the evaluator index is
+/-- **The dividing line, as one theorem: the semantic index is
     load-bearing.** The *same* `Ctx` equates the β pair under the base
-    evaluator (`base_equates_in_syntaxTagCtx`), yet separates it — at ground
-    type — under `evalF`. `wand_beta_ctx_pure_at_start` is a theorem about
-    `eval`; a semantic extension can refine contextual equivalence by giving
-    new observational power to a previously-stuck context, without enlarging
-    the context syntax. A Wand-style counterexample, not the full triviality
-    theorem, and not a statement about `CE_weak_strong`. -/
+    evaluator (`base_equates_in_syntaxTagCtx`), yet separates it — with
+    distinct ground observations — under `evalF`.
+    `wand_beta_ctx_pure_at_start` is a theorem about `eval`; a semantic
+    extension can refine contextual equivalence by giving new observational
+    power to a previously-stuck context, without enlarging the context
+    syntax. A Wand-style counterexample, not the full triviality theorem,
+    and not a statement about `CE_weak_strong`. -/
 theorem syntaxTagCtx_equated_by_eval_but_separated_by_evalF :
     (∀ (ptable : PolicyTable) (p : BlackPolicy) (env : Env)
         (v : Val) (T_final : TowerState),
@@ -209,6 +218,6 @@ theorem syntaxTagCtx_equated_by_eval_but_separated_by_evalF :
               = some (v, T_final)))
     ∧ evalF 100 [acceptAllPolicy] (observe betaRedex)
         ≠ evalF 100 [acceptAllPolicy] (observe betaContractum) :=
-  ⟨base_equates_in_syntaxTagCtx, operative_separates⟩
+  ⟨base_equates_in_syntaxTagCtx, syntaxObserver_separates⟩
 
 end LeanBlack
