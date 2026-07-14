@@ -332,6 +332,22 @@ A confident summary of what is and is not claimed. See
   weak-relation analog of the full `all_tower_safe` induction is
   the real target and remains future work; see `SCOPE.md`.
 
+## How conservative extension and equational reasoning fit together
+
+The gate in this artifact certifies an operational notion of conservative
+extension for changes to `base-apply`. The β results establish a nontrivial
+equational theory for the evaluator and configurations covered by their
+hypotheses.
+
+These are related but distinct claims: conservative extension does not, by
+itself, state that an arbitrary contextual or equational theory is transported
+across every admitted change. `LeanBlack/SyntaxObserver.lean` illustrates why
+the semantic interface matters by showing that syntax observation can
+distinguish terms equated by the base evaluator.
+
+For the precise relationship between the two claims, see
+[`DECOUPLING.md`](DECOUPLING.md).
+
 ## File map
 
 **User-facing.**
