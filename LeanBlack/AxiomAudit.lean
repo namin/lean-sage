@@ -25,6 +25,7 @@ import LeanBlack.GovChain
 import LeanBlack.GuardedExt
 import LeanBlack.GuardedExtApproval
 import LeanBlack.GuardedExtStack
+import LeanBlack.SyntaxObserver
 
 open LeanBlack
 
@@ -152,3 +153,29 @@ and its demo-facing front end, are kernel-only. -/
 /-- info: 'LeanBlack.guardsDisjoint_num_bool' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms guardsDisjoint_num_bool
+
+/-! ## Syntax-observer experiment — the syntax-observation / β dividing line
+
+A top-level syntax-sensitive observation extension. The *same* lam-free,
+pure-sided `Ctx` equates the β pair under the base evaluator
+(`base_equates_in_syntaxTagCtx`, from `wand_beta_ctx_pure_at_start`) yet
+separates it — with distinct ground observations — under `evalF`: the
+**semantic index** is load-bearing, not any restriction on `Ctx`. A
+Wand-style counterexample; it proves nothing about `CE_weak_strong`. See
+`LeanBlack/SyntaxObserver.lean` for the precise (deliberately modest)
+scope. -/
+
+-- The two halves of `syntaxTagCtx_equated_by_eval_but_separated_by_evalF`
+-- (whose own long name wraps the `#print axioms` message); together they
+-- pin the bundle's footprint.
+/-- info: 'LeanBlack.base_equates_in_syntaxTagCtx' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms base_equates_in_syntaxTagCtx
+
+/-- info: 'LeanBlack.syntaxObserver_separates' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms syntaxObserver_separates
+
+/-- info: 'LeanBlack.evalF_agrees_off_operative_root' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms evalF_agrees_off_operative_root
