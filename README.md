@@ -25,6 +25,7 @@ lake exe demoGuarded      # master theorem: two admissions + a provable refusal
 lake exe demoStack        # stacking: two modifications live at once
 lake exe demoSeq          # a useful admission: applicable sequences, 0/6 -> 6/6 clients
 lake exe demoForget       # why histories: a forgetful gate can't tell improvement from regression
+lake exe syntaxObserverSmoke # CE ≠ equational transport: same Ctx, equated by eval, split by a syntax observer (see DECOUPLING.md)
 lake exe booth llm "…"    # the LLM proposal booth (needs Bedrock)
 ```
 
@@ -362,6 +363,7 @@ For the precise relationship between the two claims, see
 | [`DemoSeq.lean`](DemoSeq.lean) | `lake exe demoSeq` — a useful admission (Clojure-style applicable sequences): 6 stuck clients unlocked, unmodified higher-order library gains reach, baseline certified; currying provably refused |
 | [`DemoForget.lean`](DemoForget.lean) | `lake exe demoForget` — why histories: to a gate that checks only against day zero, an improvement and the regression that undoes it are indistinguishable (same shape, same GuardSpec) — it admits the regression, 6/6 → 0/6 clients, baseline intact throughout; the accumulating obligation tells them apart and refuses |
 | [`Booth.lean`](Booth.lean) | `lake exe booth check\|llm` — the proposal booth (LLM proposer + kernel gate) |
+| [`SyntaxObserverSmoke.lean`](SyntaxObserverSmoke.lean) | `lake exe syntaxObserverSmoke` — the CE / equational dividing line: the *same* `Ctx` is equated by `eval` yet split by a syntax observer under `evalF` (illustrates `DECOUPLING.md`) |
 | [`DESIGN_MASTER_THEOREM.md`](DESIGN_MASTER_THEOREM.md) | The guarded-extension family: proved-once vs per-proposal, stacking, scope |
 | [`DESIGN_LLM.md`](DESIGN_LLM.md) | The proposer contract, booth pipeline, trust story |
 | [`TUTORIAL.md`](TUTORIAL.md) | Hands-on walkthrough — start here to build your first approval |
@@ -369,6 +371,7 @@ For the precise relationship between the two claims, see
 | [`DESIGN_PROOF.md`](DESIGN_PROOF.md) | Proof-based admission design |
 | [`SCOPE.md`](SCOPE.md) | Precise scope of headline claims |
 | [`CLAIMS.md`](CLAIMS.md) | The ledger: every claim classified (kernel theorem / instantiated / demo / not mechanized) with its qualifiers |
+| [`DECOUPLING.md`](DECOUPLING.md) | Why operational CE is a *simulation* obligation, not an *equational-transport* one — and the open transport problem |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | The layer map; which dualities are theorem-forced and which are consolidation debt (with plan) |
 
 **Library** (dependency order; internal lemmas live here).
@@ -402,6 +405,7 @@ For the precise relationship between the two claims, see
 | `LeanBlack/PureExt.lean` | `StateExtends`: pure evaluation only extends the state (the preservation engine) |
 | `LeanBlack/CtxPure.lean` | THE master congruence `Ctx.plug_cong_master` (sibling-class- and predicate-family-parameterized) + tier instantiations (`Ctx.plug_cong`, `Ctx.plug_cong_at_easy`) |
 | `LeanBlack/ContextualBetaPure.lean` | #7: `contextual_beta_pure`, `buildTower` readiness, start-state corollaries |
+| `LeanBlack/SyntaxObserver.lean` | Auxiliary (not a headline result): the syntax-observation / β dividing line — `syntaxTagCtx` equated by `eval` (`base_equates_in_syntaxTagCtx` via `wand_beta_ctx_pure_at_start`) yet split under `evalF` (`syntaxObserver_separates`); illustrates `DECOUPLING.md`, proves nothing about `CE_weak_strong` |
 
 **Chain-composition layer** (supports #6, see §6a):
 
