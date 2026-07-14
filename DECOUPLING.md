@@ -1,157 +1,176 @@
-# DECOUPLING — conservative extension is not equational preservation
+# DECOUPLING — lean-sage's operational CE is not an equational-preservation theorem
 
-**Thesis.** The property lean-sage's gate certifies — *conservative
-extension* — and the property equational reasoning needs — *preservation of
-a contextual/equational theory* — are **independent**. A gate that
-guarantees the first guarantees nothing about the second. This is not a
-limitation of the current proofs; it is a fact about what the two
-properties *are*, and lean-sage's own theorem structure already exhibits
-it.
+**Thesis.** lean-sage's gate certifies an *operational simulation* property
+for changes to `base-apply`: every application that succeeded through the
+old apply rule can be reproduced through the new one with a *related*
+result. **Equational preservation is a different, relational obligation**:
+laws valid under one semantic configuration must remain valid under a later
+configuration, in all relevant contexts. lean-sage proves operational CE,
+and proves selected β laws *separately and conditionally*; it currently
+proves **no general theorem transporting those laws across a CE-admitted
+transition**. So equational preservation is not supplied by the present CE
+certificate — it must be earned by an additional relational gate condition
+or a lifting theorem.
 
-For what each headline result does and does not claim, see
-[`SCOPE.md`](SCOPE.md) and [`CLAIMS.md`](CLAIMS.md). This note isolates one
-cross-cutting conclusion.
+This note is deliberately narrow about what is and isn't shown. For the
+headline results and their qualifiers see [`SCOPE.md`](SCOPE.md) and
+[`CLAIMS.md`](CLAIMS.md).
 
-## The two axes
+> The title says *operational CE* on purpose. In logic, "conservative
+> extension" often means preservation of *all* old-language theorems,
+> equations included. lean-sage's `CE_weak_strong` is a specific operational
+> predicate; this note is about that predicate, not the logician's notion.
 
-**Conservative extension (`CE_weak_strong`).** A property of a *change to
-the evaluator*: replacing the `base-apply` value preserves every
-previously-successful application's result, up to CakeML-style value
-bisimulation. It quantifies over `callAsBaseApply (op : Val) (args : List
-Val)` — over already-evaluated *values* — and is carried by an
-`ApprovedModification`'s kernel-checked proof
+## The two obligations
+
+**Operational CE (`CE_weak_strong`).** A property of a *change to the apply
+rule*. It quantifies over one `callAsBaseApply old op operands` execution
+and requires a successful execution through `new` whose result is
+**bisimulation-related** (`ValVis_weak`), not necessarily identical
 (`approvedPolicy_soundForCE_weak_strong`, `LeanBlack/ProofBased.lean`;
 worked instance `multnExact_soundForCE_first_install_tower`,
-`LeanBlack/Policies.lean`; propagated through reflective depth by
-`eval_tower_safe`, `LeanBlack/Soundness.lean`).
+`LeanBlack/Policies.lean`). Propagated across reflective depth,
+`eval_tower_safe` (`LeanBlack/Soundness.lean`) gives `TowerCE` /
+`SafeEvolution`: it relates the apply rules stored at corresponding tower
+levels — it is **not** a whole-program, cross-version observational
+equivalence `eval_S(P) ≈ eval_{S'}(P)`.
 
-**Contextual equivalence (`CtxEquiv`).** A relation between *terms*,
-relative to a *fixed observing semantics*: `M ≈ N` iff `M` and `N`
-may-converge to the same ground value (`.num`/`.bool`) in every context
-(`LeanBlack/CtxEquiv.lean`). It is a statement about the evaluator, not
-about any particular closed run.
+**Equational validity.** A relation between *terms*, relative to an
+*observing configuration*. Write `M ≈_{P,S} N` for "`M` and `N` are
+contextually indistinguishable under semantics `S` at configurations
+satisfying predicate `P`". lean-sage's β law is of this shape:
+`contextual_beta_pure` / `wand_beta_ctx_pure_at_start`
+(`LeanBlack/ContextualBetaPure.lean`) establish a **conditional,
+contextually-quantified exact-outcome equivalence** for the redex/contractum
+pair — under `BuiltinReadyP`, lam-free contexts, pure pre-hole siblings, and
+a pure operand. It is *not* the unconditional `CtxEquiv` relation of
+`LeanBlack/CtxEquiv.lean`; indeed `beta_not_unconditional_CtxEquiv` proves
+the pair is **not** in unconditional `CtxEquiv` (at the top of the tower the
+redex's gate-mediated apply is stuck while the contractum converges).
 
-These answer different questions. CE asks: *after I change the machine, do
-old programs still produce their old outputs?* Equational reasoning asks:
-*can I substitute `N` for `M` anywhere without any observer noticing?* The
-first is preserved by construction of the gate; the second is a property of
-the semantics the gate is allowed to change.
+These are different questions. CE asks: *after replacing a level's apply
+rule, can every previously-successful application be simulated through the
+new rule with a related result?* Equational validity asks: *can I substitute
+`N` for `M` in every context without any observer noticing — under this
+configuration and semantics?*
 
-## Why they are independent — from lean-sage's own theorems
+## What lean-sage does and does not connect
 
-The decoupling does not need the fexpr experiment. It is visible in the
-shape of the existing β development.
+The missing link is a **transport** theorem:
 
-**If CE implied equational preservation, `contextual_beta_pure` would be a
-corollary of the CE theorems.** It is not. It is a separate, hard
-development that CE never mentions, and it carries side conditions CE never
-imposes:
+> `CE(S, S')  ∧  (M ≈_{P,S} N)  ⟹  (M ≈_{P',S'} N)`
 
-- `contextual_beta_pure` / `wand_beta_ctx_pure_at_start`
-  (`LeanBlack/ContextualBetaPure.lean`) — β *is* a contextual equivalence,
-  but only for **lam-free, pure-sided contexts under a depth budget**
-  (`BuiltinReadyP`). None of those conditions appears in `CE_weak_strong`.
+(with the relationship between `P` and `P'` itself to be stated). lean-sage
+does not prove it. Two cautions about what that absence does and does not
+mean:
 
-- The forward half alone (`obsConv_refine_forward`,
-  `LeanBlack/LamBetaReflect.lean`) needs the gate *plus* purity — again,
-  conditions foreign to CE.
+- **Absence is not refutation.** lean-sage having no transport theorem does
+  not prove transport is *false*. Establishing genuine independence would
+  need both a `CE ∧ ¬EqPres` witness and an `EqPres ∧ ¬CE` witness inside
+  the *same* admission mechanism; this note claims neither. (The appendix
+  is explicitly *not* a CE witness — see below.)
 
-And the equation genuinely **fails** without those conditions — three
-machine-checked impossibilities pin why:
+- **A separate β proof is not evidence against transport.**
+  `contextual_beta_pure` answers `Beta(S)` — "does β hold in the current
+  semantics?" — not `TransportBeta(S, S')`. Even a system that *did* have a
+  CE-to-transport theorem would still need an independent proof that β held
+  initially. So the mere existence of a hard, separate β development says
+  nothing about whether transport holds.
 
-- `beta_not_unconditional_CtxEquiv` (`LeanBlack/CtxEquiv.lean`) — at the top
-  of the tower the redex's gate-mediated apply cannot fire, so it diverges
-  where the contractum converges. β is *not* an unconditional contextual
-  equivalence.
-- `lam_EvalEquiv_congruence_fails` — outcome-equality congruence is false
-  under `.lam` (closures freeze bodies).
-- `reverseSimβ_false` — the gate alone, without a depth margin, is
-  insufficient for the reverse direction.
+What the β development *does* show is the **shape** the equational side is
+forced into: the three impossibilities —
+`beta_not_unconditional_CtxEquiv`, `lam_EvalEquiv_congruence_fails`,
+`reverseSimβ_false` — establish that the equation needs ground observation,
+a depth budget, purity, and lam-freedom. They explain *why* `contextual_
+beta_pure` is conditional. They do **not**, on their own, show anything
+about CE-to-equational transport.
 
-So the equational fact is conditional, hard, and independently proved, and
-it is false in exactly the regimes CE says nothing about. **That gap — a
-separate conditional theorem flanked by impossibility results, sitting next
-to an unconditional CE guarantee — is the decoupling, already mechanized.**
+Conversely, `obsConv_refine_forward` (`LeanBlack/LamBetaReflect.lean`) is
+positive evidence that the transport layer is *buildable*: gate readiness +
+purity + a cross-side β relation together establish the forward half of a
+ground-observational refinement under a binder. That is the template for
+what a transport theorem would need — operational invariants plus a
+relational lifting — not a proof that CE gives it for free.
 
-## The sharper reason: contextual equivalence is evaluator-indexed
+## The sharper reason: equivalence is configuration-indexed
 
-`CtxEquiv` / `wand_beta_ctx_pure_at_start` are theorems about **`eval`**.
-They are not statements about arbitrary semantic extensions of `eval`.
-Since a reflective system's whole premise is that it *changes its own
-evaluator*, an equation that held is a claim about a semantics that may no
-longer be the operative one. Preserving every old closed-program result
-(CE) does not preserve the observing semantics that made two terms
-equivalent — because the equivalence was never a fact about the preserved
-behavior; it was a fact about the (mutable) semantics.
+Internally, an admitted reflection does **not** replace the Lean function
+`eval` — `eval` is fixed. What changes is a *tower configuration*
+`(ptable, level, env, T)`, especially the value stored in a `base-apply`
+cell. An equation is therefore not a relation between syntax trees; it is
+relative to an observing configuration — policy table, level, environment,
+tower state, and observation discipline — and lean-sage's reflective
+transitions change exactly that configuration. An equation that held is a
+claim about a configuration that may no longer be the operative one.
+Operational CE relates the apply rules across the transition; it does not,
+by itself, carry a relational law stated over the old configuration to the
+new one.
 
-Concretely: a context that is *stuck* under the base evaluator has no
-distinguishing power, so it cannot witness an inequivalence — but a semantic
-extension can give that same syntactic context new observational power, and
-then it does. See the appendix.
+## The conclusion to keep
 
-## The consequence
+> **The gate certifies simulation of the old application behavior — not
+> transport of the relational laws used to reason about programs.**
 
-> The gate certifies that old **behavior** survives — not that old
-> **reasoning** survives.
+lean-sage's β development establishes such laws separately and
+conditionally. The research problem this frames is the useful one:
 
-For a self-improving / reflective system this is the load-bearing caveat:
-it can keep every promise about outputs (CE across the whole tower,
-`eval_tower_safe`) and still invalidate the equational theory its own code
-was written against. **Equational-theory preservation is a distinct
-obligation from conservative extension, and it needs a distinct gate** — an
-equational/contextual checker, not a CE checker. Wand 1998 bounds what such
-a gate can admit: with unrestricted syntactic reflection, the only
-surviving congruence is α-equivalence.
+> **What local admission conditions, interface restrictions, and relational
+> lifting principles suffice to make selected equational laws durable across
+> reflective transitions?**
 
-For the LICS-ask framing this refines two of the open needs:
+`obsConv_refine_forward` is a first data point that the answer is not
+"nothing"; a full `TransportBeta` under CE-admitted transitions is open (a
+weak-relation analog of the `eval_tower_safe` induction; cf. `SCOPE.md`,
+"Reflective depth: what is NOT claimed").
 
-- *"Equational theories that survive gated reflection"* — this is not a
-  corollary of the CE gate; it is a separate obligation, and lean-sage's
-  β development is a first (conditional) instance of discharging it.
-- *"A negative theory of incompatible substrate–gate pairings"* — a CE gate
-  is provably silent about equational theories; a semantic substrate that
-  admits syntactic reflection is incompatible with a gate meant to preserve
-  a nontrivial equational theory (Wand).
+For the LICS-ask framing this sharpens two open needs:
+
+- *"Equational theories that survive gated reflection"* — not a corollary of
+  the CE gate; a distinct transport obligation, of which the conditional β
+  law is a first (non-transported) instance.
+- *"A negative theory of incompatible substrate–gate pairings"* — precisely:
+  a gate that **admits unrestricted syntax-discriminating reflection**
+  cannot simultaneously preserve the full nontrivial contextual theory
+  characterized in Wand's model (Wand 1998, contextual equivalence collapses
+  to α-congruence). Note this is a fact about the **admission policy**, not
+  the substrate: a substrate expressive enough to represent syntax-inspecting
+  reflection whose gate *rejects* every such modification is not
+  incompatible with equational preservation.
 
 ## What this does NOT claim
 
-- Not that CE and equational preservation are in *conflict* — only that
-  they are *independent*. A modification can satisfy both.
-- Not that any specific admitted lean-sage modification (e.g. multn)
-  provably breaks a contextual equivalence — lean-sage proves no such
-  thing. The claim is about the *guarantees*: the CE gate provides no
-  equational theorem, and β-preservation had to be earned separately and
-  conditionally.
+- Not that operational CE and equational preservation are *logically
+  independent* — only that they are *different obligations*, and no theorem
+  in lean-sage transports the latter from the former.
+- Not that any admitted lean-sage modification (e.g. multn) provably breaks
+  an equational law — lean-sage proves no such thing.
 - Not that equational reasoning under reflection is hopeless — it is
-  conditionally recoverable (`contextual_beta_pure`), just not for free.
+  conditionally recoverable (`contextual_beta_pure`), and the transport
+  layer looks buildable (`obsConv_refine_forward`), just not free.
 
-## Appendix — a sharpening witness (`LeanBlack/Fexpr.lean`)
+## Appendix — illustration of configuration-index dependence (not a CE counterexample)
 
-An additive, evaluator-only illustration of the evaluator-index point. The
-observation context `(syntax-tag [-])` is an *ordinary* lean-sage context
-`syntaxTagCtx : Ctx` (a hole in application-argument position), lam-free,
-depth 0, pure-sided.
+`LeanBlack/Fexpr.lean` illustrates the *configuration/semantics-index*
+point with an external, evaluator-level extension. The observation context
+`(syntax-tag [-])` is an ordinary lean-sage context `syntaxTagCtx : Ctx`
+(lam-free, depth 0, pure-sided).
 
 - `base_equates_in_syntaxTagCtx` — under the base evaluator this exact
-  context equates the β pair `((λx.x) 0)` and `let x = 0 in x` (by
-  instantiating `wand_beta_ctx_pure_at_start`; machine-checked, not
-  asserted).
-- `operative_separates` — under `evalF` (the base evaluator plus one
-  syntax-reading operative) the **same syntactic context** maps the pair to
-  distinct ground values (`.num 0` vs `.num 1`).
-- `syntaxTagCtx_equated_by_eval_but_separated_by_evalF` — the two together:
-  the evaluator index is load-bearing. A previously-stuck context acquires
-  observational power under a semantic extension and refines `≈`, without
-  enlarging the context syntax at all.
+  context equates the β pair (by instantiating `wand_beta_ctx_pure_at_start`;
+  machine-checked).
+- `operative_separates` — under a *different* function `evalF` (the base
+  evaluator plus one syntax-reading operative) the same syntactic context
+  separates the pair at ground type (`.num 0` vs `.num 1`).
 
-Honest scope (see the file header): this is a *root-only* observer, **not**
-a fexpr evaluator, **not** a statement about `CE_weak_strong` (the operative
-is not a `base-apply` modification, so `evalF_agrees_off_operative_root` is
-whole-program agreement off one root pattern, not the CE gate), and **not**
-Wand's full triviality theorem — one characteristic counterexample.
-Kernel-clean, axiom-pinned in `LeanBlack/AxiomAudit.lean`; run
-`lake exe fexprSmoke`.
+**This is not a `CE_weak_strong` counterexample.** `evalF` is not a
+`base-apply` modification and is not related to `eval` by
+`CE_weak_strong`; `evalF_agrees_off_operative_root` is whole-program
+agreement off one root pattern, not the CE gate. It is a *root-only*
+observer, not a fexpr evaluator, and not Wand's triviality theorem — one
+characteristic witness that an equation is relative to the observing
+semantics, which changing the semantics can invalidate. Kernel-clean,
+pinned in `LeanBlack/AxiomAudit.lean`; run `lake exe fexprSmoke`.
 
-The witness sharpens the conclusion, but the conclusion stands on the
-existing β theorems alone: **conservative extension is not equational
-preservation.**
+The appendix sharpens the intuition; the conclusion rests on the main text:
+operational CE is a simulation obligation, equational preservation is a
+transport obligation, and lean-sage currently supplies only the first.
